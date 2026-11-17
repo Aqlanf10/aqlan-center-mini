@@ -1177,12 +1177,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-    env:
-      DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
-      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
-      SYNTHETIC_LATE_ROLLBACK_WITNESS: '1'
-      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
-      CLINIC_TIME_ZONE: Asia/Aden
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -1196,6 +1190,12 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Run focused synthetic restore witness
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
+          TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
+          SYNTHETIC_LATE_ROLLBACK_WITNESS: '1'
+          SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+          CLINIC_TIME_ZONE: Asia/Aden
         run: npx vitest run --config vitest.config.focused-rollback-witness.mts
 
   # Actual shared contract components, synthetic fixtures only. No app session,

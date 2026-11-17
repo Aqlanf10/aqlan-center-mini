@@ -10,6 +10,11 @@ export function validateFocusedRollbackWitnessEnvironment(env: NodeJS.ProcessEnv
       || env.DATABASE_URL !== database || !env.GITHUB_WORKSPACE || !path.isAbsolute(env.GITHUB_WORKSPACE)) {
     throw new Error('Focused rollback witness requires its dedicated GitHub CI synthetic service.');
   }
+  for (const key of ['POSTGRES_URL', 'POSTGRES_PRISMA_URL', 'POSTGRES_URL_NON_POOLING', 'SOURCE_DATABASE_URL'] as const) {
+    if (env[key] !== undefined && env[key] !== database) {
+      throw new Error('Focused rollback witness requires matching database aliases.');
+    }
+  }
   // Reject unsafe alternative aliases and deployment markers before any client.
   validateOperationalVerificationEnvironment(env, { requireSource: true });
   validatePostgresTestTarget(env);

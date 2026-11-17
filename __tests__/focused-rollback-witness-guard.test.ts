@@ -20,9 +20,15 @@ describe('focused rollback synthetic target guard', () => {
     { TEST_DATABASE_URL: 'postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable' },
     { TEST_DATABASE_URL: 'postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?host=example.com' },
     { POSTGRES_URL: 'postgresql://ci:ci@example.com/aqlan_p1_test' },
+    { POSTGRES_URL: 'postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable' },
+    { SOURCE_DATABASE_URL: 'postgresql://ci:ci@127.0.0.1:55473/other?sslmode=disable' },
+    { POSTGRES_PRISMA_URL: '' }, { POSTGRES_URL_NON_POOLING: 'postgresql://ci:ci@example.com/aqlan_p1_test' },
     { RAILWAY_PROJECT_ID: 'synthetic-marker' }, { USE_LOCAL_DB: 'true' },
   ])('refuses unsafe configuration before connecting: %#', (change) => {
     expect(() => validateFocusedRollbackWitnessEnvironment({ ...valid, ...change })).toThrow();
+  });
+  it('accepts additional aliases only when they exactly name the dedicated service', () => {
+    expect(() => validateFocusedRollbackWitnessEnvironment({ ...valid, POSTGRES_URL: valid.DATABASE_URL, SOURCE_DATABASE_URL: valid.DATABASE_URL })).not.toThrow();
   });
   it('keeps the guard ahead of the original connection setup and selects only the intended test', () => {
     const setup = readFileSync('__tests__/postgres/_focused-rollback-witness-setup.ts', 'utf8');
