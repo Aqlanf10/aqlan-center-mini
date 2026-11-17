@@ -1,7 +1,8 @@
 import path from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 import { Client } from "pg";
-import { assertNoAmbientPgOptions, assertNoRuntimeTargetCollision, parseRestoreIdentity } from "./target-identity.mjs";
+import { assertNoAmbientPgOptions, parseRestoreIdentity } from "./target-identity.mjs";
+import { assertNoScopedRestoreCollision } from "./target-scope";
 import { createRestoreClientSnapshot, restoreConfigFromSnapshot, type RestoreClientSnapshot } from "./client-config";
 import { classifyDbTarget } from "../db-target";
 import { readBackupHistory } from "../backupHistory";
@@ -75,7 +76,7 @@ export function restoreDrillAvailability(
   try {
     assertNoAmbientPgOptions(ambient, env);
     identity = parseRestoreIdentity(targetUrl, { target:true });
-    assertNoRuntimeTargetCollision(identity, ambient, env);
+    assertNoScopedRestoreCollision(identity, ambient, env);
   } catch (error) {
     return { available:false, targetEnvironment:classification,
       reason:error instanceof Error && error.message === "RESTORE_TARGET_COLLISION" ? "production-collision" : "unsafe-classification" };
@@ -105,7 +106,7 @@ async function resetDedicatedTarget(snapshot: RestoreClientSnapshot): Promise<vo
   // Re-check current application aliases in the same synchronous turn as Client
   // construction. URL aliases can otherwise change while archive I/O is pending.
   const identity = parseRestoreIdentity(snapshot.targetUrl, { target:true });
-  assertNoRuntimeTargetCollision(identity, process.env);
+  assertNoScopedRestoreCollision(identity, process.env);
   const client = new Client(restoreConfigFromSnapshot(snapshot, snapshot.targetUrl));
   try {
     await client.connect();
@@ -197,7 +198,7 @@ export async function runAdminRestoreDrill(input: {
 
   let targetSnapshot: RestoreClientSnapshot;
   try {
-    targetSnapshot = createRestoreClientSnapshot(env.RESTORE_DRILL_DATABASE_URL!);
+    targetSnapshot = createRestoreClientSnapshot(env.RESTORE_DRILL_DATABASE_URL!, env);
     restoreConfigFromSnapshot(targetSnapshot, targetSnapshot.targetUrl);
   }
   catch { return { ok:false, reason:"unsafe-classification" }; }

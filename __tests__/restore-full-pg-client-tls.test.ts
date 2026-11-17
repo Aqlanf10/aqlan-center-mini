@@ -3,6 +3,8 @@ import { Client } from 'pg';
 import { validatedRestoreFullTarget } from '../scripts/security/restore-full-target-guard.mjs';
 import { restoreClientConfigFor, createRestoreClientSnapshot, restoreConfigFromSnapshot } from '../lib/restore/client-config';
 import { parseRestoreIdentity } from '../lib/restore/target-identity.mjs';
+import { AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID, AQLAN_CENTER_MINI_DATABASE_NAME } from '../lib/database-scope';
+import { snapshotRestoreEnvironment } from '../lib/restore/target-scope';
 
 const REMOTE = 'pg-staging.example.invalid';
 const REMOTE_INPUT =
@@ -97,6 +99,16 @@ describe('restore:full effective node-postgres TLS configuration (without connec
 
 
 describe('restore target identity has no parser overrides or inherited defaults', () => {
+  it('does not retain alias credentials, CA content or unrelated environment in the scoped snapshot', () => {
+    const env=snapshotRestoreEnvironment({DATABASE_URL:'postgresql://user:synthetic-secret@localhost:5432/db?sslmode=disable',
+      PGSSL_ROOT_CERT_PEM:'synthetic-certificate', UNRELATED_SECRET:'synthetic-unrelated'});
+    const saved=JSON.stringify(env);
+    expect(saved).not.toContain('synthetic-secret'); expect(saved).not.toContain('synthetic-certificate');
+    expect(saved).not.toContain('synthetic-unrelated');
+    const identity=parseRestoreIdentity(env.DATABASE_URL!);
+    expect(identity.host).toBe('localhost'); expect(identity.port).toBe('5432'); expect(identity.database).toBe('db');
+    expect(env.PGSSL_ROOT_CERT_PEM).toBe('configured');
+  });
   it.each([
     'postgresql://synthetic:synthetic@127.0.0.1:5432/db',
     'postgresql://synthetic%40user:synthetic@127.0.0.1:5433/db_name',
@@ -137,6 +149,17 @@ describe('restore target identity has no parser overrides or inherited defaults'
     const snapshot=createRestoreClientSnapshot('postgresql://synthetic:synthetic@127.0.0.1:5432/db');
     vi.stubEnv('POSTGRES_URL','postgresql://different:synthetic@localhost:5432/db');
     expect(() => restoreConfigFromSnapshot(snapshot,snapshot.targetUrl)).toThrow('RESTORE_TARGET_COLLISION');
+  });
+  it('rechecks the application scoped database after the project identity changes', () => {
+    vi.stubEnv('DATABASE_URL','postgresql://source:synthetic@127.0.0.1:5432/railway');
+    const snapshot=createRestoreClientSnapshot(`postgresql://synthetic:synthetic@127.0.0.1:5432/${AQLAN_CENTER_MINI_DATABASE_NAME}`);
+    vi.stubEnv('RAILWAY_PROJECT_ID',AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID);
+    expect(() => restoreConfigFromSnapshot(snapshot,snapshot.targetUrl)).toThrow('RESTORE_TARGET_COLLISION');
+  });
+  it('rejects a wrong project before a snapshot can be used', () => {
+    const snapshot=createRestoreClientSnapshot('postgresql://synthetic:synthetic@127.0.0.1:5432/db');
+    vi.stubEnv('RAILWAY_PROJECT_ID','synthetic-wrong-project');
+    expect(() => restoreConfigFromSnapshot(snapshot,snapshot.targetUrl)).toThrow('RESTORE_TARGET_SCOPE_INVALID');
   });
   it('does not accept an unverified TLS decision for a loopback alias spelling', () => {
     vi.stubEnv('PGSSL_ROOT_CERT_PEM', undefined); vi.stubEnv('PGSSL_ROOT_CERT', undefined);

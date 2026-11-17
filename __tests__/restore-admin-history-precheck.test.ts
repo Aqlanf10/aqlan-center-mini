@@ -19,6 +19,7 @@ import { runAdminRestoreDrill } from '../lib/restore/admin';
 import * as staging from '../lib/restore/staging';
 import { readTarGzSnapshot } from '../lib/restore/archive';
 import * as catalog from '../lib/restore/migration-catalog';
+import { AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID, AQLAN_CENTER_MINI_DATABASE_NAME } from '../lib/database-scope';
 
 const hash = (value: Uint8Array) => createHash('sha256').update(value).digest('hex');
 const id = 'production-backup-20261117-010203-001-abcde123-abcdef12.tar.gz';
@@ -145,7 +146,8 @@ describe('administrative restore validation precedes target changes', () => {
     expect(snapshot.sha256).toBe(hash(archive)); expect(snapshot.bytes).toBe(archive.length);
     expect(Buffer.from(snapshot.archive.entries.get('database.sql')!.data)).toEqual(sql);
   });
-  it('restores the same verified snapshot even if the archive path changes before target reset', async () => {
+  it.each([false,true])('restores the same verified snapshot with project scope=%s even if the archive path changes before target reset', async scoped => {
+    if (scoped) vi.stubEnv('RAILWAY_PROJECT_ID', AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID);
     const directory = await mkdtemp(path.join(tmpdir(), 'synthetic-admin-snapshot-'));
     const backups = path.join(directory, 'backups'); await mkdir(backupStateDir(backups), {recursive:true});
     const sql = Buffer.from('BEGIN;\nCOMMIT;\n');
@@ -163,6 +165,7 @@ describe('administrative restore validation precedes target changes', () => {
     const snapshot = call.archiveSnapshot;
     expect(Buffer.from(snapshot!.entries.get('database.sql')!.data)).toEqual(sql);
     expect(target.constructed).toHaveBeenCalledOnce();
+    expect(target.query).toHaveBeenCalledWith('DROP SCHEMA IF EXISTS public CASCADE');
     expect(call.targetSnapshot?.config).toBe(target.constructed.mock.calls[0][0]);
     expect(call.targetUrl).toBe(call.targetSnapshot?.targetUrl);
     expect(await readFile(archivePath,'utf8')).toBe('replacement synthetic bytes');
@@ -207,6 +210,19 @@ describe('administrative effective target identity guard', () => {
   it.each(['DATABASE_URL','POSTGRES_URL','POSTGRES_PRISMA_URL','POSTGRES_URL_NON_POOLING'])('rejects collision against %s even with a different user', async alias => {
     await checkRefusal({...valid,[alias]:'postgresql://different:synthetic@restore.invalid:5432/restore_drill'}, 'production-collision');
   });
+  it.each(['DATABASE_URL','POSTGRES_URL','POSTGRES_PRISMA_URL','POSTGRES_URL_NON_POOLING'])('rejects the project-scoped database behind %s before Client or stage removal', async alias => {
+    await checkRefusal({...valid,RAILWAY_PROJECT_ID:AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID,
+      RESTORE_DRILL_DATABASE_URL:`postgresql://restore:synthetic@restore.invalid:5432/${AQLAN_CENTER_MINI_DATABASE_NAME}`,
+      [alias]:'postgresql://different:synthetic@restore.invalid:5432/railway'}, 'production-collision');
+  });
+  it('rejects an unrelated Railway project before Client or stage removal', async () => {
+    await checkRefusal({...valid,RAILWAY_PROJECT_ID:'synthetic-wrong-project'});
+  });
+  it('checks scoped provided aliases using the real process project identity', async () => {
+    vi.stubEnv('RAILWAY_PROJECT_ID',AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID);
+    await checkRefusal({...valid,POSTGRES_URL:'postgresql://different:synthetic@restore.invalid:5432/railway',
+      RESTORE_DRILL_DATABASE_URL:`postgresql://restore:synthetic@restore.invalid:5432/${AQLAN_CENTER_MINI_DATABASE_NAME}`}, 'production-collision');
+  });
   it.each(['PGHOST','PGHOSTADDR','PGPORT','PGDATABASE','PGUSER','PGPASSWORD','PGSERVICE','PGOPTIONS','PGSSLMODE','PGSSLROOTCERT','PGAPPNAME'])('rejects ambient %s before stage removal or Client', async key => {
     vi.stubEnv(key,'synthetic-ambient-override'); await checkRefusal(valid);
   });
@@ -220,7 +236,7 @@ describe('administrative effective target identity guard', () => {
   it('treats literal loopback spellings as the same target', async () => {
     await checkRefusal({...valid,DATABASE_URL:'postgresql://prod:synthetic@localhost:5432/clinic',RESTORE_DRILL_DATABASE_URL:'postgresql://restore:synthetic@127.0.0.1:5432/clinic'}, 'production-collision');
   });
-  it.each(['PGHOST','POSTGRES_URL'])('rechecks changed %s after archive reading before removing the prior stage', async key => {
+  it.each(['PGHOST','POSTGRES_URL','RAILWAY_PROJECT_ID'])('rechecks changed %s after archive reading before removing the prior stage', async key => {
     const directory=await mkdtemp(path.join(tmpdir(),'synthetic-guard-race-'));
     try {
       const backups=path.join(directory,'backups'), stage=path.join(backupStateDir(backups),'restore-drill-current');
@@ -233,10 +249,12 @@ describe('administrative effective target identity guard', () => {
       const actual=catalog.createRestoreMigrationSnapshot;
       const spy=vi.spyOn(catalog,'createRestoreMigrationSnapshot').mockImplementation(async () => {
         const snapshot=await actual();
-        vi.stubEnv(key,key==='PGHOST' ? 'synthetic-override' : 'postgresql://other:synthetic@restore.invalid:5432/restore_drill');
+        vi.stubEnv(key,key==='PGHOST' ? 'synthetic-override' : key==='POSTGRES_URL' ? 'postgresql://other:synthetic@restore.invalid:5432/restore_drill' : AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID);
         return snapshot;
       });
-      expect(await runAdminRestoreDrill({backupDir:backups,backupId:id,actor:'synthetic',env:valid})).toEqual({ok:false,reason:'unsafe-classification'});
+      const env=key==='RAILWAY_PROJECT_ID' ? {...valid,DATABASE_URL:'postgresql://source:synthetic@restore.invalid:5432/railway',
+        RESTORE_DRILL_DATABASE_URL:`postgresql://restore:synthetic@restore.invalid:5432/${AQLAN_CENTER_MINI_DATABASE_NAME}`} : valid;
+      expect(await runAdminRestoreDrill({backupDir:backups,backupId:id,actor:'synthetic',env})).toEqual({ok:false,reason:'unsafe-classification'});
       expect(spy).toHaveBeenCalledOnce(); expect(target.constructed).not.toHaveBeenCalled(); expect(target.query).not.toHaveBeenCalled();
       expect(await readFile(path.join(stage,'prior.txt'),'utf8')).toBe('SYNTHETIC PRIOR');
       expect(await readFile(path.join(backups,id))).toEqual(archive);
@@ -244,7 +262,7 @@ describe('administrative effective target identity guard', () => {
   });
 });
 
-it.each(['override','alias'])('staged direct invocation rejects a target %s before constructing a client', async kind => {
+it.each(['override','alias','scoped','wrong-project'])('staged direct invocation rejects a target %s before constructing a client', async kind => {
   const directory=await mkdtemp(path.join(tmpdir(),'synthetic-staged-target-'));
   try {
     const sql=Buffer.from('BEGIN;\nCOMMIT;\n');
@@ -253,8 +271,12 @@ it.each(['override','alias'])('staged direct invocation rejects a target %s befo
     const file=path.join(directory,'synthetic.tar.gz'), stage=path.join(directory,'stage');
     await writeFile(file,archive); await mkdir(stage); await writeFile(path.join(stage,'prior.txt'),'SYNTHETIC PRIOR');
     if (kind === 'alias') vi.stubEnv('POSTGRES_URL','postgresql://different:synthetic@localhost:5432/db');
-    const targetUrl=kind === 'alias' ? 'postgresql://x:y@127.0.0.1:5432/db' : 'postgresql://x:y@127.0.0.1:5432/db?host=remote.invalid';
-    await expect(staging.stagedRestore({archivePath:file,targetUrl,stagingDir:stage})).rejects.toThrow(kind === 'alias' ? 'RESTORE_TARGET_COLLISION' : 'RESTORE_TARGET_UNSAFE_QUERY');
+    if (kind === 'scoped') {vi.stubEnv('POSTGRES_URL','postgresql://different:synthetic@localhost:5432/railway'); vi.stubEnv('RAILWAY_PROJECT_ID',AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID);}
+    if (kind === 'wrong-project') vi.stubEnv('RAILWAY_PROJECT_ID','synthetic-wrong-project');
+    const targetUrl=kind === 'override' ? 'postgresql://x:y@127.0.0.1:5432/db?host=remote.invalid' :
+      kind === 'scoped' ? `postgresql://x:y@127.0.0.1:5432/${AQLAN_CENTER_MINI_DATABASE_NAME}` : 'postgresql://x:y@127.0.0.1:5432/db';
+    const error=kind === 'override' ? 'RESTORE_TARGET_UNSAFE_QUERY' : kind === 'wrong-project' ? 'RESTORE_TARGET_SCOPE_INVALID' : 'RESTORE_TARGET_COLLISION';
+    await expect(staging.stagedRestore({archivePath:file,targetUrl,stagingDir:stage})).rejects.toThrow(error);
     expect(target.constructed).not.toHaveBeenCalled(); expect(target.connect).not.toHaveBeenCalled();
     expect(await readFile(path.join(stage,'prior.txt'),'utf8')).toBe('SYNTHETIC PRIOR');
   } finally {await rm(directory,{recursive:true,force:true});}
