@@ -15,7 +15,7 @@ async function seed(pool: Pool, suffix: string) {
   await pool.query("INSERT INTO invoices(patient_id,invoice_number,total_minor) VALUES($1,$2,250000)",[patient,`SYN-0079-INV-${suffix}`]);
   await pool.query("INSERT INTO visits(patient_name,patient_id,signed_at,signed_by,diagnosis) VALUES('Synthetic historical visit',$1,'2026-01-01T12:34:56.123456Z','synthetic-historical-doctor','Historical unchanged findings')",[patient]);
 }
-it("adds missing registered 0079 after 0080/0081/0082 via migrator and bounded runtime without adopting hand-installed proposals",async()=>{
+it("restores historical 0079 after 0080/0081/0082 via explicit migrator and bounded runtime without adopting hand-installed proposals",async()=>{
   const fixture=await openBackupTimestampFixture(process.env);
   try{
     const files=await loadMigrationFiles(),coverage=files.find(file=>file.version==='0079');
@@ -28,7 +28,7 @@ it("adds missing registered 0079 after 0080/0081/0082 via migrator and bounded r
       expect((await target.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows[0].name).toBeNull();
     }
     await seed(fixture.sqlTarget,'migrator');const migratorBefore=await historicalRows(fixture.sqlTarget);
-    expect((await migrate(fixture.sqlTarget,{apply:true,files})).appliedVersions).toEqual(['0079']);
+    expect((await migrate(fixture.sqlTarget,{apply:true,files,historical0079:true})).appliedVersions).toEqual(['0079']);
     expect(await historicalRows(fixture.sqlTarget)).toEqual(migratorBefore);
     expect((await migrate(fixture.sqlTarget,{apply:true,files})).alreadyUpToDate).toBe(true);
 
