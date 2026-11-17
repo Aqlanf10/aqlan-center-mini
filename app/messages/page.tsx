@@ -93,7 +93,7 @@ interface ReplyContext {
 const POLL_MS = 5_000;
 
 export default function MessagesPage() {
-  const searchParams = useSearchParams();
+  const searchParams = useSearchParams()!;
   const [tab, setTab] = useState<ConversationTab>("staff");
   /* (MSG-1) الداخلية كما كانت، والقنوات الخارجية (واتساب/نصية/بريد) في وضعٍ مستقل. */
   const [mode, setMode] = useState<"internal" | "external">("internal");
