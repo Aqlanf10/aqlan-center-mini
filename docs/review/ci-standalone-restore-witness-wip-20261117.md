@@ -6,8 +6,9 @@ on `e5f3c4fbff08c098e319572d5d9d13fce2c14787`.
 It adds a required, independent CI job with its own PostgreSQL service and
 standalone build, preflight seal and runtime checks before the HTTP witness.
 The additional build consumes CI time and resources, but this job cannot
-prevent the existing HTTP shards from starting. It has not been pushed, run in
-CI, or approved for deployment. No production or patient data is used.
+prevent the existing HTTP shards from starting. At this local checkpoint, it
+had not been pushed, run in CI, or approved for deployment. No production or
+patient data is used.
 
 The planned witness creates five uniquely named, identity-checked synthetic
 PostgreSQL databases on an additional disposable CI service: historical
