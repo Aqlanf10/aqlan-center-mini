@@ -66,8 +66,16 @@ async function inspectCopiedTree(project, relative) {
 }
 
 /** Verify source-derived assets and reject unexpected raw files, without reading them. */
-export async function verifyStandaloneAssets(projectRoot, standaloneRoot) {
+export async function verifyStandaloneAssets(projectRoot, standaloneRoot, { onUnexpectedRoot = () => {} } = {}) {
   const project = path.resolve(projectRoot), bundle = path.resolve(standaloneRoot);
+  // Emit only finite, predeclared categories, never raw runtime paths or names.
+  const rejectUnexpectedRoot = (name, entry) => {
+    const rootName = name.split("/", 1)[0];
+    const category = ["scripts", "lib", "app", "pages", "components", "migrations", ".next", "node_modules", "public"].includes(rootName) ? rootName : "other";
+    const kind = entry.isSymbolicLink() ? "symlink" : entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other";
+    onUnexpectedRoot({ category, kind });
+    fail("UNEXPECTED_RAW_ENTRY");
+  };
   await inspectCopiedTree(project, "public");
   await inspectCopiedTree(project, ".next/static");
   const provenance = await readPlain(project, "lib/preflight-provenance.ts");
@@ -107,12 +115,12 @@ export async function verifyStandaloneAssets(projectRoot, standaloneRoot) {
     for (const entry of entries) {
       const name = relative ? `${relative}/${entry.name}` : entry.name;
       if (!isSafeRelative(name)) fail("INVALID_PATH");
-      if (entry.isSymbolicLink()) fail("UNEXPECTED_RAW_ENTRY");
+      if (entry.isSymbolicLink()) rejectUnexpectedRoot(name, entry);
       if (entry.isDirectory()) {
         if (relative === "" && opaque.has(entry.name)) continue;
-        if (![...allowed].some((file) => file.startsWith(`${name}/`))) fail("UNEXPECTED_RAW_ENTRY");
+        if (![...allowed].some((file) => file.startsWith(`${name}/`))) rejectUnexpectedRoot(name, entry);
         queue.push(name);
-      } else if (!entry.isFile() || !allowed.has(name)) fail("UNEXPECTED_RAW_ENTRY");
+      } else if (!entry.isFile() || !allowed.has(name)) rejectUnexpectedRoot(name, entry);
     }
   }
   // Check names in generated trees as well, without following links or opening
@@ -141,7 +149,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === ownFile) {
   else {
     const root = path.resolve(path.dirname(ownFile), "..");
     try {
-      const result = await verifyStandaloneAssets(root, path.join(root, ".next/standalone"));
+      const result = await verifyStandaloneAssets(root, path.join(root, ".next/standalone"), {
+        onUnexpectedRoot: ({ category, kind }) => console.error(`UNEXPECTED_RAW_CATEGORY=${category};KIND=${kind}`),
+      });
       console.log(`Standalone verified: ${result.migrationCount} migrations, ${result.preflightSourceCount} provenance sources.`);
     } catch (error) { console.error(error.message); process.exitCode = 1; }
   }

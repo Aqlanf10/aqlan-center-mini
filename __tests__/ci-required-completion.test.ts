@@ -21,14 +21,17 @@ function completionShell(): string {
 }
 
 const results = ["success", "failure", "skipped", "cancelled"] as const;
-const combinations = results.flatMap(quality =>
-  results.flatMap(postgres => results.flatMap(http => results.map(print => ({ quality, postgres, http, print })))),
-);
+const combinations = [
+  ...results.flatMap(quality => results.flatMap(postgres => results.flatMap(http => results.map(print =>
+    ({ quality, postgres, http, print, privacy: "success" as const }))))),
+  ...results.filter(privacy => privacy !== "success").map(privacy =>
+    ({ quality: "success" as const, postgres: "success" as const, http: "success" as const, print: "success" as const, privacy })),
+];
 
 describe("required CI completion executes fail-closed shell", () => {
   it.each(combinations)(
-    "quality=$quality postgres=$postgres http=$http print=$print",
-    ({ quality, postgres, http, print }) => {
+    "quality=$quality postgres=$postgres http=$http print=$print privacy=$privacy",
+    ({ quality, postgres, http, print, privacy }) => {
       const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", completionShell()], {
         encoding: "utf8",
         timeout: 5_000,
@@ -39,17 +42,18 @@ describe("required CI completion executes fail-closed shell", () => {
           POSTGRES_RESULT: postgres,
           HTTP_RESULT: http,
           PRINT_RESULT: print,
+          PRIVACY_RESULT: privacy,
         },
       });
       expect(result.error).toBeUndefined();
       expect(result.signal).toBeNull();
-      const success = quality === "success" && postgres === "success" && http === "success" && print === "success";
+      const success = quality === "success" && postgres === "success" && http === "success" && print === "success" && privacy === "success";
       expect(result.status, result.stderr).toBe(success ? 0 : 1);
       if (success) {
         expect(result.stdout).toBe("");
       } else {
         expect(result.stdout).toContain(
-          `::error::Required CI incomplete: quality=${quality}, postgres_integration=${postgres}, security_http=${http}, contract_print_visual=${print}`,
+          `::error::Required CI incomplete: quality=${quality}, postgres_integration=${postgres}, security_http=${http}, contract_print_visual=${print}, standalone_privacy_inventory=${privacy}`,
         );
       }
     },

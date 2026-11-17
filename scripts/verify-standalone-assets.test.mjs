@@ -66,8 +66,19 @@ test("rejects unexpected raw files and synthetic witness paths without reading t
 });
 test("rejects a raw test script in standalone, matching the CI failure", async (t) => {
   const { source, shipped, put } = await fixture(t);
+  const diagnostics = [];
   await put(shipped, "scripts/assemble-standalone-entry-chunks.test.mjs", "// synthetic raw test source\n");
-  await rejects(verifyStandaloneAssets(source, shipped), "UNEXPECTED_RAW_ENTRY");
+  await rejects(verifyStandaloneAssets(source, shipped, { onUnexpectedRoot: diagnostic => diagnostics.push(diagnostic) }), "UNEXPECTED_RAW_ENTRY");
+  assert.deepEqual(diagnostics, [{ category: "scripts", kind: "directory" }]);
+});
+test("diagnoses an unknown private-looking root without exposing its name or bytes", async (t) => {
+  const { source, shipped, put } = await fixture(t);
+  const diagnostics = [];
+  const secret = "SYNTHETIC_PRIVATE_NAME_AND_CONTENT";
+  await put(shipped, `${secret}.txt`, secret);
+  await rejects(verifyStandaloneAssets(source, shipped, { onUnexpectedRoot: diagnostic => diagnostics.push(diagnostic) }), "UNEXPECTED_RAW_ENTRY");
+  assert.deepEqual(diagnostics, [{ category: "other", kind: "file" }]);
+  assert.ok(!JSON.stringify(diagnostics).includes(secret));
 });
 test("rejects duplicate migration versions and an altered historical source", async (t) => {
   const { source, shipped, put } = await fixture(t);

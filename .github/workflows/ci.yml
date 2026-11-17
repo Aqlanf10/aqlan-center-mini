@@ -1148,11 +1148,43 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Independent synthetic build: report runtime inventory failures even when
+  # the longer quality suite fails before its production build step.
+  standalone_privacy_inventory:
+    name: Standalone synthetic privacy inventory
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build and inspect standalone assets
+        run: npm run build
+      - name: Rebuild preflight and verify existing runtime guards
+        run: |
+          npm run build:preflight
+          node scripts/verify-braces-runtime.mjs
+          node scripts/dependency-security/verify-lint-tooling-runtime.mjs
+          node scripts/preflight-build-seal.mjs --verify
+
   # A failed, skipped or cancelled required job never produces a green gate.
   required_completion:
     name: Required CI gates (fail closed)
     if: always()
-    needs: [quality, postgres_integration, security_http, contract_print_visual]
+    needs: [quality, postgres_integration, security_http, contract_print_visual, standalone_privacy_inventory]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1162,8 +1194,9 @@ jobs:
           POSTGRES_RESULT: ${{ needs.postgres_integration.result }}
           HTTP_RESULT: ${{ needs.security_http.result }}
           PRINT_RESULT: ${{ needs.contract_print_visual.result }}
+          PRIVACY_RESULT: ${{ needs.standalone_privacy_inventory.result }}
         run: |
-          if [ "$QUALITY_RESULT" != "success" ] || [ "$POSTGRES_RESULT" != "success" ] || [ "$HTTP_RESULT" != "success" ] || [ "$PRINT_RESULT" != "success" ]; then
-            echo "::error::Required CI incomplete: quality=$QUALITY_RESULT, postgres_integration=$POSTGRES_RESULT, security_http=$HTTP_RESULT, contract_print_visual=$PRINT_RESULT"
+          if [ "$QUALITY_RESULT" != "success" ] || [ "$POSTGRES_RESULT" != "success" ] || [ "$HTTP_RESULT" != "success" ] || [ "$PRINT_RESULT" != "success" ] || [ "$PRIVACY_RESULT" != "success" ]; then
+            echo "::error::Required CI incomplete: quality=$QUALITY_RESULT, postgres_integration=$POSTGRES_RESULT, security_http=$HTTP_RESULT, contract_print_visual=$PRINT_RESULT, standalone_privacy_inventory=$PRIVACY_RESULT"
             exit 1
           fi

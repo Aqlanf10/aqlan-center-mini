@@ -631,9 +631,9 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     // verify:full is serial; hosted CI intentionally isolates quality, PostgreSQL,
     // and HTTP into separate jobs. Check ordering *within* each job, not a fake
     // cross-job textual ordering, and enforce the fail-closed dependency DAG.
-    const jobMarkers = [...ciYaml.matchAll(/^ {2}(quality|postgres_integration|security_http|contract_print_visual|required_completion):\s*$/gm)];
+    const jobMarkers = [...ciYaml.matchAll(/^ {2}(quality|postgres_integration|security_http|contract_print_visual|standalone_privacy_inventory|required_completion):\s*$/gm)];
     expect(jobMarkers.map(match => match[1])).toEqual([
-      "quality", "postgres_integration", "security_http", "contract_print_visual", "required_completion",
+      "quality", "postgres_integration", "security_http", "contract_print_visual", "standalone_privacy_inventory", "required_completion",
     ]);
     const jobSource = new Map(jobMarkers.map((match, index) => [
       match[1], ciYaml.slice(match.index!, jobMarkers[index + 1]?.index ?? ciYaml.length),
@@ -669,15 +669,18 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     const final = jobSource.get("required_completion")!;
     expect(http).toMatch(/needs:\s*\[quality\]/);
     expect(final).toMatch(/if:\s*always\(\)/);
-    expect(final).toMatch(/needs:\s*\[quality,\s*postgres_integration,\s*security_http,\s*contract_print_visual\]/);
+    expect(final).toMatch(/needs:\s*\[quality,\s*postgres_integration,\s*security_http,\s*contract_print_visual,\s*standalone_privacy_inventory\]/);
     for (const [job, result] of [
       ["quality", "QUALITY_RESULT"], ["postgres_integration", "POSTGRES_RESULT"],
       ["security_http", "HTTP_RESULT"], ["contract_print_visual", "PRINT_RESULT"],
+      ["standalone_privacy_inventory", "PRIVACY_RESULT"],
     ] as const) {
       expect(final).toContain(`needs.${job}.result`);
       expect(final).toContain(`"$${result}" != "success"`);
     }
     expect(final).toContain("exit 1");
+    const privacy = jobSource.get("standalone_privacy_inventory")!;
+    for (const gate of ["npm run build", "node scripts/verify-braces-runtime.mjs", "node scripts/dependency-security/verify-lint-tooling-runtime.mjs", "node scripts/preflight-build-seal.mjs --verify"]) expect(privacy).toContain(gate);
   });
 
   it("خطوة عقد المخطط وحدها هي التي تولّد الملتزم — وتستعيده بعدها (عين git checkout في CI)", async () => {

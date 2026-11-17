@@ -33,7 +33,7 @@ describe("complete isolated HTTP CI partition", () => {
  });
  it("keeps the fail-closed aggregate dependent on the whole HTTP matrix", () => {
   const aggregate = workflow.slice(workflow.indexOf("  required_completion:"));
-  expect(aggregate).toContain("needs: [quality, postgres_integration, security_http, contract_print_visual]");
+  expect(aggregate).toContain("needs: [quality, postgres_integration, security_http, contract_print_visual, standalone_privacy_inventory]");
   expect(aggregate).toContain("HTTP_RESULT: ${{ needs.security_http.result }}");
   expect(aggregate).toContain('[ "$HTTP_RESULT" != "success" ]');
  });
