@@ -153,3 +153,26 @@ from this verification. Go/Gn are still excluded, not substituted by Go/Me.
 Verification environment for this supplement: Node 24.22.1, while the project
 requests Node 22. Results from this environment must not be represented as
 passing the required Node 22 CI gate. The clinical-use flag remains false.
+
+### Gn / Me separation regression (2026-11-17)
+
+The synthetic main fixture yields approximately 31.6 degrees for the historical
+`SNGOGN` code, whose implementation uses Go–Me; the independently calculated
+Go–Gn line inclination is approximately 25.208 degrees. The characterization
+test now varies Gn alone and Me alone: only Me changes the legacy result,
+whereas the independent Go–Gn witness changes only with Gn. No saved result,
+legacy implementation, label, or normal range is migrated or reinterpreted.
+
+Core-8 contains neither a mandibular-plane measurement nor Go/Gn/Me landmarks.
+New rejection tests enforce this boundary and retain `clinicalUseAllowed=false`.
+A future metric must have an explicit construction/version, reviewed original
+definition and Gn construction, independent reference fixtures and clinician
+validation before any clinical claim. A shared label is not proof of equivalent
+geometry or interchangeable norms.
+
+Scientific review context supplied by the scientific reviewer:
+https://pmc.ncbi.nlm.nih.gov/articles/PMC7491969/ and
+https://pmc.ncbi.nlm.nih.gov/articles/PMC9100433/ . The latter explicitly uses
+SN–GoGn (Methods); the former was blocked by a browser challenge during this
+verification. Neither is treated here as authorization to implement a new
+clinical construction or reinterpret the historical Go–Me measurement.
