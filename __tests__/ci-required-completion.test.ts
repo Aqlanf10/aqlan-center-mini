@@ -22,13 +22,14 @@ function completionShell(): string {
 
 const results = ["success", "failure", "skipped", "cancelled"] as const;
 const combinations = results.flatMap(quality =>
-  results.flatMap(postgres => results.flatMap(http => results.map(print => ({ quality, postgres, http, print })))),
+  results.flatMap(postgres => results.flatMap(http => results.flatMap(print =>
+    results.map(witness => ({ quality, postgres, http, print, witness }))))),
 );
 
 describe("required CI completion executes fail-closed shell", () => {
   it.each(combinations)(
-    "quality=$quality postgres=$postgres http=$http print=$print",
-    ({ quality, postgres, http, print }) => {
+    "quality=$quality postgres=$postgres http=$http print=$print witness=$witness",
+    ({ quality, postgres, http, print, witness }) => {
       const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", completionShell()], {
         encoding: "utf8",
         timeout: 5_000,
@@ -39,11 +40,12 @@ describe("required CI completion executes fail-closed shell", () => {
           POSTGRES_RESULT: postgres,
           HTTP_RESULT: http,
           PRINT_RESULT: print,
+          RESTORE_WITNESS_RESULT: witness,
         },
       });
       expect(result.error).toBeUndefined();
       expect(result.signal).toBeNull();
-      const success = quality === "success" && postgres === "success" && http === "success" && print === "success";
+      const success = quality === "success" && postgres === "success" && http === "success" && print === "success" && witness === "success";
       expect(result.status, result.stderr).toBe(success ? 0 : 1);
       if (success) {
         expect(result.stdout).toBe("");
@@ -51,7 +53,19 @@ describe("required CI completion executes fail-closed shell", () => {
         expect(result.stdout).toContain(
           `::error::Required CI incomplete: quality=${quality}, postgres_integration=${postgres}, security_http=${http}, contract_print_visual=${print}`,
         );
+        expect(result.stdout).toContain(`standalone_restore_witness=${witness}`);
       }
     },
   );
+
+  it("fails closed when the standalone restore result is missing", () => {
+    const result = spawnSync("bash", ["--noprofile", "--norc", "-e", "-c", completionShell()], {
+      encoding: "utf8", timeout: 5_000,
+      env: { NODE_ENV: "test", PATH: process.env.PATH, QUALITY_RESULT: "success", POSTGRES_RESULT: "success", HTTP_RESULT: "success", PRINT_RESULT: "success" },
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.signal).toBeNull();
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("standalone_restore_witness=");
+  });
 });

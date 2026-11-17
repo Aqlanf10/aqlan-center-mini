@@ -631,9 +631,9 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
     // verify:full is serial; hosted CI intentionally isolates quality, PostgreSQL,
     // and HTTP into separate jobs. Check ordering *within* each job, not a fake
     // cross-job textual ordering, and enforce the fail-closed dependency DAG.
-    const jobMarkers = [...ciYaml.matchAll(/^ {2}(quality|postgres_integration|security_http|contract_print_visual|required_completion):\s*$/gm)];
+    const jobMarkers = [...ciYaml.matchAll(/^ {2}(quality|postgres_integration|security_http|standalone_restore_witness|contract_print_visual|required_completion):\s*$/gm)];
     expect(jobMarkers.map(match => match[1])).toEqual([
-      "quality", "postgres_integration", "security_http", "contract_print_visual", "required_completion",
+      "quality", "postgres_integration", "security_http", "standalone_restore_witness", "contract_print_visual", "required_completion",
     ]);
     const jobSource = new Map(jobMarkers.map((match, index) => [
       match[1], ciYaml.slice(match.index!, jobMarkers[index + 1]?.index ?? ciYaml.length),
@@ -666,13 +666,19 @@ describe("تصحيح ٣ — البوابة الكاملة تحمل بوابات 
       }
     }
     const http = jobSource.get("security_http")!;
+    const witness = jobSource.get("standalone_restore_witness")!;
     const final = jobSource.get("required_completion")!;
     expect(http).toMatch(/needs:\s*\[quality\]/);
+    expect(witness).toMatch(/needs:\s*\[quality\]/);
+    expect(witness).toContain("npx vitest run --config vitest.config.standalone-restore-witness.mts");
+    expect(witness).toContain("node scripts/preflight-build-seal.mjs --verify");
+    expect(witness).not.toMatch(/continue-on-error|passWithNoTests|allowFailure/);
     expect(final).toMatch(/if:\s*always\(\)/);
-    expect(final).toMatch(/needs:\s*\[quality,\s*postgres_integration,\s*security_http,\s*contract_print_visual\]/);
+    expect(final).toMatch(/needs:\s*\[quality,\s*postgres_integration,\s*security_http,\s*contract_print_visual,\s*standalone_restore_witness\]/);
     for (const [job, result] of [
       ["quality", "QUALITY_RESULT"], ["postgres_integration", "POSTGRES_RESULT"],
       ["security_http", "HTTP_RESULT"], ["contract_print_visual", "PRINT_RESULT"],
+      ["standalone_restore_witness", "RESTORE_WITNESS_RESULT"],
     ] as const) {
       expect(final).toContain(`needs.${job}.result`);
       expect(final).toContain(`"$${result}" != "success"`);

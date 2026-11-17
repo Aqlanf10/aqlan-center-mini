@@ -33,9 +33,11 @@ describe("complete isolated HTTP CI partition", () => {
  });
  it("keeps the fail-closed aggregate dependent on the whole HTTP matrix", () => {
   const aggregate = workflow.slice(workflow.indexOf("  required_completion:"));
-  expect(aggregate).toContain("needs: [quality, postgres_integration, security_http, contract_print_visual]");
+  expect(aggregate).toContain("needs: [quality, postgres_integration, security_http, contract_print_visual, standalone_restore_witness]");
   expect(aggregate).toContain("HTTP_RESULT: ${{ needs.security_http.result }}");
   expect(aggregate).toContain('[ "$HTTP_RESULT" != "success" ]');
+  expect(aggregate).toContain("RESTORE_WITNESS_RESULT: ${{ needs.standalone_restore_witness.result }}");
+  expect(aggregate).toContain('[ "$RESTORE_WITNESS_RESULT" != "success" ]');
  });
  it("the installed runner assigns every normal test file exactly once across both shards", async () => {
   const files = readdirSync(resolve(root, "__tests__/security-http"), { recursive: true }).map(String)
