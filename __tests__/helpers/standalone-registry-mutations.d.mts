@@ -1,1 +1,1 @@
-export function registryMutations(record: string): Record<'wrong-name' | 'wrong-checksum' | 'adopted' | 'invalid-time' | '0090-missing-fields', string>;
+export function registryMutations(record: string, baselineChecksum: string): Record<'wrong-name' | 'wrong-checksum' | 'adopted' | 'invalid-time' | '0090-missing-fields' | '0001-missing-fields', string>;
