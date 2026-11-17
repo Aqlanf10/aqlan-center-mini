@@ -1,9 +1,9 @@
 /** Synthetic commercial lineage only. No owner issuance or real financial history. */
 import { randomUUID } from "node:crypto";
-import type { Pool } from "pg";
+import type { Pool, QueryResult } from "pg";
 import { readFollowupCoverageSnapshotWith } from "../../lib/ortho-followup-coverage-db";
 import { withCoverageFixtureDiagnostics } from "./coverage-fixture-diagnostic";
-import { observeCoverageSeedFailure } from "./coverage-seed-stage-diagnostic";
+import { observeCoverageSeedFailure, observeCoverageSourceDetail } from "./coverage-seed-stage-diagnostic";
 let sequence = 0;
 export async function seedCanonicalCoverage(q: Pick<Pool, "query">, input: { patientId: number; actorId: number; doctorId: number; caseId?: number; save?: boolean; createdAt?: string }) {
   return withCoverageFixtureDiagnostics(() => seedCanonicalCoverageInner(q, input));
@@ -34,17 +34,30 @@ async function seedCanonicalCoverageInner(q: Pick<Pool, "query">, input: { patie
     VALUES($1,$2,$3,'SYN invoice service',1,250000,250000,'plan_item',$4::bigint,$4::int)`, [invoice, service, input.doctorId, item]); }
   catch (error) { observeCoverageSeedFailure("invoice_item"); throw error; }
   let snapshot: unknown;
+  let sourceQueryFailed = false;
+  let sourceAbsenceDetected = false;
   const observed = { query: async (sql: string, values?: unknown[]) => {
-    const result = await q.query(sql, values);
+    let result: QueryResult;
+    try { result = await q.query(sql, values); }
+    catch (error) { sourceQueryFailed = true; throw error; }
     if (sql.startsWith("WITH candidates AS MATERIALIZED")) snapshot = result.rows[0]?.sources?.[0]?.snapshot;
     return result;
   } } as Pick<Pool, "query">;
   let source: Awaited<ReturnType<typeof readFollowupCoverageSnapshotWith>>["sources"][number];
   try {
     const found = (await readFollowupCoverageSnapshotWith(observed, patient, ortho)).sources[0];
-    if (!found || !snapshot) throw new Error("Synthetic coverage lineage was not valid");
+    if (!found || !snapshot) {
+      sourceAbsenceDetected = true;
+      observeCoverageSourceDetail(!found && !snapshot ? "source_and_snapshot_missing" : !found ? "source_missing" : "snapshot_missing");
+      throw new Error("Synthetic coverage lineage was not valid");
+    }
     source = found;
-  } catch (error) { observeCoverageSeedFailure("source"); throw error; }
+  } catch (error) {
+    observeCoverageSeedFailure("source");
+    if (sourceQueryFailed) observeCoverageSourceDetail("query_exception");
+    else if (!sourceAbsenceDetected) observeCoverageSourceDetail("read_exception");
+    throw error;
+  }
   let revision: string | null = null;
   if (input.save !== false) {
     try { revision = (await q.query(`INSERT INTO ortho_followup_coverage_revisions(patient_id,ortho_case_id,clinical_case_id,plan_id,plan_item_id,invoice_id,version,scope,decision,source_fingerprint,source_snapshot,reason,actor_user_id,created_by,command_id,request_fingerprint,created_at)
