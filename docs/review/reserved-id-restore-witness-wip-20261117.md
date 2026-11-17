@@ -52,5 +52,26 @@ blanket safety proof. See the [companion investigation](https://github.com/Aqlan
 
 An in-memory focused TypeScript check and ESLint lintText passed locally; the
 compiler uses the current checkout plus the base guard and classifier overlaid
-and is not a full-project typecheck. This witness has not been run on
-PostgreSQL, through HTTP, in a build, or in CI.
+and is not a full-project typecheck. No PostgreSQL or build ran locally.
+
+## Synthetic CI observation
+
+On exact revision `df3531956cc93ce7b0735d18f08f29e93702dc47`,
+[CI 44113745713](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/44113745713)
+ran this witness on its disposable PostgreSQL 18 service. Both cases passed as
+observational classifications and emitted
+`SYNTHETIC_RESERVED_ID_COLLISION_AFTER_ACCEPTED_REPLAY`: after the actor's
+separate, non-cooperating ID allocation, staged replay reported success, and
+the actor's later INSERT encountered the synthetic `patients_pkey` collision.
+This occurred for initial called and uncalled states. The restored patient
+fields were compared before that INSERT attempt; afterward the witness compared
+the original target patient fields, source patient fields, archive, stage and
+target identity. It did not recompare the restored patient row after the actor
+attempt or compare all target tables on accepted replay. It does not test the
+normal `createPatient` path, any HTTP endpoint, or a properly isolated target.
+
+The standalone CI job as a whole failed: the inherited
+`sequence-atomicity.witness.ts` had five failing cases, while this witness
+had 2/2. Other CI jobs were still running at observation time. This result is
+evidence of the specified synthetic behavior, not an approved concurrency
+policy, product fix, proof of production behavior, or full-CI success.
