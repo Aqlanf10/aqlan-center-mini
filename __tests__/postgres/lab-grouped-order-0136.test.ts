@@ -217,6 +217,13 @@ describe("0136 grouped lab order from one invoice entry", () => {
     expect(dispatch).not.toHaveProperty("members");
   });
 
+  it("a manual total for one doctor needs no comparison of foreign tooth prices", async () => {
+    const w = await world({ unitMinor: 50, currency: "SAR" });
+    const result = await save(w, grouped(w));
+    await db.updateLabOrderAccounting(result.labWork![0].orderId, { costMinor: 900, costCurrency: "YER", exchangeRate: 1, actor: actor.username, actorRole: actor.role });
+    expect(await report(w.doctorIds[0])).toMatchObject({ accruedMinor: 1230, labCostMinor: 900, labCostNotDeductedCount: 0 });
+  });
+
   it("concurrent identical submissions commit one invoice, one order and one payable", async () => {
     const w = await world({ unitMinor: 200, currency: "YER" }, 2);
     const items = grouped(w), key = `glo-race-${randomUUID()}`;

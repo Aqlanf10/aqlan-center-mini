@@ -14960,7 +14960,13 @@ export async function commissionReport(
       const ids = row.invoice_ids.filter((id) => id !== null);
       if (ids.length > 1) throw new CommissionLabLineageError(row.lab_order_id);
       const candidates = ids.map((id) => invoiceById.get(id)).filter((invoice): invoice is CommissionInvoice => Boolean(invoice));
-      const weights = row.member_split === null ? null : comparableGroupedLabWeights(row.member_split, row.cost_currency);
+      // A single known doctor receives the explicit order total without comparing tooth prices.
+      // Several doctors require comparable weights; an incidental visit doctor cannot override them.
+      const soleMemberDoctor = row.member_split?.length && row.member_split[0].doctorId !== null
+        && row.member_split.every(member => member.doctorId === row.member_split![0].doctorId)
+        ? row.member_split[0].doctorId : null;
+      const weights = soleMemberDoctor !== null ? [{ doctorId: soleMemberDoctor, weight: 1 }]
+        : row.member_split === null ? null : comparableGroupedLabWeights(row.member_split, row.cost_currency);
       if (row.member_split !== null && weights === null) {
         for (const doctorId of new Set(row.member_split.map(member => member.doctorId).filter((id): id is number => id !== null))) {
           for (const invoice of candidates) {
