@@ -32,6 +32,7 @@ RUN npm run build
 RUN npm run build:preflight
 RUN node scripts/verify-braces-runtime.mjs
 RUN node scripts/dependency-security/verify-lint-tooling-runtime.mjs
+RUN node scripts/preflight-build-seal.mjs --verify
 
 # ── التشغيل ──────────────────────────────────────────────────────────────────
 FROM node:22-alpine AS runner

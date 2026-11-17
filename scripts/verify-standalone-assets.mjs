@@ -42,9 +42,34 @@ async function readPlain(root, name) {
   return readFile(path.join(root, ...parts));
 }
 
+// Docker copies these project trees separately after copying standalone.
+// Reject all symlinks there: unlike the Next runtime tree they have no
+// reviewed package-alias exception and must not escape to uninspected files.
+async function inspectCopiedTree(project, relative) {
+  let first = project;
+  for (const part of relative.split("/")) {
+    first = path.join(first, part);
+    const rootStat = await lstat(first).catch(() => fail("REQUIRED_FILE_MISSING"));
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) fail("UNSAFE_RUNTIME_SYMLINK");
+  }
+  const pending = [first];
+  while (pending.length) {
+    const current = pending.pop();
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) fail("UNSAFE_RUNTIME_SYMLINK");
+      if (/\.tsx?$/i.test(entry.name)) fail("RAW_TYPESCRIPT_IN_RUNTIME");
+      if (/synthetic-trace-(?:data|witness|probe)/i.test(entry.name)) fail("SYNTHETIC_TRACE_MARKER");
+      if (entry.isDirectory()) pending.push(path.join(current, entry.name));
+      else if (!entry.isFile()) fail("UNEXPECTED_RAW_ENTRY");
+    }
+  }
+}
+
 /** Verify source-derived assets and reject unexpected raw files, without reading them. */
 export async function verifyStandaloneAssets(projectRoot, standaloneRoot) {
   const project = path.resolve(projectRoot), bundle = path.resolve(standaloneRoot);
+  await inspectCopiedTree(project, "public");
+  await inspectCopiedTree(project, ".next/static");
   const provenance = await readPlain(project, "lib/preflight-provenance.ts");
   const preflight = parsePreflightList(provenance.toString("utf8"));
   const sourceEntries = await readdir(path.join(project, "migrations"), { withFileTypes: true });
@@ -100,6 +125,7 @@ export async function verifyStandaloneAssets(projectRoot, standaloneRoot) {
       try { entries = await readdir(path.join(bundle, current), { withFileTypes: true }); }
       catch (error) { if (error.code === "ENOENT" && current === tree) continue; throw error; }
       for (const entry of entries) {
+        if (tree === "public" && entry.isSymbolicLink()) fail("UNSAFE_RUNTIME_SYMLINK");
         if (/\.tsx?$/i.test(entry.name)) fail("RAW_TYPESCRIPT_IN_RUNTIME");
         if (/synthetic-trace-(?:data|witness|probe)/i.test(entry.name)) fail("SYNTHETIC_TRACE_MARKER");
         if (entry.isDirectory() && !entry.isSymbolicLink()) pending.push(`${current}/${entry.name}`);

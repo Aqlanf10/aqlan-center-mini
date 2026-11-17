@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "vitest";
@@ -29,6 +29,7 @@ async function fixture(t) {
   } }));
   await put(shipped, "server.js", "// synthetic server\n"); await put(shipped, "package.json", "{}\n");
   await put(source, ".next/BUILD_ID", "synthetic-build-id\n"); await put(shipped, ".next/BUILD_ID", "synthetic-build-id\n");
+  await mkdir(path.join(source, "public")); await mkdir(path.join(source, ".next/static"));
   await mkdir(path.join(shipped, ".next/server"));
   return { source, shipped, put };
 }
@@ -99,4 +100,22 @@ test("the build verifies standalone assets after completing chunk assembly", asy
   const assembled = build.indexOf("node scripts/assemble-standalone-entry-chunks.mjs");
   const verified = build.indexOf("node scripts/verify-standalone-assets.mjs");
   assert.ok(build.indexOf("npm run build:preflight") >= 0 && build.indexOf("npm run build:preflight") < assembled && assembled >= 0 && verified > assembled);
+});
+
+for (const tree of ["public", ".next/static"]) test(`rejects raw TypeScript and unsafe links from separately shipped ${tree}`, async (t) => {
+  const { source, shipped, put } = await fixture(t);
+  await put(source, `${tree}/synthetic.tsx`, "// synthetic only\n");
+  await rejects(verifyStandaloneAssets(source, shipped), "RAW_TYPESCRIPT_IN_RUNTIME");
+  await rm(path.join(source, tree, "synthetic.tsx"));
+  await symlink(path.join(root, "lib"), path.join(source, tree, "outside"));
+  await rejects(verifyStandaloneAssets(source, shipped), "UNSAFE_RUNTIME_SYMLINK");
+  await rm(path.join(source, tree, "outside"));
+  await put(source, `${tree}/synthetic-trace-witness`, "synthetic marker");
+  await rejects(verifyStandaloneAssets(source, shipped), "SYNTHETIC_TRACE_MARKER");
+});
+test("rejects a symlinked ancestor of the separately shipped static tree", async (t) => {
+  const { source, shipped } = await fixture(t);
+  await rename(path.join(source, ".next"), path.join(source, "relocated-next"));
+  await symlink("relocated-next", path.join(source, ".next"));
+  await rejects(verifyStandaloneAssets(source, shipped), "UNSAFE_RUNTIME_SYMLINK");
 });

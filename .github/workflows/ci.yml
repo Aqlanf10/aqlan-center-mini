@@ -123,6 +123,8 @@ jobs:
 
       - name: Verify lint tooling absence in actual runtime artifacts
         run: node scripts/dependency-security/verify-lint-tooling-runtime.mjs
+      - name: Verify final preflight and copied assets
+        run: node scripts/preflight-build-seal.mjs --verify
 
       - name: Upload exact runtime dependency proof
         uses: actions/upload-artifact@v4
@@ -347,6 +349,8 @@ jobs:
         run: |
           node scripts/verify-braces-runtime.mjs
           node scripts/dependency-security/verify-lint-tooling-runtime.mjs
+      - name: Verify final preflight and copied assets
+        run: node scripts/preflight-build-seal.mjs --verify
       # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
       # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
