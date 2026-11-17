@@ -14,6 +14,15 @@ before reset, without Date normalization, and the accepted text is preserved
 at microsecond precision. Non-writer forms, including precision beyond six
 fractional digits, are conservatively refused.
 
+Guarded registry records require all five historic fields. Version, checksum,
+and name must match the local catalogue. An adopted 0001 baseline remains
+valid; other versions must not be marked adopted. Ordinary migration timestamps
+may also use PostgreSQL `infinity` or `-infinity`, supported by the backup
+writer. The general migrator historically compared checksums without requiring
+matching names, so refusing a different name is a conservative compatibility
+hold, not a finding that the source is corrupt. Older/malformed or differently
+named ledgers require review without resetting the target.
+
 The guarded parser accepts the application's writer-style literal `INSERT`
 tuples, its three numeric relationship-fixup `UPDATE` forms, and its two
 documented sequence `setval` forms. It rejects executable expressions in VALUES
@@ -26,7 +35,7 @@ has no unrecorded history. Rejection preserves the source archive and target;
 it does not reconstruct an unknown 0090 schema. Native full-schema recovery
 and independently protected assets require separate verification.
 
-Synthetic unit and mocked-target tests on Node 22 passed **90/90** across seven
+Synthetic unit and mocked-target tests on Node 22 passed **99/99** across seven
 files. Their target connection is mocked; they do not prove PostgreSQL target
 preservation. The initial adversarial tests for `DO`, `COPY`, `set_config`, and
 `pg_sleep` were observed failing against the prior parser, and the executable

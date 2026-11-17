@@ -29,6 +29,28 @@ beforeEach(() => { vi.clearAllMocks(); target.connect.mockRejectedValue(new Erro
 afterEach(() => { vi.restoreAllMocks(); });
 
 describe('administrative restore validation precedes target changes', () => {
+  it.each(['wrong-name','invalid-time','missing-fields'])('rejects inconsistent baseline metadata (%s) before reset', async kind => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'synthetic-baseline-registry-'));
+    try {
+      const backups=path.join(directory,'backups'), stage=path.join(backupStateDir(backups),'restore-drill-current');
+      await mkdir(stage,{recursive:true}); await writeFile(path.join(stage,'prior.txt'),'SYNTHETIC PRIOR STAGE');
+      const baseline=(await loadMigrationFiles()).find(file=>file.version==='0001')!;
+      const record=kind==='missing-fields'
+        ? `INSERT INTO schema_migrations ("version", "checksum") VALUES ('0001', '${baseline.checksum}');`
+        : `INSERT INTO schema_migrations ("version", "name", "checksum", "applied_at", "adopted") VALUES ('0001', '${kind==='wrong-name' ? 'incorrect_baseline' : baseline.name}', '${baseline.checksum}', '${kind==='invalid-time' ? '2026-99-99T77:99:99Z' : '2026-01-01T00:00:00Z'}', TRUE);`;
+      const sql=Buffer.from(`BEGIN;\n${record}\nCOMMIT;\n`);
+      const manifest={format:'aqlan-full-backup',version:1,createdAt:'2026-01-01T00:00:00.000Z',databaseSha256:hash(sql),documents:[]};
+      const archive=tarGzBytes([{name:'database.sql',data:sql},{name:'manifest.json',data:Buffer.from(JSON.stringify(manifest))}]);
+      expect(validateBackupArchive(parseTarBytes(gunzipSync(archive)),{documentsDir:stage}).ok).toBe(true);
+      expect(() => prepareBackupSql(sql.toString('utf8'),{inspectHistorical0079:true,migrationFiles:[baseline]})).toThrow();
+      await writeFile(path.join(backups,id),archive);
+      await upsertBackupHistoryRecord(backups,{backupId:id,createdAt:'2026-01-01T00:00:00.000Z',triggerType:'manual',archiveSha256:hash(archive),archiveBytes:archive.length,databaseSha256:hash(sql),documentCount:0,status:'verified',replicationStatus:'none',destinations:[]});
+      expect(await runAdminRestoreDrill({backupDir:backups,backupId:id,actor:'synthetic',env:environment})).toEqual({ok:false,reason:'archive-integrity-mismatch'});
+      expect(target.connect).not.toHaveBeenCalled(); expect(target.query).not.toHaveBeenCalled();
+      expect(await readFile(path.join(stage,'prior.txt'),'utf8')).toBe('SYNTHETIC PRIOR STAGE');
+      expect(await readFile(path.join(backups,id))).toEqual(archive);
+    } finally { await rm(directory,{recursive:true,force:true}); }
+  });
   it('rejects an impossible 0079 timestamp before reset while preserving the prior synthetic stage', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'synthetic-invalid-0079-time-'));
     try {

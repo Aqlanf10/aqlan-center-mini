@@ -12,9 +12,9 @@ import { createRestoreMigrationSnapshot, isRestoreMigrationSnapshot } from '../l
 
 const historical = '5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99';
 const ordinary = 'a'.repeat(64);
-const files = [{ version: '0080', checksum: ordinary }, { version: '0079', checksum: historical }];
-const entry = (version: string, checksum: string, name = 'synthetic', appliedAt = '2026-01-01T00:00:00Z') =>
-  `INSERT INTO schema_migrations ("version", "name", "checksum", "applied_at", "adopted") VALUES ('${version}', '${name}', '${checksum}', '${appliedAt}', FALSE);`;
+const files = [{ version: '0001', name: 'baseline_schema', checksum: ordinary }, { version: '0080', name: 'synthetic', checksum: ordinary }, { version: '0079', name: 'ortho_followup_coverage', checksum: historical }];
+const entry = (version: string, checksum: string, name = 'synthetic', appliedAt = '2026-01-01T00:00:00Z', adopted = 'FALSE') =>
+  `INSERT INTO schema_migrations ("version", "name", "checksum", "applied_at", "adopted") VALUES ('${version}', '${name}', '${checksum}', '${appliedAt}', ${adopted});`;
 const run = (body: string) => prepareBackupSql(`BEGIN;\n${body}\nCOMMIT;`, { inspectHistorical0079: true, migrationFiles: files });
 
 describe('source migration provenance before restoration', () => {
@@ -43,11 +43,25 @@ describe('source migration provenance before restoration', () => {
     expect(parsed.historical0079).toEqual({ appliedAt: '2026-01-01T00:00:00.123456+00:00' });
     expect(parsed.historical0079Footprint).toBe(true);
   });
+  it('accepts adopted baselines, columnless and reordered historical registry records', () => {
+    const adopted=entry('0001',ordinary,'baseline_schema','2026-01-01T00:00:00.123456Z','TRUE');
+    const columnless=`INSERT INTO schema_migrations VALUES ('0080', 'synthetic', '${ordinary}', '2026-01-01T00:00:00Z', FALSE);`;
+    const reordered=`INSERT INTO schema_migrations ("checksum", "adopted", "name", "applied_at", "version") VALUES ('${ordinary}', FALSE, 'synthetic', 'infinity', '0080');`;
+    expect(run(adopted).skippedMigrationRecordLines).toBe(1);
+    expect(run(columnless).skippedMigrationRecordLines).toBe(1);
+    expect(run(reordered).skippedMigrationRecordLines).toBe(1);
+    expect(run(entry('0080',ordinary,'synthetic','-infinity')).skippedMigrationRecordLines).toBe(1);
+  });
   it.each([
     ['unknown historical version', entry('0090', ordinary)],
     ['checksum mismatch', entry('0080', 'b'.repeat(64))],
     ['duplicate', `${entry('0080', ordinary)}\n${entry('0080', ordinary)}`],
     ['changed 0079', entry('0079', 'b'.repeat(64), 'ortho_followup_coverage')],
+    ['mismatched baseline name', entry('0001', ordinary, 'incorrect_baseline', '2026-01-01T00:00:00Z', 'TRUE')],
+    ['invalid timestamp', entry('0080', ordinary, 'synthetic', '2026-99-99T77:99:99Z')],
+    ['missing required fields', `INSERT INTO schema_migrations ("version", "checksum") VALUES ('0080', '${ordinary}');`],
+    ['non-baseline adopted', entry('0080', ordinary, 'synthetic', '2026-01-01T00:00:00Z', 'TRUE')],
+    ['null adopted', entry('0080', ordinary, 'synthetic', '2026-01-01T00:00:00Z', 'NULL')],
     ['duplicate 0079', `${entry('0079', historical, 'ortho_followup_coverage')}\n${entry('0079', historical, 'ortho_followup_coverage')}`],
     ['registry without literal checksum', "INSERT INTO schema_migrations VALUES ('0080', 'synthetic', NULL, '2026-01-01T00:00:00Z', FALSE);"],
     ['qualified bypass', `INSERT INTO public.schema_migrations VALUES ('0080', 'synthetic', '${ordinary}', '2026-01-01T00:00:00Z', FALSE);`],
@@ -59,7 +73,7 @@ describe('source migration provenance before restoration', () => {
     ['delete bypass', 'DELETE FROM public.schema_migrations;'],
   ])('rejects %s', (_label, body) => { expect(() => run(body)).toThrow(); });
   it('does not accept an empty or inconsistent expected catalogue', () => {
-    for (const catalog of [[], [{ version: '0080', checksum: ordinary }, { version: '0080', checksum: ordinary }], [{ version: '0080', checksum: 'bad' }]])
+    for (const catalog of [[], [{ version: '0080', name:'synthetic', checksum: ordinary }, { version: '0080', name:'synthetic', checksum: ordinary }], [{ version: '0080', name:'synthetic', checksum: 'bad' }]])
       expect(() => prepareBackupSql('BEGIN;\nCOMMIT;', { inspectHistorical0079: true, migrationFiles: catalog })).toThrow();
   });
   it('accepts documented writer sequence resets and relational fixups', () => {
