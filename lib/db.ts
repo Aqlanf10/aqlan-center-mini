@@ -15332,8 +15332,17 @@ export async function commissionReport(
         remainder -= 1;
       }
       shares.forEach((share, index) => { share.labCostMinor = parts[index]; });
-      const attributedKey = `${doctorId}:${invoice.currency}:${invoiceId}`;
-      labAttributed.set(attributedKey, labMinor);
+    }
+    // The earned commission applies a case participation decision after these
+    // costs are attached to the original invoice shares. Report the same
+    // effective allocation, including approved shared cases, instead of the
+    // original line-doctor ownership. This changes display totals only.
+    for (const invoice of invoiceById.values()) {
+      for (const share of effectiveDoctorShares(invoice, participationAt)) {
+        if (!share.labCostMinor) continue;
+        const attributedKey = `${share.doctorId}:${invoice.currency}:${invoice.id}`;
+        labAttributed.set(attributedKey, (labAttributed.get(attributedKey) ?? 0) + share.labCostMinor);
+      }
     }
   }
 

@@ -4,28 +4,36 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validatePostgresTestTarget } from "./_safe-target";
-import { dropPublicSchema, stubPostgresEnv } from "./_setup";
+import { stubPostgresEnv } from "./_setup";
 import { sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 import { parseInvoiceCommand, invoiceCommandFingerprint, invoiceCatalogRequestFingerprint } from "../../lib/invoice-template";
 import { clinicalLabOrder } from "../../lib/canonical-lab-reads";
 import { toLabDispatchExternal } from "../../lib/lab";
 import { DEFAULT_SPECIALTY_TEMPLATES } from "../../lib/specialty-templates";
+import { clinicDateString } from "../../lib/schedule";
+import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
 
 const target = validatePostgresTestTarget(process.env); stubPostgresEnv();
 const db = await import("../../lib/db");
 const invoiceWriter = await import("../../lib/invoice-linkage-db");
 const participation = await import("../../lib/commission-participation-db");
+const payroll = await import("../../lib/hr-payroll");
+const hr = await import("../../lib/hr");
+const contracts = await import("../../lib/hr-contracts-attendance");
 const q = async (sql: string, values: unknown[] = []) => (await db.getPool().query(sql, values)).rows;
 let actor: SessionPayload;
+let owned: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
 
 beforeAll(async () => {
-  await dropPublicSchema(target.testUrl.toString()); await db.ensureSchema();
+  owned = await openBackupTimestampFixture(process.env);
+  process.env.DATABASE_URL = owned.source.options.connectionString!;
+  await db.ensureSchema();
   const username = `synthetic-grouped-lab-${randomUUID()}`;
   const [user] = await q("INSERT INTO users(username,display_name,password_hash,role) VALUES($1,'Synthetic grouped lab','synthetic-password-hash','admin') RETURNING id", [username]);
   actor = { userId: user.id, username, role: "admin", expiresAt: Date.now() + 3600000, credentialVersion: sessionCredentialVersion("synthetic-password-hash") };
   await db.openShift({ openedBy: username, opening: { YER: 100000, SAR: 0, USD: 0 } });
 }, 180_000);
-afterAll(async () => { await db.resetPoolForTesting(); });
+afterAll(async () => { await db.resetPoolForTesting(); process.env.DATABASE_URL = target.testUrl.toString(); await owned?.close(); });
 
 const TEETH = [14, 15, 24, 25, 26];
 type Pricing = { unitMinor: number; currency: string } | null;
@@ -76,6 +84,67 @@ const payables = (patientId: number) => q("SELECT p.amount_minor::int AS amount,
 const report = async (doctorId: number) => (await db.commissionReport("2020-01-01", "2999-12-31")).find(row => row.doctorId === doctorId && row.currency === "YER")!;
 
 describe("0136 grouped lab order from one invoice entry", () => {
+  it("reports the costs actually apportioned by an approved 60/40 case decision", async () => {
+    const w = await world({unitMinor:200,currency:'YER'}, 2);
+    const saved = await save(w, grouped(w,[14,15]));
+    await q("UPDATE invoices SET created_at=now()-interval '2 days' WHERE id=$1", [saved.invoice.id]);
+    const cases = await q("SELECT pi.case_id,ii.doctor_id FROM invoice_items ii JOIN plan_items pi ON pi.id=ii.plan_item_id WHERE ii.invoice_id=$1 ORDER BY ii.doctor_id",[saved.invoice.id]);
+    expect(cases).toHaveLength(2);
+    const decision = await participation.decideCaseParticipation({caseId:cases[0].case_id,status:'approved', participants:[{doctorId:w.doctorIds[0],shareBp:6000},{doctorId:w.doctorIds[1],shareBp:4000}],source:'centre_decision',reason:'Synthetic shared treatment',expectedHeadId:null,actor:{username:actor.username,userId:actor.userId!,role:actor.role}});
+    expect(decision.ok).toBe(true);
+    const previousDay=clinicDateString(new Date(Date.now()-86400000),db.CLINIC_TIME_ZONE);
+    const historical=await db.commissionReport('2020-01-01',previousDay);
+    expect(w.doctorIds.map(id=>historical.find(row=>row.doctorId===id&&row.currency==='YER')?.labCostMinor)).toEqual([200,200]);
+    const a=await report(w.doctorIds[0]), b=await report(w.doctorIds[1]);
+    expect([a.accruedMinor,b.accruedMinor]).toEqual([144,336]);
+    expect([a.labCostMinor,b.labCostMinor]).toEqual([120,280]);
+    const staffIds: number[] = [];
+    for (const doctorId of w.doctorIds) {
+      const staff=await hr.createStaff({fullName:`Synthetic doctor ${randomUUID()}`,phone:null,department:'doctors',jobTitle:'Synthetic',hireDate:'2020-01-01',workStatus:'active',endDate:null,contractKind:'commission',payTerms:null,note:null},actor);
+      const contract=await contracts.createContract({staffId:staff.id,templateKind:'doctor_percentage',title:'Synthetic commission',startDate:'2020-01-01',compensationKind:'commission',doctorPartyId:doctorId,commissionRatePercent:30},actor);
+      await contracts.approveContract(contract.id,actor);
+      await contracts.transitionContractStatus(contract.id,'active','Synthetic activation',actor);
+      staffIds.push(staff.id);
+    }
+    const input={patientId:w.patientId,invoiceId:saved.invoice.id,kind:'payment' as const,amountMinor:1000,currency:'YER' as const,baseCurrency:'YER' as const,exchangeRate:1,method:'cash' as const,createdBy:actor.username,note:'Synthetic payment',reversalOfId:null};
+    const first=await db.recordPayment(input);
+    expect(first.reason).toBeNull();
+    const firstA=await report(w.doctorIds[0]),firstB=await report(w.doctorIds[1]);
+    expect([firstA.earnedMinor,firstB.earnedMinor]).toEqual([72,168]);
+    expect([firstA.labCostMinor,firstB.labCostMinor]).toEqual([120,280]);
+    expect((await db.recordPayment(input)).reason).toBeNull();
+    const paidA=await report(w.doctorIds[0]),paidB=await report(w.doctorIds[1]);
+    expect([paidA.earnedMinor,paidB.earnedMinor]).toEqual([144,336]);
+    expect([paidA.labCostMinor,paidB.labCostMinor]).toEqual([120,280]);
+    const period=await payroll.getOrCreatePayrollPeriod(clinicDateString(new Date(),db.CLINIC_TIME_ZONE).slice(0,7),actor);
+    const run=await payroll.calculatePayrollRun(period.id,'YER',actor);
+    const items=await payroll.listPayrollItems(run.id);
+    expect(staffIds.map(id=>items.find(item=>item.staffId===id)?.commissionsMinor)).toEqual([144,336]);
+    await payroll.approvePayrollRun(run.id,actor);
+    const refund=await db.recordPayment({...input,invoiceId:null,kind:'refund',amountMinor:200,reversalOfId:first.payment!.id});
+    expect(refund.reason).toBeNull();
+    const afterA=await report(w.doctorIds[0]),afterB=await report(w.doctorIds[1]);
+    expect(afterA.earnedMinor).toBeLessThan(paidA.earnedMinor);
+    expect(afterB.earnedMinor).toBeLessThan(paidB.earnedMinor);
+    expect([afterA.labCostMinor,afterB.labCostMinor]).toEqual([120,280]);
+    const approved=await payroll.listPayrollItems(run.id);
+    expect(staffIds.map(id=>approved.find(item=>item.staffId===id)?.commissionsMinor)).toEqual([144,336]);
+  });
+  it("keeps mixed-currency manual costs unallocated with an approved participation", async () => {
+    const w=await world({unitMinor:200,currency:'YER'},2);
+    const [foreign]=await q("INSERT INTO lab_services(name,code,category,tooth_scope,requires_shade) VALUES($1,$2,'prostho','single_tooth',TRUE) RETURNING id",[`Synthetic currency ${randomUUID()}`,`SYN-${randomUUID()}`]);
+    await q("INSERT INTO lab_pricing_rules(party_id,lab_service_id,cost_minor,cost_currency,effective_from,created_by) VALUES($1,$2,50,'SAR','2020-01-01','synthetic')",[w.labId,foreign.id]);
+    const service=await mappedService(foreign.id), saved=await save(w,grouped(w,[14,15],tooth=>tooth===14?service:w.serviceId));
+    await db.updateLabOrderAccounting(saved.labWork![0].orderId,{costMinor:900,costCurrency:'YER',exchangeRate:1,actor:actor.username,actorRole:actor.role});
+    const cases=await q("SELECT pi.case_id,ii.doctor_id FROM invoice_items ii JOIN plan_items pi ON pi.id=ii.plan_item_id WHERE ii.invoice_id=$1 ORDER BY ii.doctor_id",[saved.invoice.id]);
+    const decision=await participation.decideCaseParticipation({caseId:cases[0].case_id,status:'approved',participants:[{doctorId:w.doctorIds[0],shareBp:6000},{doctorId:w.doctorIds[1],shareBp:4000}],source:'centre_decision',reason:'Synthetic currency review',expectedHeadId:null,actor:{username:actor.username,userId:actor.userId!,role:actor.role}});
+    expect(decision.ok).toBe(true);
+    const a=await report(w.doctorIds[0]),b=await report(w.doctorIds[1]);
+    expect([a.accruedMinor,b.accruedMinor]).toEqual([180,420]);
+    expect([a.labCostMinor,b.labCostMinor]).toEqual([0,0]);
+    expect([a.labCostNotDeductedCount,b.labCostNotDeductedCount]).toEqual([1,1]);
+    expect(await payables(w.patientId)).toEqual([{amount:900,currency:'YER'}]);
+  });
   it("T1+T3: five crowns open one order with five members, priced 5 × unit in the rule currency, with one payable", async () => {
     const w = await world({ unitMinor: 200, currency: "YER" });
     const result = await save(w, grouped(w));
