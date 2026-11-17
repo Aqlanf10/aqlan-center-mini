@@ -113,7 +113,20 @@ export async function verifyLintToolingRuntime(projectRoot) {
       for (let offset = 0; offset < trace.files.length; offset += 8) {
         const checks = await Promise.allSettled(trace.files.slice(offset, offset + 8).map(async input => {
           assert(!toolingSourcePath(input), `tooling NFT input: ${input}`);
-          const physical = await realpath(path.resolve(path.dirname(file), input));
+          const target = path.resolve(path.dirname(file), input);
+          let physical;
+          try { physical = await realpath(target); }
+          catch (error) {
+            if (error?.code !== "ENOENT") throw error;
+            // Keep the failure and classify only fixed locations; never emit
+            // the missing path or any content from untrusted NFT metadata.
+            const origin = relative.startsWith(".next/standalone/.next/server/") ? "standalone_server"
+              : relative.startsWith(".next/standalone/") ? "standalone_other"
+                : relative.startsWith(".next/server/") ? "build_server" : "build_other";
+            const ssr = path.join(root, ".next/standalone/.next/server/chunks/ssr") + path.sep;
+            const targetKind = target.startsWith(ssr) && target.endsWith(".js") ? "standalone_ssr_js" : "other";
+            throw new Error(`LINT_TOOLING_RUNTIME_REJECTED: missing NFT input origin=${origin} target=${targetKind}`);
+          }
           assert(!toolingSourcePath(physical), `tooling physical NFT input: ${input}`);
           await inspectAncestorManifests(physical, root);
         }));

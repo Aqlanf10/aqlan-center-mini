@@ -90,6 +90,17 @@ describe("strict additive lint tooling runtime evidence", () => {
     expect(proof.files[".next/server/chunk.js.nft.json"]).toBe(sha256(await readFile(path.join(root, ".next/server/chunk.js.nft.json"))));
     expect(proof.files[".next/static/chunk.js"]).toBe(sha256("console.log('client');\n"));
   });
+  it("classifies a missing standalone SSR trace input without revealing its name", async () => {
+    const secret = "SYNTHETIC_PRIVATE_FILENAME";
+    const trace = {version:1, files:[`../../chunks/ssr/${secret}.js`]};
+    await put(`.next/server/chunks/ssr/${secret}.js`, "console.log('synthetic');\n");
+    await json(".next/server/app/synthetic/route.js.nft.json", trace);
+    await json(".next/standalone/.next/server/app/synthetic/route.js.nft.json", trace);
+    await expect(verifyLintToolingRuntime(root)).rejects.toThrow(
+      "LINT_TOOLING_RUNTIME_REJECTED: missing NFT input origin=standalone_server target=standalone_ssr_js",
+    );
+    try { await verifyLintToolingRuntime(root); } catch (error) { expect(error.message).not.toContain(secret); }
+  });
   it("retains the unchanged alias guard's rejection of unreviewed links", async () => {
     await symlink("../../package.json", path.join(root, ".next/standalone/unknown-link"));
     await expect(verifyLintToolingRuntime(root)).rejects.toThrow(/alias/);
