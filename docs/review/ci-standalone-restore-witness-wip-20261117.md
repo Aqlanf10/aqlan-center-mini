@@ -3,9 +3,11 @@
 This local branch combines restore candidate
 `88ce015cf224f0eec748f83e147717c5913e44eb` and the witness originally based
 on `e5f3c4fbff08c098e319572d5d9d13fce2c14787`.
-It adds a separately configured HTTP witness after the existing build and
-preflight seal checks in CI. It has not been pushed, run in CI, or approved
-for deployment. No production or patient data is used.
+It adds a required, independent CI job with its own PostgreSQL service and
+standalone build, preflight seal and runtime checks before the HTTP witness.
+The additional build consumes CI time and resources, but this job cannot
+prevent the existing HTTP shards from starting. It has not been pushed, run in
+CI, or approved for deployment. No production or patient data is used.
 
 The planned witness creates five uniquely named, identity-checked synthetic
 PostgreSQL databases on an additional disposable CI service: historical
@@ -36,8 +38,10 @@ inconsistent historical archive in an independent mocked-client probe. Candidate
 88ce adds a precheck and passes the validated snapshot to restoration; the new
 sentinel assertion has not yet been run against that candidate.
 A source-only synthetic SQL probe showed the historical SQL validator rejects
-an orphaned 0079 effect; it did not test the endpoint or a database. Existing
-stage handling can clear the live staging directory before archive rejection;
-this witness preserves a separate copy of the historical staged files and
-does not claim that the original stage stays unchanged. The witness tests the
-standalone build, not a complete Docker image or general secret absence.
+an orphaned 0079 effect; it did not test the endpoint or a database. In the
+previous e5 path, stage handling could clear the live staging directory before
+archive rejection. Candidate 88ce moves the studied archive and historical
+prechecks ahead of that removal; its mocked-client tests cover preserving the
+stage on rejection, while this branch's HTTP/PostgreSQL assertion has not run.
+The witness tests the standalone build, not a complete Docker image or general
+secret absence.

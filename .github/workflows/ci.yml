@@ -317,21 +317,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      # Dedicated disposable service for the destructive synthetic restore
-      # witness; it never targets the HTTP suite's service or a deployed DB.
-      synthetic_restore_postgres:
-        image: postgres:18-alpine
-        env:
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci
-          POSTGRES_DB: aqlan_p1_test
-        ports:
-          - 55472:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_center_ci?sslmode=disable
       TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/aqlan_p1_test?sslmode=disable
@@ -365,7 +350,6 @@ jobs:
           node scripts/verify-braces-runtime.mjs
           node scripts/dependency-security/verify-lint-tooling-runtime.mjs
       - name: Verify final preflight and copied assets
-        id: restore_witness_build_guard
         run: node scripts/preflight-build-seal.mjs --verify
       # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
@@ -1112,18 +1096,59 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # Run after the existing HTTP suites and their reports so a witness
-      # failure cannot prevent them. Its PostgreSQL service is separate.
-      - name: Restore synthetic historical and fresh archives through standalone HTTP
-        if: always() && matrix.shard == 1 && steps.restore_witness_build_guard.outcome == 'success'
+  # Independent runner and service: a failed restore fixture cannot prevent
+  # either of the existing HTTP security shards from starting or completing.
+  standalone_restore_witness:
+    name: Synthetic standalone restore witness
+    needs: [quality]
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    services:
+      postgres:
+        image: postgres:18-alpine
         env:
-          SYNTHETIC_PRESERVE_EVIDENCE: "1"
-          SYNTHETIC_STANDALONE_SERVER: ${{ github.workspace }}/.next/standalone/server.js
-          DATABASE_URL: postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable
-          TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 55472:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+      SYNTHETIC_PRESERVE_EVIDENCE: "1"
+      SYNTHETIC_STANDALONE_SERVER: ${{ github.workspace }}/.next/standalone/server.js
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Upgrade npm to bulk advisory endpoint
+        run: npm install -g npm@11.21.1
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify environment contract
+        run: npm run verify:environment
+      - name: Build standalone for synthetic restore
+        run: npm run build
+      - name: Verify standalone runtime boundaries and final assets
         run: |
+          node scripts/verify-braces-runtime.mjs
+          node scripts/dependency-security/verify-lint-tooling-runtime.mjs
           node scripts/preflight-build-seal.mjs --verify
-          npx vitest run --config vitest.config.standalone-restore-witness.mts
+      - name: Restore synthetic historical and fresh archives through standalone HTTP
+        run: npx vitest run --config vitest.config.standalone-restore-witness.mts
 
   # Actual shared contract components, synthetic fixtures only. No app session,
   # database, customer PDF or external network is used by the renderer.
@@ -1173,7 +1198,7 @@ jobs:
   required_completion:
     name: Required CI gates (fail closed)
     if: always()
-    needs: [quality, postgres_integration, security_http, contract_print_visual]
+    needs: [quality, postgres_integration, security_http, contract_print_visual, standalone_restore_witness]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1183,8 +1208,9 @@ jobs:
           POSTGRES_RESULT: ${{ needs.postgres_integration.result }}
           HTTP_RESULT: ${{ needs.security_http.result }}
           PRINT_RESULT: ${{ needs.contract_print_visual.result }}
+          RESTORE_WITNESS_RESULT: ${{ needs.standalone_restore_witness.result }}
         run: |
-          if [ "$QUALITY_RESULT" != "success" ] || [ "$POSTGRES_RESULT" != "success" ] || [ "$HTTP_RESULT" != "success" ] || [ "$PRINT_RESULT" != "success" ]; then
-            echo "::error::Required CI incomplete: quality=$QUALITY_RESULT, postgres_integration=$POSTGRES_RESULT, security_http=$HTTP_RESULT, contract_print_visual=$PRINT_RESULT"
+          if [ "$QUALITY_RESULT" != "success" ] || [ "$POSTGRES_RESULT" != "success" ] || [ "$HTTP_RESULT" != "success" ] || [ "$PRINT_RESULT" != "success" ] || [ "$RESTORE_WITNESS_RESULT" != "success" ]; then
+            echo "::error::Required CI incomplete: quality=$QUALITY_RESULT, postgres_integration=$POSTGRES_RESULT, security_http=$HTTP_RESULT, contract_print_visual=$PRINT_RESULT, standalone_restore_witness=$RESTORE_WITNESS_RESULT"
             exit 1
           fi

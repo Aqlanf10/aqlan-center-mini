@@ -245,6 +245,7 @@ it("standalone HTTP restores old and fresh synthetic archives and rejects traver
   await assertOwnedTarget(); const bad = await post(badId); expect(bad.status).toBe(500);
   expect(await bad.json()).toMatchObject({ok:false,reason:"archive-integrity-mismatch"});
   expect(await snapshots(fixture.archiveTarget)).toEqual(before);
+  expect(await readFile(join(stage, documentKey))).toEqual(documentBytes);
   await expect(readFile(join(volume, "synthetic-outside.png"))).rejects.toMatchObject({code:"ENOENT"});
 
   // A second valid archive is deliberately fresh: 0079 must remain absent.
