@@ -78,6 +78,10 @@ async function dataDigest(client:Queryable){
   return hash.digest('hex');
 }
 async function seq(client:Queryable):Promise<State>{return (await client.query('SELECT last_value::text,is_called FROM public.patients_id_seq')).rows[0] as State;}
+async function supportedSequenceConfig(client:Queryable){
+  const config=(await client.query("SELECT seqincrement::text AS increment,seqcache::text AS cache,seqcycle AS cycle FROM pg_sequence WHERE seqrelid='public.patients_id_seq'::regclass")).rows[0];
+  return config?.increment==='1' && config?.cache==='1' && config?.cycle===false;
+}
 const next=(value:State)=>BigInt(value.last_value)+(value.is_called?1n:0n);
 
 async function archive(source:Pool){
@@ -141,8 +145,7 @@ it.each([
       installUnregisteredProposals:async client=>{
         const actual=(await client.query("SELECT current_database() AS name,oid::text,datdba::text AS owner,(SELECT oid::text FROM pg_roles WHERE rolname=current_user) AS role,current_setting('transaction_isolation') AS isolation FROM pg_database WHERE datname=current_database()")).rows[0];
         expect(actual.name===identity.name && actual.oid===identity.oid && actual.owner===identity.owner && actual.role===identity.owner && actual.isolation==='read committed').toBe(true);
-        const config=(await client.query("SELECT seqincrement::text AS increment,seqcache::text AS cache,seqcycle AS cycle FROM pg_sequence WHERE seqrelid='public.patients_id_seq'::regclass")).rows[0];
-        expect(config.increment==='1' && config.cache==='1' && config.cycle===false).toBe(true);
+        expect(await supportedSequenceConfig(client)).toBe(true);
         await client.query("SELECT setval('public.patients_id_seq',100000,$1)",[called]);
         await client.query(`CREATE FUNCTION synthetic_default_pause() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id=75000 THEN PERFORM pg_advisory_xact_lock(473021::bigint); END IF; RETURN NEW; END $$`);
         await client.query('CREATE TRIGGER synthetic_default_pause BEFORE INSERT ON patients FOR EACH ROW EXECUTE FUNCTION synthetic_default_pause()');
@@ -196,6 +199,7 @@ it.each([
         throw new Error('SYNTHETIC_REPLAY_OUTCOME_UNCLASSIFIED');
       }
       console.log('SYNTHETIC_LATE_DUPLICATE_REACHED');
+      if(!await supportedSequenceConfig(fixture.target.pool))throw new Error('SYNTHETIC_SEQUENCE_CONFIG_CHANGED_UNCLASSIFIED');
       const afterFailure=await seq(fixture.target.pool);
       const noRegression=next(afterFailure)>=next(before.sequence);
       console.log(noRegression?'SYNTHETIC_ID_CANDIDATE_NOT_REGRESSED_AFTER_FAILURE':'SYNTHETIC_ID_CANDIDATE_REGRESSED_AFTER_FAILURE');
@@ -218,6 +222,7 @@ it.each([
       expect(sha(Buffer.from(JSON.stringify(saved)))===sha(Buffer.from(JSON.stringify(inserted.rows)))).toBe(true);
       expect(sha(Buffer.from(JSON.stringify(afterRows.filter(row=>row.id!==id))))===before.rows).toBe(true);
       const afterInsert=await seq(fixture.target.pool);
+      if(!await supportedSequenceConfig(fixture.target.pool))throw new Error('SYNTHETIC_SEQUENCE_CONFIG_CHANGED_UNCLASSIFIED');
       const sequenceMatches=afterInsert.last_value===id && afterInsert.is_called===true;
       console.log(sequenceMatches?'SYNTHETIC_DEFAULT_SEQUENCE_MATCHES_INSERT':'SYNTHETIC_DEFAULT_SEQUENCE_MISMATCH');
       expect(sequenceMatches).toBe(true);

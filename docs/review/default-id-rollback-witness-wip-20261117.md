@@ -23,7 +23,8 @@ fails replay, the witness compares snapshot table rows and migration registry,
 source patient fields, stage, both archives and target identity, then issues an
 actual INSERT with DEFAULT ID and checks `RETURNING`, the persisted actor row,
 all previously present patient rows and the sequence's `last_value`/`is_called`
-after insertion (increment/cache are constrained to one). A fixed marker and
+after insertion. Increment/cache/cycle are checked before replay, after replay
+failure, and after the INSERT; any change is unclassified. A fixed marker and
 assertion distinguish whether the returned ID exceeds the reserved floor and
 whether both the post-failure candidate and the returned ID remain at or above
 the pre-replay floor. The assertions run after the real INSERT so the result is
