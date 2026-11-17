@@ -118,6 +118,7 @@ it.each([
     expect(adminIdentity?.oid===identity.oid && adminIdentity?.owner===identity.owner).toBe(true);
     const entryCount=(await fixture.target.pool.query("SELECT count(*)::int AS n FROM pg_tables WHERE schemaname='public'")).rows[0].n;
     expect(entry==='empty'?entryCount===0:entryCount>0).toBe(true);
+    const entrySnapshot=entry==='nonempty'?{data:await dataDigest(fixture.target.pool),history:await history(fixture.target.pool),sequence:await seq(fixture.target.pool)}:null;
     // The setting affects only future connections to this new owned DB.
     await fixture.admin.query(`ALTER DATABASE "${fixture.target.name}" SET statement_timeout = '75s'`);
     const sourceRows=await patients(fixture.source.pool), copies=await archive(fixture.source.pool);
@@ -162,7 +163,13 @@ it.each([
         expect(sha(await readFile(markerPath))===sha(marker)).toBe(true);
         const after=(await fixture.target.pool.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=current_database()')).rows[0];
         expect(after.oid===identity.oid && after.owner===identity.owner).toBe(true);
-        if(observation.kind==='returned' && knownNonEmptyRefusal(observation.result))throw new Error('SYNTHETIC_KNOWN_REFUSAL_REPLAY_NOT_EXERCISED');
+        if(observation.kind==='returned' && knownNonEmptyRefusal(observation.result)){
+          if(!entrySnapshot)throw new Error('SYNTHETIC_REFUSAL_TARGET_STATE_UNCLASSIFIED');
+          expect(await dataDigest(fixture.target.pool)===entrySnapshot.data && await history(fixture.target.pool)===entrySnapshot.history).toBe(true);
+          const after=await seq(fixture.target.pool);
+          expect(after.last_value===entrySnapshot.sequence.last_value && after.is_called===entrySnapshot.sequence.is_called).toBe(true);
+          throw new Error('SYNTHETIC_KNOWN_REFUSAL_REPLAY_NOT_EXERCISED');
+        }
         throw new Error('SYNTHETIC_REPLAY_NOT_EXERCISED_UNCLASSIFIED');
       }
       const before=prepared as Prepared|undefined;
@@ -203,8 +210,19 @@ it.each([
       const id=inserted.rows[0]?.id as string|undefined;
       expect(inserted.rowCount===1 && typeof id==='string' && inserted.rows[0]?.patient_number==='SYNTHETIC-DEFAULT-ACTOR' && inserted.rows[0]?.full_name==='SYNTHETIC ACTOR').toBe(true);
       if(!id)throw new Error('SYNTHETIC_DEFAULT_INSERT_ID_MISSING');
-      const saved=(await patients(fixture.target.pool)).filter(row=>row.id===id);
+      const afterRows=await patients(fixture.target.pool);
+      const saved=afterRows.filter(row=>row.id===id);
       expect(sha(Buffer.from(JSON.stringify(saved)))===sha(Buffer.from(JSON.stringify(inserted.rows)))).toBe(true);
+      expect(sha(Buffer.from(JSON.stringify(afterRows.filter(row=>row.id!==id))))===before.rows).toBe(true);
+      const afterInsert=await seq(fixture.target.pool);
+      const sequenceMatches=afterInsert.last_value===id && afterInsert.is_called===true;
+      console.log(sequenceMatches?'SYNTHETIC_DEFAULT_SEQUENCE_MATCHES_INSERT':'SYNTHETIC_DEFAULT_SEQUENCE_MISMATCH');
+      expect(sequenceMatches).toBe(true);
+      expect(sha(Buffer.from(JSON.stringify(await patients(fixture.source.pool))))===sha(Buffer.from(JSON.stringify(sourceRows)))).toBe(true);
+      expect(sha(await readFile(originalPath))===sha(copies.original) && sha(await readFile(archivePath))===sha(copies.faulty)).toBe(true);
+      expect(sha(await readFile(markerPath))===sha(marker)).toBe(true);
+      const finalIdentity=(await fixture.target.pool.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=current_database()')).rows[0];
+      expect(finalIdentity.oid===identity.oid && finalIdentity.owner===identity.owner).toBe(true);
       console.log(BigInt(id)>BigInt(reservation.value)?'SYNTHETIC_DEFAULT_ID_ABOVE_RESERVATION':'SYNTHETIC_DEFAULT_ID_AT_OR_BELOW_RESERVATION');
       expect(BigInt(id)>BigInt(reservation.value),'synthetic default ID did not exceed the reservation').toBe(true);
     }finally{

@@ -14,11 +14,16 @@ A test-only `installUnregisteredProposals` callback runs after target
 migrations and adds a synthetic trigger and high-water before replay. A
 separate connection controls the trigger's advisory barrier. The actor runs
 `nextval` asynchronously; replay resumes after allocation completes or an
-actual sequence-lock wait is observed. After the exact writer-shaped duplicate
+actual sequence-lock wait is observed. The post-failure sequence state is read
+after both replay and reservation finish; when reservation was blocked, it may
+include a `nextval` which ran after rollback and is not an instantaneous
+snapshot at rollback. After the exact writer-shaped duplicate
 fails replay, the witness compares snapshot table rows and migration registry,
 source patient fields, stage, both archives and target identity, then issues an
-actual INSERT with DEFAULT ID and checks `RETURNING` and the persisted actor
-row. A fixed marker and assertion distinguish whether the returned ID exceeds
+actual INSERT with DEFAULT ID and checks `RETURNING`, the persisted actor row,
+all previously present patient rows and the sequence's `last_value`/`is_called`
+after insertion (increment/cache are constrained to one). A fixed marker and
+assertion distinguish whether the returned ID exceeds
 the reserved floor. No numbers or raw database messages are printed.
 
 The fixture uses only a guarded dedicated CI PostgreSQL 18 service. Global
@@ -36,3 +41,7 @@ before push. It does not prove the ordinary `createPatient` transaction uses
 the actor's separate SQL flow, test an HTTP endpoint, cover all sequences or
 roles, or justify the nonempty-target concurrency policy. Its completion
 deadline and database statement timeout do not bound every Node/cleanup hang.
+
+Focused in-memory TypeScript and ESLint checks passed locally using the current
+checkout plus base-commit guard/classifier overlays; this is not a full-project
+typecheck. No PostgreSQL, HTTP, build, or CI has run for this witness.
