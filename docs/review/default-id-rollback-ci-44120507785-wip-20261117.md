@@ -14,7 +14,7 @@ pre-replay floor. Each case then performed an actual `INSERT` using the ID
 default, checked the returned synthetic fields and persisted row, and checked
 the post-insert sequence state. The fixed diagnostic classifications printed
 after those checks say the inserted ID was at or below the reserved ID and
-below the pre-replay floor. No numeric values are reported here.
+below the pre-replay floor. No synthetic ID or sequence values are reported here.
 
 Each case failed its first final assertion, the no-regression assertion. The
 subsequent assertions comparing the inserted ID with the prior floor and the
