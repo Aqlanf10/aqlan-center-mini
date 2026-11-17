@@ -133,6 +133,29 @@ describe("the decision is stored once, complete, attributed and append-only", ()
     expect(results.find(result => !result.ok)).toEqual({ ok: false, reason: "stale_head" });
     expect(await q("SELECT count(*)::int AS n FROM commission_case_participations WHERE case_id=$1", [c.caseId])).toEqual([{ n: 1 }]);
   });
+
+  it("competing approvals of a pending head cannot pay both versions or rewrite the approved run", async () => {
+    const a = await doctor(40), b = await doctor(30), c = await sharedCase(a.partyId);
+    const pending = await decide(c.caseId, "pending", [], null);
+    if (!pending.ok) throw new Error("fixture");
+    await decidedAt(pending.record.id, OCT);
+    const october = await run("2026-10");
+    await payroll.approvePayrollRun(october.id, admin);
+    const prior = (await itemOf(october.id, a.staffId))?.commissionsMinor;
+    expect(prior).toBe(40_000);
+    const results = await Promise.all([
+      decide(c.caseId, "approved", [[a.partyId, 6_000], [b.partyId, 4_000]], pending.record.id),
+      decide(c.caseId, "approved", [[a.partyId, 5_000], [b.partyId, 5_000]], pending.record.id),
+    ]);
+    expect(results.filter(result => result.ok)).toHaveLength(1);
+    expect(results.find(result => !result.ok)).toEqual({ ok: false, reason: "stale_head" });
+    expect(await q("SELECT status FROM commission_case_participations WHERE case_id=$1 ORDER BY id", [c.caseId])).toEqual([{ status: "pending" }, { status: "approved" }]);
+    const winner = results.find(result => result.ok);
+    if (!winner?.ok) throw new Error("winning decision missing");
+    const shareA = winner.record.participants.find(participant => participant.doctorId === a.partyId)?.shareBp;
+    expect([await earned(a.partyId), await earned(b.partyId)]).toEqual(shareA === 6_000 ? [24_000, 12_000] : [20_000, 15_000]);
+    expect((await itemOf(october.id, a.staffId))?.commissionsMinor).toBe(prior);
+  });
 });
 
 describe("the commission report follows the decision in force", () => {
