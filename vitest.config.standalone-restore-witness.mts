@@ -8,6 +8,7 @@ export default defineConfig({
     include: [
       "__tests__/postgres/standalone-real-restore.witness.ts",
       "__tests__/postgres/allocator-archive.witness.ts",
+      "__tests__/postgres/patient-number-pending-replay.witness.ts",
     ],
     globalSetup: ["__tests__/postgres/_standalone-restore-witness-setup.ts"],
   },
