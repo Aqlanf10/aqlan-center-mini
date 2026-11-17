@@ -46,6 +46,18 @@ revision its target guard restricts it to local synthetic fixture targets, so
 do not describe it as an observed production entry point. It still needs
 coverage and explicit safe handling when the executor changes.
 
+The two sequence contracts differ. `patients.id` is an internal serial ID;
+its observed next-candidate regression can reissue an ID. The patient-file
+allocator instead combines `patient_number_seq`, the numbering policy and
+retired/current aliases. Migration 0080 explicitly permits gaps from
+allocation or `setval` after rollback to avoid identifier reuse. Do not
+therefore impose exact `patient_number_seq` value/`is_called` equality on
+every failed operation. Preserve its no-regression/no-reuse guarantees, policy,
+retired aliases and the twelve historical source/target cases. The strict
+patient-number state check in the `603b` legacy witness is limited to an
+isolated archive that neither carries that sequence statement nor runs a
+concurrent patient-number allocation; it is not a general gapless requirement.
+
 ## Candidate work, not an approved contract
 
 1. Keep archive bytes and historical fingerprints untouched. At preflight,
@@ -75,7 +87,7 @@ coverage and explicit safe handling when the executor changes.
 4. Investigate taking the required sequence locks and transactional rewrite in
    deterministic order **before** any replay operation that can use them.
    Compute from verified catalog identifiers, bounded `bigint` values,
-   increment, bounds, cycle and exact `last_value`/`is_called`; preserve the
+   increment, bounds, cycle and the actual `last_value`/`is_called` state; preserve the
    existing patient-number policy and twelve documented source/target cases.
    Sequence ownership for `ALTER` is a stricter requirement than update
    permission for `setval`; test and disclose that compatibility limit. GREATEST
