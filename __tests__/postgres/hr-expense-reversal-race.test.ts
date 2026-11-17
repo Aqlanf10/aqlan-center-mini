@@ -36,7 +36,7 @@ it.each(['early-lookup', 'absent-locked-voucher'] as const)('refuses a general r
   await pay.approvePayrollRun(run.id, reviewer);
   const item = (await pay.listPayrollItems(run.id)).find(row => row.staffId === staff.id)!;
   expect(item.netDueMinor).toBe(1000);
-  await db.openShift({ openedBy: actor.username, opening: { YER: 0, SAR: 0, USD: 0 } });
+  await db.openShift({ openedBy: actor.username, opening: { YER: 100000000, SAR: 100000000, USD: 100000000 } }); // 0128: payouts need drawer cash
   // This owned fixture has no competing expense writer. Discover the next ID without
   // changing the sequence; the normal payroll transaction must allocate it itself.
   const sequence = (await fixture.source.query('SELECT last_value::int, is_called FROM expenses_id_seq')).rows[0];

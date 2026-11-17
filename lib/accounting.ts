@@ -553,6 +553,13 @@ export function expenseEntry(input: {
   /** الربط المالي (المختبرات V2): حسابات مخصصة للجهة — تُغني عن الافتراضي. */
   expenseAccountCode?: string | null;
   payableAccountCode?: string | null;
+  /**
+   * 0128 (docs/finance/EXPENSE_COMMANDS_0128.md §2.3): the part that left the drawer, with the voucher's
+   * sign. Omitted = the whole amount (every voucher before 0128).
+   */
+  drawerMinor?: number;
+  /** The part the owner paid privately, with the voucher's sign, and the account captured on the voucher. */
+  ownerPrivate?: { amountMinor: number; accountCode: string } | null;
 }): JournalEntry | null {
   if (input.amountMinor === 0) return null;
   const reversal = input.amountMinor < 0;
@@ -586,7 +593,12 @@ export function expenseEntry(input: {
       lines.push({ accountCode: ap, currency, amountMinor: Math.abs(unallocated), side: unallocated > 0 ? "debit" : "credit" });
     }
   }
-  lines.push({ accountCode: CASH_ACCOUNT[currency], currency, amountMinor: amount, side: "credit" });
+  // The credit side: the drawer part leaves the cash account; a private part is credited to the funding account.
+  const drawer = Math.abs(input.drawerMinor ?? input.amountMinor);
+  const privatePart = Math.abs(input.ownerPrivate?.amountMinor ?? 0);
+  if (drawer + privatePart !== amount) throw new Error(`أجزاء الدفع لا تساوي مبلغ السند ${input.voucherNumber}`);
+  lines.push({ accountCode: CASH_ACCOUNT[currency], currency, amountMinor: drawer, side: "credit" });
+  if (privatePart !== 0) lines.push({ accountCode: input.ownerPrivate!.accountCode, currency, amountMinor: privatePart, side: "credit" });
   return {
     source: reversal ? "expense_void" : "expense",
     reference: input.voucherNumber,

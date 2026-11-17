@@ -1,6 +1,7 @@
 # Expense commands (migration 0128)
 
-Status: specification, written before tests and code (2026-11-14).
+Status: specification written before tests and code (2026-11-14); updated with the implementation
+decisions in section 7.
 Sources: owner decision on #483, comment 6831365228, items 2 and 3. Allocation and test requirements:
 6833690789. Finance queue rows F1-2 and F2-4 in `docs/review/work-finance-continuation-plan-20261110.md`.
 Migration allocation: `docs/review/integration-finance-ortho-merge-20261112.md` section 8.
@@ -55,7 +56,8 @@ parts with negative signs.
   the open shift's drawer in that currency at the moment of the write. Expected cash uses the existing
   rule (opening, plus cash in, minus cash refunds, minus the drawer parts of vouchers). A voucher over
   the limit is refused with 409 `exceeds_drawer_cash`, with the expected amount, and writes nothing.
-  The check runs under a per-shift lock, so two vouchers cannot both pass against the same cash.
+  The check runs under one drawer-outflow lock, so two vouchers cannot both pass against the same cash.
+  It applies in the shared writer, so payroll payouts and lab batch settlements obey it too.
 - **Owner exception.** Only the protected owner may record a private part (`owner_private` or
   `drawer_and_owner_private`). The server proves the owner through the canonical staff runtime
   (`staff_authority_control.owner_user_id`, the proof used by `staffOperationIsProtectedOwner`). A
@@ -84,10 +86,12 @@ The derived journal today credits the cash account for the whole voucher. With t
 part credits cash. The private part needs a credit account, and the owner said not to assume one
 ("إذا احتاج التنفيذ تصنيفًا محاسبيًا إضافيًا غير محسوم، اعرض السؤال المحدد قبل اختياره").
 
-The question is posted on #483. Until it is answered:
+The question is posted on #483 (6878857625). Until it is answered:
 - The credit account for private parts is read from a new setting, `finance.owner_private_funding_account`,
-  which has no default. Only an existing postable equity or liability account is accepted; cash and bank
-  accounts are refused.
+  which has no default and is owner-only to change (settings class `authority`). Only an existing postable
+  equity or liability account is accepted; cash, bank, receivable, revenue and expense accounts are refused.
+- The account in force is captured on the voucher (`owner_private_account_code`), so a later change of the
+  setting never rewrites an earlier derived journal entry.
 - While the setting is empty, a private part is refused with 409 `owner_private_account_unset` and writes
   nothing. Drawer-only vouchers are unaffected.
 - Tests set the setting to a synthetic value only to exercise the path. That choice is not the owner's
@@ -102,7 +106,7 @@ after 0132's predecessor 0126 in `ensureSchema`:
   on the key; a CHECK that the two are both present or both absent.
 - `expenses.payment_source TEXT`, `expenses.drawer_amount_minor BIGINT`,
   `expenses.owner_private_amount_minor BIGINT`, `expenses.owner_private_reason TEXT`,
-  `expenses.owner_private_user_id INTEGER REFERENCES users(id)`.
+  `expenses.owner_private_user_id INTEGER REFERENCES users(id)`, `expenses.owner_private_account_code TEXT`.
 - CHECK `expenses_payment_source_valid`:
   - all five are NULL (a voucher written before 0128: the whole amount came from the drawer, which
     was the only source), or
@@ -152,3 +156,15 @@ PostgreSQL, real route, synthetic data:
   on legacy sessions the drawer limit applies to everyone.
 - Cash refunds are not capped by drawer cash. That is a separate rule, not part of this decision.
 - Payment sources other than the drawer and the owner's private source (bank, transfer) are not added.
+
+## 7. Implementation decisions (2026-11-14)
+
+| Topic | Decision |
+|---|---|
+| Owner proof | Only the canonical staff runtime proves the protected owner. `POST /api/expenses` gains a canonical branch (`lib/canonical-expense-create.ts`, the first route of M2 slice 97) with the runtime action `finance.expenses.create`. A legacy session that sends a private part is refused with 403 `owner_private_requires_owner`. |
+| Rate override and prepayment on the canonical branch | The legacy route gave both to the admin label. The canonical branch takes each from its own grant: `finance.fx.manage` for a rate different from the settings, `finance.payables.record` for a prepayment above a supplier's balance, or the protected owner. Neither is granted automatically. |
+| Lock order | The request-key lock comes first. The drawer-outflow lock comes after the party and payable row locks, so the lab batch and payroll writers keep the lock order their concurrency tests pin. A private-only voucher takes no drawer lock. |
+| Writer | `recordExpenseOn(client, …)` runs the whole create (replay, voucher, receipt read, audit rows) on a caller-owned transaction. `recordExpense` wraps it in its own transaction; the canonical command runs it inside the admitted operation. |
+| Journal | The drawer part credits the cash account of the voucher currency; the private part credits the captured account. A void mirrors both. |
+| Screen | The expense form shows the private-source fields only to the protected owner on a canonical session. The finance page reads remain on the legacy runtime until the rest of slice 97. |
+| Test fixtures | Fixtures that paid out of an empty drawer now open a funded drawer; assertions that pinned an overdrawn drawer use the float. No assertion was removed. |

@@ -89,6 +89,8 @@ interface CashShiftTabProps {
   clinicTimeZone?: string;
   parties: PartyItem[];
   isAdmin: boolean;
+  /** 0128 (#483 6831365228): only the protected owner on a canonical session may pay part of an expense privately. */
+  canPayPrivately?: boolean;
   busy: boolean;
   onOpenShift: (opening: Record<Currency, string>) => Promise<void>;
   onCloseShift: (
@@ -104,6 +106,9 @@ interface CashShiftTabProps {
     /** (P0-2) دفعة مقدمة فوق رصيد المورد/المختبر — المدير وحده بسبب. */
     prepayment?: boolean;
     prepaymentReason?: string;
+    /** 0128: the part the owner paid from a private source (the rest leaves the drawer) and why. */
+    ownerPrivateAmount?: string;
+    ownerPrivateReason?: string;
   }) => Promise<number | void>;
   onRemoveExpense: (voucherId: number, voucherNumber: string) => Promise<void>;
   onOpenQuickCollect: () => void;
@@ -137,6 +142,7 @@ export function CashShiftTab({
   clinicTimeZone = CLINIC_ZONE_FALLBACK,
   parties,
   isAdmin,
+  canPayPrivately = false,
   busy,
   onOpenShift,
   onCloseShift,
@@ -171,6 +177,8 @@ export function CashShiftTab({
     note: "",
     prepayment: false,
     prepaymentReason: "",
+    ownerPrivateAmount: "",
+    ownerPrivateReason: "",
   });
 
   // تصفية حركات الصندوق
@@ -530,12 +538,39 @@ export function CashShiftTab({
                 </div>
               ) : null}
 
+              {/* 0128 (#483 6831365228): المالك وحده يسجّل جزءًا دفعه من مصدره الخاص؛ الباقي وحده يخرج من الدرج. */}
+              {canPayPrivately ? (
+                <div className="mt-2.5 rounded-xl border border-indigo-200 bg-indigo-50/60 p-2" data-testid="owner-private-source">
+                  <p className="text-[11px] font-bold text-indigo-900">دفعتُ جزءًا من مالي الخاص (لا يخرج من الدرج)</p>
+                  <input
+                    value={expenseForm.ownerPrivateAmount}
+                    onChange={(e) => setExpenseForm((curr) => ({ ...curr, ownerPrivateAmount: e.target.value }))}
+                    placeholder="المبلغ من المصدر الخاص (اتركه فارغًا إن خرج كله من الدرج)"
+                    aria-label="المبلغ المدفوع من المصدر الخاص"
+                    inputMode="decimal" dir="ltr"
+                    className="mt-1.5 w-full rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs"
+                  />
+                  {expenseForm.ownerPrivateAmount.trim() ? (
+                    <input
+                      value={expenseForm.ownerPrivateReason}
+                      onChange={(e) => setExpenseForm((curr) => ({ ...curr, ownerPrivateReason: e.target.value }))}
+                      placeholder="سبب الدفع من المصدر الخاص (إلزامي)"
+                      aria-label="سبب الدفع من المصدر الخاص"
+                      className="mt-1.5 w-full rounded-xl border border-indigo-200 bg-white px-3 py-2 text-xs"
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="mt-3 flex gap-2">
                 <button
                   type="button"
                   onClick={async () => {
                     // يُفرَّغ النموذج بعد النجاح فقط — الرفض (مثل تجاوز الرصيد) يُبقي ما كُتب.
-                    const created = await onCreateExpense(expenseForm);
+                    const { ownerPrivateAmount, ownerPrivateReason, ...rest } = expenseForm;
+                    const created = await onCreateExpense(canPayPrivately && ownerPrivateAmount.trim()
+                      ? { ...rest, ownerPrivateAmount: ownerPrivateAmount.trim(), ownerPrivateReason }
+                      : rest);
                     if (created === undefined) return;
                     setExpenseForm({
                       category: "lab",
@@ -546,6 +581,8 @@ export function CashShiftTab({
                       note: "",
                       prepayment: false,
                       prepaymentReason: "",
+                      ownerPrivateAmount: "",
+                      ownerPrivateReason: "",
                     });
                   }}
                   disabled={busy || !expenseForm.amount.trim()}

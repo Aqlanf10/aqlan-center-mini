@@ -33,7 +33,7 @@ beforeEach(async () => {
   await db.resetPoolForTesting();
   await dropPublicSchema(process.env.DATABASE_URL!);
   await db.ensureSchema();
-  await query("INSERT INTO cashier_shifts (opened_by) VALUES ('SYN-lab-cancel')");
+  await query("INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd) VALUES ('SYN-lab-cancel', 100000000, 100000000, 100000000)");
 });
 afterAll(async () => { await db.resetPoolForTesting(); });
 
