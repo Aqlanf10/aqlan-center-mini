@@ -14,6 +14,9 @@ beforeEach(async () => {
   await put(".next/BUILD_ID", "synthetic-build");
   await put(".next/standalone/server.js", "console.log('safe');\n");
   await json(".next/standalone/package.json", pkg);
+  await put(".next/standalone/.next/server/app/api/synthetic/route.js", 'var R=require("../../../chunks/[turbopack]_runtime.js")("server/app/api/synthetic/route.js")\nR.c("server/chunks/synthetic.js")\n');
+  await put(".next/standalone/.next/server/chunks/[turbopack]_runtime.js", "console.log('synthetic entry runtime');\n");
+  await put(".next/standalone/.next/server/chunks/synthetic.js", "console.log('synthetic runtime chunk');\n");
   await json(".next/next-server.js.nft.json", { version: 1, files: ["../package.json"] });
   await put(".next/server/chunk.js", "console.log('server');\n");
   await json(".next/server/chunk.js.nft.json", { version: 1, files: ["chunk.js"] });
@@ -89,6 +92,52 @@ describe("strict additive lint tooling runtime evidence", () => {
     expect(proof.traceCount).toBe(2);
     expect(proof.files[".next/server/chunk.js.nft.json"]).toBe(sha256(await readFile(path.join(root, ".next/server/chunk.js.nft.json"))));
     expect(proof.files[".next/static/chunk.js"]).toBe(sha256("console.log('client');\n"));
+  });
+  it("resolves an unchanged copied standalone NFT against its original build location", async () => {
+    const trace = { version: 1, files: ["../chunks/ssr/generated.js"] };
+    await put(".next/server/chunks/ssr/generated.js", "console.log('synthetic build input');\n");
+    await json(".next/server/app/route.js.nft.json", trace);
+    await json(".next/standalone/.next/server/app/route.js.nft.json", trace);
+    const proof = await verifyLintToolingRuntime(root);
+    expect(proof.traceCount).toBe(4);
+    expect(proof.files[".next/server/app/route.js.nft.json"]).toBe(proof.files[".next/standalone/.next/server/app/route.js.nft.json"]);
+  });
+  it("rejects a copied standalone NFT with no byte-identical verified build original", async () => {
+    await put(".next/server/chunks/ssr/generated.js", "console.log('synthetic build input');\n");
+    await json(".next/standalone/.next/server/app/route.js.nft.json", { version: 1, files: ["../chunks/ssr/generated.js"] });
+    await expect(verifyLintToolingRuntime(root)).rejects.toThrow(/standalone NFT lacks identical verified build original/);
+    await json(".next/server/app/route.js.nft.json", { version: 1, files: ["../chunks/ssr/generated.js", "../chunk.js"] });
+    await expect(verifyLintToolingRuntime(root)).rejects.toThrow(/standalone NFT lacks identical verified build original/);
+  });
+  it("still inspects forbidden ancestors resolved through a copied NFT's build original", async () => {
+    await json("node_modules/renamed/package.json", { name: "@eslint/js", version: "1" });
+    await put("node_modules/renamed/index.js", "exports.disguised = true;");
+    const trace = { version: 1, files: ["../../../node_modules/renamed/index.js"] };
+    await json(".next/server/app/route.js.nft.json", trace);
+    await json(".next/standalone/.next/server/app/route.js.nft.json", trace);
+    await expect(verifyLintToolingRuntime(root)).rejects.toThrow(/tooling trace package/);
+  });
+  it("still rejects an actual shipped tooling package alongside an otherwise valid copied trace", async () => {
+    const trace = { version: 1, files: ["../chunks/ssr/generated.js"] };
+    await put(".next/server/chunks/ssr/generated.js", "console.log('synthetic build input');\n");
+    await json(".next/server/app/route.js.nft.json", trace);
+    await json(".next/standalone/.next/server/app/route.js.nft.json", trace);
+    await json(".next/standalone/node_modules/renamed/package.json", { name: "@eslint/js", version: "1" });
+    await expect(verifyLintToolingRuntime(root)).rejects.toThrow(/tooling package identity/);
+  });
+  it("rejects a missing shipped chunk required by an actual entry wrapper", async () => {
+    await rm(path.join(root, ".next/standalone/.next/server/chunks/synthetic.js"));
+    await expect(verifyLintToolingRuntime(root)).rejects.toThrow(/missing inventoried chunk/);
+  });
+  it("still rejects missing shipped JavaScript bound to an empty indexed source map", async () => {
+    const map = { version: 3, sections: [] };
+    const trace = { version: 1, files: ["../chunk.js"] };
+    await put(".next/server/app/page.js", "console.log('synthetic runtime');\n");
+    await json(".next/server/app/page.js.map", map);
+    await json(".next/server/app/page.js.nft.json", trace);
+    await json(".next/standalone/.next/server/app/page.js.map", map);
+    await json(".next/standalone/.next/server/app/page.js.nft.json", trace);
+    await expect(verifyLintToolingRuntime(root)).rejects.toThrow(/empty indexed map lacks shipped JavaScript/);
   });
   it("retains the unchanged alias guard's rejection of unreviewed links", async () => {
     await symlink("../../package.json", path.join(root, ".next/standalone/unknown-link"));

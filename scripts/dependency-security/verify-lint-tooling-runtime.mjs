@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { verifyRuntimeArtifacts } from "../verify-braces-runtime.mjs";
 import { sha256 } from "./installed-braces.mjs";
+import { checkWrapperChunks } from "./verify-turbopack-wrapper-chunks.mjs";
 
 const exactNames = new Set(["minimatch", "eslint", "eslint-plugin-react-hooks", "typescript-eslint"]);
 const namespaces = ["@eslint/", "@eslint-community/", "@typescript-eslint/"];
@@ -85,6 +86,13 @@ export async function verifyLintToolingRuntime(projectRoot) {
   // allowance or weaker traversal replaces the reviewed braces guard.
   const provenance = await verifyRuntimeArtifacts(root);
   assert(Object.keys(provenance.files).length > 0 && provenance.traceCount > 1, "empty artifact provenance");
+  const standaloneFiles = Object.fromEntries(Object.entries(provenance.files)
+    .filter(([name]) => name.startsWith(".next/standalone/"))
+    .map(([name, digest]) => [name.slice(".next/standalone/".length), digest]));
+  // Copied NFTs describe build inputs, not what actually shipped. Independently
+  // bind each observed Turbopack entry wrapper's required chunks to the
+  // standalone inventory so a missing runtime chunk cannot be hidden.
+  const wrapperChunks = await checkWrapperChunks(path.join(root, ".next/standalone"), standaloneFiles);
   let manifests = 0, maps = 0, traces = 0;
   for (const [relative, digest] of Object.entries(provenance.files)) {
     assert(!toolingSourcePath(relative), `tooling artifact path: ${relative}`);
@@ -102,13 +110,26 @@ export async function verifyLintToolingRuntime(projectRoot) {
     if (relative.endsWith(".nft.json")) {
       const trace = JSON.parse(bytes.toString("utf8"));
       assert(record(trace) && trace.version === 1 && Array.isArray(trace.files) && trace.files.length > 0 && trace.files.every(input => typeof input === "string"), `malformed NFT metadata: ${relative}`);
+      // Next copies build NFT metadata unchanged into standalone, but its
+      // relative inputs remain anchored to the original build trace. Bind that
+      // copy to the already-inventoried original before using its directory;
+      // never accept a missing, modified, or unverified counterpart.
+      let traceLocation = file;
+      if (relative.startsWith(".next/standalone/.next/")) {
+        const original = relative.slice(".next/standalone/".length);
+        assert(Object.hasOwn(provenance.files, original) && provenance.files[original] === digest,
+          `standalone NFT lacks identical verified build original: ${relative}`);
+        traceLocation = path.resolve(root, original);
+        assert(traceLocation.startsWith(`${root}${path.sep}`) && sha256(await readFile(traceLocation)) === digest,
+          `standalone NFT build original changed: ${relative}`);
+      }
       // Every occurrence retains its own path resolution and ancestor checks.
       // Only independent read-only work overlaps; no cache, skipped duplicate,
       // weakened assertion or changed build/provenance boundary is introduced.
       for (let offset = 0; offset < trace.files.length; offset += 8) {
         const checks = await Promise.allSettled(trace.files.slice(offset, offset + 8).map(async input => {
           assert(!toolingSourcePath(input), `tooling NFT input: ${input}`);
-          const physical = await realpath(path.resolve(path.dirname(file), input));
+          const physical = await realpath(path.resolve(path.dirname(traceLocation), input));
           assert(!toolingSourcePath(physical), `tooling physical NFT input: ${input}`);
           await inspectAncestorManifests(physical, root);
         }));
@@ -124,7 +145,7 @@ export async function verifyLintToolingRuntime(projectRoot) {
   return { format: "aqlan-lint-tooling-runtime-absence-v1", buildId: provenance.buildId,
     packageSha256: provenance.packageSha256, lockSha256: provenance.lockSha256,
     checkedRoots: provenance.checkedRoots, exactNames: [...exactNames], namespaces,
-    manifestCount: manifests, traceCount: traces, sourceMapCount: maps,
+    manifestCount: manifests, traceCount: traces, sourceMapCount: maps, wrapperChunks,
     mapCoverage: "Only available validated maps are inspected. Empty indexed maps give zero source attribution. Unmapped/minified arbitrary bundled code is not proven absent.",
     scope: "Exact tooling package identities, artifact paths, NFT/source-map/preflight inputs, plus separately verified npm production graph. Root devDependency declarations are not installed runtime copies.",
     files: provenance.files, preflightBundledPackages: provenance.preflightBundledPackages,

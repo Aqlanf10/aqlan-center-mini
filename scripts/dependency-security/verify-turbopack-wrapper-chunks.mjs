@@ -11,10 +11,19 @@ export async function checkWrapperChunks(standaloneRoot, inventory) {
     const text = await readFile(path.join(standaloneRoot, file), 'utf8');
     ensure(digest(text) === expectedHash, `changed entry ${file}`);
     const lines = text.split('\n');
-    const isWrapper = lines[0].startsWith('var R=require(') && lines[0].includes('[turbopack]_runtime.js');
+    const bootstrap = /^var R=require\("([^"\\]+)"\)\("([^"\\]+)"\)\r?$/.exec(lines[0]);
+    const isWrapper = !!bootstrap && bootstrap[1].endsWith('/[turbopack]_runtime.js');
     const rCalls = text.match(/\bR\.c\s*\(/g) ?? [];
     if (!isWrapper && rCalls.length === 0) continue;
     ensure(isWrapper, `unknown runtime chunk syntax ${file}`);
+    const entry = file.slice('.next/'.length);
+    ensure(bootstrap[2] === entry, `invalid wrapper entry ${file}`);
+    const runtime = path.posix.normalize(path.posix.join(path.posix.dirname(entry), bootstrap[1]));
+    ensure(/^server\/chunks\/(?:[a-zA-Z0-9_@.\/[\]~-]+)\.js$/.test(runtime)
+      && !runtime.split('/').some(part => part === '..' || part === '.'), `invalid wrapper runtime ${file}`);
+    const runtimeFile = `.next/${runtime}`;
+    ensure(Object.hasOwn(inventory, runtimeFile), `missing inventoried runtime ${runtimeFile}`);
+    ensure(digest(await readFile(path.join(standaloneRoot, runtimeFile))) === inventory[runtimeFile], `changed runtime ${runtimeFile}`);
     const calls = lines.filter(line => /^R\.c\s*\(/.test(line));
     ensure(calls.length === rCalls.length && calls.length > 0, `unknown chunk call ${file}`);
     entries++;
