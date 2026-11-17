@@ -64,7 +64,6 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
       TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
       SYNTHETIC_RESTORE_HISTORY_WITNESS: '1'
-      SYNTHETIC_WITNESS_ROOT: ${{ runner.temp }}
       SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
       CLINIC_TIME_ZONE: Asia/Aden
     steps:
@@ -83,6 +82,8 @@ jobs:
         run: node --test scripts/restore-history-report-test.mjs
       - name: Run guarded synthetic restore cases
         id: witness
+        env:
+          SYNTHETIC_WITNESS_ROOT: ${{ runner.temp }}
         run: npx vitest run --config vitest.config.restore-history-witness.mts --reporter=json --outputFile="$RUNNER_TEMP/restore-history-vitest.json"
       - name: Create fixed-field result report
         id: report

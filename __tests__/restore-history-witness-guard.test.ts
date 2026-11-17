@@ -41,4 +41,9 @@ describe('restore history synthetic target guard', () => {
     expect(config).toContain("'__tests__/postgres/inventory-authority-maintenance.test.ts'");
     expect(config).toContain("globalSetup: ['__tests__/postgres/_history-witness-setup.ts']");
   });
+  it('sets runner temp in the witness step rather than an unsupported job-level context', () => {
+    const workflow = readFileSync('.github/workflows/restore-history-retained.yml', 'utf8');
+    expect(workflow).not.toMatch(/^      SYNTHETIC_WITNESS_ROOT:/m);
+    expect(workflow).toMatch(/id: witness\n\s+env:\n\s+SYNTHETIC_WITNESS_ROOT: \$\{\{ runner\.temp \}\}/);
+  });
 });
