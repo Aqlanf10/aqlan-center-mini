@@ -6,6 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { loadMigrationFiles } from '../lib/migration-files';
 import { loadRestoreMigrationChecksums } from '../lib/restore/migration-provenance.mjs';
 import { prepareBackupSql } from '../lib/restore/sql.mjs';
+import { insertStatement, sequenceResets } from '../lib/backup';
+import { patientNumberSequenceRestoreSql } from '../lib/patient-numbering-backup';
 
 const historical = '5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99';
 const ordinary = 'a'.repeat(64);
@@ -26,7 +28,7 @@ describe('source migration provenance before restoration', () => {
     expect(parsed.dataSql).toContain(data);
     expect(parsed.dataSql).not.toContain('INSERT INTO schema_migrations');
     expect(parsed.historical0079).toBeNull();
-    expect(run("UPDATE example SET note='schema_migrations'; -- schema_migrations\n").dataSql).toContain("'schema_migrations'");
+    expect(run("INSERT INTO example (\"note\") VALUES ('schema_migrations'); -- schema_migrations\n").dataSql).toContain("'schema_migrations'");
   });
   it('preserves exact historical 0079 and its timestamp without making it a fresh migration', () => {
     const parsed = run(`${entry('0079', historical, 'ortho_followup_coverage', '2026-01-01T00:00:00.123456+00:00')}\nINSERT INTO visits ("ortho_followup_coverage_proof") VALUES (NULL);`);
@@ -51,6 +53,33 @@ describe('source migration provenance before restoration', () => {
   it('does not accept an empty or inconsistent expected catalogue', () => {
     for (const catalog of [[], [{ version: '0080', checksum: ordinary }, { version: '0080', checksum: ordinary }], [{ version: '0080', checksum: 'bad' }]])
       expect(() => prepareBackupSql('BEGIN;\nCOMMIT;', { inspectHistorical0079: true, migrationFiles: catalog })).toThrow();
+  });
+  it('accepts documented writer sequence resets and relational fixups', () => {
+    const serial = "SELECT setval(pg_get_serial_sequence('patients', 'id'), COALESCE((SELECT MAX(id) FROM patients), 1), (SELECT MAX(id) IS NOT NULL FROM patients)) WHERE pg_get_serial_sequence('patients', 'id') IS NOT NULL;";
+    const allocator = "SELECT setval('patient_number_seq', GREATEST(last_value, 10000::bigint), (last_value > 10000::bigint OR (last_value = 10000::bigint AND is_called) OR false)) FROM patient_number_seq;";
+    const update = 'UPDATE patients SET photo_document_id = 17 WHERE id = 5;';
+    expect(run(`${serial}\n${allocator}\n${update}`).dataSql).toContain(allocator);
+  });
+  it('preserves actual writer literals, multiline quoted text, arrays and generated sequence statements', () => {
+    const row = insertStatement('synthetic_rows', ['id','text','flag','amount','tags','empty'], {
+      id:1, text:"quoted ' text\nSELECT set_config('synthetic','on',true); -- \\", flag:true, amount:1.2e20,
+      tags:['synthetic,one','quote " and slash \\'], empty:null,
+    }, new Map([['tags','ARRAY']]));
+    const serial = sequenceResets(['synthetic_rows'])[0];
+    for (const called of [false,true]) {
+      const patient = patientNumberSequenceRestoreSql('10000',called);
+      const sql = `${row}\n${serial}\n${patient}`;
+      expect(run(sql).dataSql.trim()).toBe(sql);
+    }
+  });
+  it.each([
+    "DO 'BEGIN INSERT INTO schema_migrations VALUES (1); END';",
+    "COPY schema_migrations FROM '/tmp/synthetic';",
+    "SELECT set_config('synthetic.setting','on',true);",
+    "SELECT pg_sleep(1);",
+    "INSERT INTO sample (\"note\") VALUES ((SELECT set_config('search_path','synthetic',false)));",
+  ])('rejects unsupported statement without executing it', statement => {
+    expect(() => run(statement)).toThrow('Unsupported restore writer statement');
   });
   it('refuses unknown 0090 in the raw CLI before attempting the target connection', () => {
     const dir = mkdtempSync(join(tmpdir(), 'synthetic-raw-provenance-'));
