@@ -159,4 +159,16 @@ describe("synthetic coverage seed stage observation", () => {
     finally { stdout.mockRestore(); info.mockRestore(); }
     expect(identical).toBe(true); expect(db.operations).toEqual(["case"]);
   });
+
+  it("keeps the original source read failure if diagnostic output throws", async () => {
+    const { seedCanonicalCoverage } = await import("./fixtures/canonical-ortho-coverage");
+    const original = new Error(syntheticMarker), db = database(null, null);
+    probe.read.mockRejectedValue(original);
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => { throw new Error("SYNTHETIC_WRITER"); });
+    let identical = false;
+    try { identical = await seedCanonicalCoverage(db as never, { patientId: 1, actorId: 1, doctorId: 1, save: false }).then(() => false, error => error === original); }
+    finally { stdout.mockRestore(); info.mockRestore(); }
+    expect(identical).toBe(true); expect(db.operations).toEqual(stages.slice(0, 7));
+  });
 });
