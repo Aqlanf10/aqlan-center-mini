@@ -1,0 +1,13 @@
+# WIP: preflight without raw TypeScript in standalone
+
+This is an incomplete local experiment based on `a517703d`; do not merge or deploy it. It is not evidence that the final standalone package is free of raw sources or safe for release.
+
+The experiment removes the 15 provenance source paths from the explicit Next tracing includes while retaining the SQL catalogue include. It builds preflight before Next, then checks its source hash map against the build tree and checks the runner hash before allowing the standalone asset check to pass. The final inventory rejects root raw entries and `.ts`/`.tsx` names inside the generated runtime trees. Existing migration checks, including the pinned historical 0079 hash, are retained.
+
+The focused synthetic Vitest run passed 19/19 tests across `scripts/verify-standalone-assets.test.mjs` and `__tests__/preflight-artifact.test.ts`. An independent isolated preflight artifact without raw TypeScript matched 15 source digests and 73 SQL files, including historical 0079. It ran `--help` successfully and rejected separate changes to the manifest, runner, and SQL. This does not establish that the built Next app or restore can operate without raw sources.
+
+A local Next build under `/tmp` built preflight, compiled successfully, and entered TypeScript checking. The build was deliberately stopped with exit 143 when the shared `/workspace` filesystem fell below the 800 MB safety threshold. Build, standalone inventory, privacy, HTTP/runtime, database restore, full CI and Docker image checks have not completed. No production data or databases were used. A new isolated synthetic PostgreSQL container was started and subsequently stopped without deletion; its test databases were not created.
+
+Important limitations: source hashes and runner hash provide consistency, not signed source attestation. An independent synthetic witness showed that changing the runner and updating `manifest.bundleSha256` together can still pass the existing self-check. A stronger claim needs a stable source snapshot and an independently verified/reproduced build. The TypeScript filename inventory does not prove that generated JavaScript or source maps contain no raw source content. The tracing includes may not be honored identically by Turbopack; only a completed production-shaped build can establish the generated artifact's actual contents. Do not infer that dynamic imports or restore dependencies are complete from this WIP.
+
+The interrupted build log is `/tmp/aqlan-preflight-no-raw-source-build.log`. The untouched isolated preflight evidence is `/workspace/aqlan-preflight-isolated-synthetic/preflight`. These paths are local ephemeral evidence, not deployable artifacts.

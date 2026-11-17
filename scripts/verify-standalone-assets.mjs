@@ -53,13 +53,20 @@ export async function verifyStandaloneAssets(projectRoot, standaloneRoot) {
   const old = migrations.find((name) => name.startsWith("0079_"));
   if (old !== "0079_ortho_followup_coverage.sql" || digest(await readPlain(project, `migrations/${old}`)) !== HISTORICAL_0079) fail("INVALID_HISTORICAL_0079");
 
-  const allowed = new Set(["server.js", "package.json", ...preflight, ...migrations.map((name) => `migrations/${name}`)]);
+  // The runner embeds this ordered map before bundling; build:preflight also
+  // runs it once to validate the manifest against those embedded values.
+  const preflightManifest = JSON.parse((await readPlain(project, ".preflight/manifest.json")).toString("utf8"));
+  const sourceHashes = Object.fromEntries(await Promise.all(preflight.map(async (name) => [name, digest(await readPlain(project, name))])));
+  if (JSON.stringify(preflightManifest.sourceFiles) !== JSON.stringify(sourceHashes)) fail("PREFLIGHT_SOURCE_MISMATCH");
+  if (!/^[a-f0-9]{64}$/.test(preflightManifest.bundleSha256 ?? "")
+    || digest(await readPlain(project, ".preflight/runner/run.mjs")) !== preflightManifest.bundleSha256) fail("PREFLIGHT_RUNNER_MISMATCH");
+  const allowed = new Set(["server.js", "package.json", ...migrations.map((name) => `migrations/${name}`)]);
   for (const name of ["server.js", "package.json"]) await readPlain(bundle, name);
   const [buildId, shippedId] = await Promise.all([readPlain(project, ".next/BUILD_ID"), readPlain(bundle, ".next/BUILD_ID")]);
   if (!buildId.toString("utf8").trim() || !buildId.equals(shippedId)) fail("BUILD_ID_MISMATCH");
   const serverDir = await lstat(path.join(bundle, ".next/server")).catch(() => fail("REQUIRED_FILE_MISSING"));
   if (!serverDir.isDirectory() || serverDir.isSymbolicLink()) fail("REQUIRED_FILE_NOT_REGULAR");
-  for (const name of [...preflight, ...migrations.map((file) => `migrations/${file}`)]) {
+  for (const name of migrations.map((file) => `migrations/${file}`)) {
     const [source, shipped] = await Promise.all([readPlain(project, name), readPlain(bundle, name)]);
     if (digest(source) !== digest(shipped)) fail("SHIPPED_ASSET_MISMATCH");
   }
@@ -93,6 +100,7 @@ export async function verifyStandaloneAssets(projectRoot, standaloneRoot) {
       try { entries = await readdir(path.join(bundle, current), { withFileTypes: true }); }
       catch (error) { if (error.code === "ENOENT" && current === tree) continue; throw error; }
       for (const entry of entries) {
+        if (/\.tsx?$/i.test(entry.name)) fail("RAW_TYPESCRIPT_IN_RUNTIME");
         if (/synthetic-trace-(?:data|witness|probe)/i.test(entry.name)) fail("SYNTHETIC_TRACE_MARKER");
         if (entry.isDirectory() && !entry.isSymbolicLink()) pending.push(`${current}/${entry.name}`);
       }
