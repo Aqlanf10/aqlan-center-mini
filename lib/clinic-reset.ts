@@ -116,6 +116,9 @@ export const RESET_WIPE_TABLES = [
   "plan_items",
   "clinical_cases",
   "treatment_plans",
+  // (0129) مراجعات فرق افتتاح الوردية — تُمسح مع وردياتها (TRUNCATE لا يطلق حارس الإلحاق فقط)
+  "shift_opening_corrections",
+  "shift_opening_reviews",
   "cashier_shifts",
   "legacy_balance_arrangements",
   "patient_opening_balance_history",
@@ -216,6 +219,9 @@ export const RESET_KEEP_TABLES = [
   "login_limits",
   "staff_login_limits",
   "audit_log",
+  // (0133) Expense request retirements are kept through a reset and never block it: they hold no money and
+  // no patient data, and a kept retirement keeps a delayed send of its exact request from writing afterwards.
+  "expense_request_retirements",
   "schema_migrations",
 ] as const;
 

@@ -104,7 +104,7 @@ it("leave audit failure rolls back decision, balance and attendance together",as
 });
 
 it("legacy single-voucher HR payouts cannot be reversed through the generic expense entrypoint",async()=>{
- const payroll=await import("../../lib/hr-payroll");await db.openShift({openedBy:admin.username,opening:{YER:0,SAR:0,USD:0}});
+ const payroll=await import("../../lib/hr-payroll");await db.openShift({openedBy:admin.username,opening:{YER:100000000,SAR:100000000,USD:100000000}});
  const period=await payroll.getOrCreatePayrollPeriod("2026-08",admin),run=await payroll.calculatePayrollRun(period.id,"YER",admin);await payroll.approvePayrollRun(run.id,admin);
  const item=(await payroll.listPayrollItems(run.id))[0];
  const paid=await payroll.disbursePayrollItem(item.id,{amountMinor:10,clientRequestId:"legacy-void-fixture-1"},admin);
@@ -118,7 +118,7 @@ it("an unreconciled legacy hybrid claim blocks unlinked doctor commission paymen
  const payroll=await import("../../lib/hr-payroll"),pool=db.getPool();
  const party=(await pool.query("INSERT INTO parties(name,kind,commission_percent) VALUES ('Legacy hybrid doctor','doctor',30) RETURNING id")).rows[0];
  const contract=await work.createContract({staffId,templateKind:"doctor_hybrid",title:"Legacy hybrid fixture",startDate:"2026-01-01",compensationKind:"salary_commission",baseSalaryMinor:80000,salaryCurrency:"YER",salaryPeriod:"monthly",doctorPartyId:party.id,commissionRatePercent:30},admin);await work.approveContract(contract.id,admin);await work.transitionContractStatus(contract.id,"active","Explicit contract fixture",admin);
- const shift=await db.openShift({openedBy:admin.username,opening:{YER:0,SAR:0,USD:0}});
+ const shift=await db.openShift({openedBy:admin.username,opening:{YER:100000000,SAR:100000000,USD:100000000}});
  const patient=(await pool.query("INSERT INTO patients(patient_number,full_name) VALUES ('LEGACY-HR','Synthetic legacy patient') RETURNING id")).rows[0];
  const invoice=(await pool.query("INSERT INTO invoices(invoice_number,patient_id,total_minor,base_currency,created_by,created_at) VALUES ('LEGACY-HR-I',$1,40000,'YER','work-admin','2026-08-02 10:00+03') RETURNING id",[patient.id])).rows[0];
  await pool.query("INSERT INTO invoice_items(invoice_id,description,quantity,unit_price_minor,total_minor,doctor_id) VALUES ($1,'Synthetic legacy service',1,40000,40000,$2)",[invoice.id,party.id]);

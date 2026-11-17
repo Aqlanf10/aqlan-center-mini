@@ -77,7 +77,8 @@
   "isAdmin("
  ],
  "/api/finance/reconciliation": [
-  "canViewMoney("
+  "canViewMoney(",
+  "isAdmin("
  ],
  "/api/finance/report": [
   "financeAccess",
@@ -259,6 +260,7 @@
  ],
  "/api/shifts": [
   "canViewMoney(",
+  "isAdmin(",
   "permissions?.canViewCashDrawer",
   "role === \"doctor\""
  ],

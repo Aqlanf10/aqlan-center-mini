@@ -42,6 +42,7 @@ export const STAFF_CAPABILITIES = Object.freeze([
   "hr.directory.view", "hr.attendance.record", "hr.attendance.correct", "hr.staff.manage", "hr.leaves.request",
   "hr.leaves.approve", "hr.schedules.manage", "hr.payroll.manage", "hr.reports.view", "hr.settings.edit",
   "tasks.use", "messages.use", "patients.operational-summary.view",
+  "finance.shifts.review-opening",
 ] as const);
 export type StaffCapability = typeof STAFF_CAPABILITIES[number];
 
@@ -113,6 +114,7 @@ export const STAFF_CAPABILITY_PREREQUISITES: Readonly<Partial<Record<StaffCapabi
   "finance.payments.void": Object.freeze(["finance.payments.view"] as const),
   "finance.expenses.void": Object.freeze(["finance.expenses.view"] as const),
   "finance.shifts.operate": Object.freeze(["finance.shifts.view"] as const),
+  "finance.shifts.review-opening": Object.freeze(["finance.shifts.view"] as const),
   "finance.service-prices.edit": Object.freeze(["finance.service-prices.view"] as const),
   "finance.discounts.override": Object.freeze(["finance.discounts.apply"] as const),
   "staff.profile.edit": Object.freeze(["staff.view"] as const),

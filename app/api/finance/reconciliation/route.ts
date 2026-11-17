@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { CLINIC_TIME_ZONE, getOpenShift, listShifts, listShiftPayments, listShiftExpenses, shiftDrawerBreakdown } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getOpenShift, listShiftsForViewer, listShiftPayments, listShiftExpenses, shiftDrawerBreakdown } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { canViewMoney } from "@/lib/roles";
+import { canViewMoney, isAdmin } from "@/lib/roles";
 import { type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 
 export async function GET(req: NextRequest) {
@@ -39,7 +39,8 @@ export async function GET(req: NextRequest) {
       };
     }
 
-    const pastShifts = await listShifts(30);
+    // 0129 §8.3: the latest close is sealed for everyone but the admin until the next count is fixed.
+    const pastShifts = await listShiftsForViewer({ authorized: isAdmin(session.role) }, 30);
 
     return NextResponse.json({
       clinicTimeZone: CLINIC_TIME_ZONE,
