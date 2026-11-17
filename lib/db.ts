@@ -102,6 +102,8 @@ import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
 import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "./ortho-followup-coverage-schema";
+import { PRESCRIPTION_LINEAGE_MIGRATIONS } from "./prescription-migration-lineage";
+import { PRESCRIPTION_ISSUANCE_MIGRATIONS } from "./prescription-issuance-migration";
 import { GROUPED_LAB_ORDER_SQL } from "./grouped-lab-order-schema";
 import { comparableGroupedLabWeights, splitGroupedLabCost } from "./grouped-lab-cost-split";
 import { ENDODONTICS_SQL } from "./endodontics-schema";
@@ -2138,6 +2140,8 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0082", name: "invoice_service_additions", filename: "0082_invoice_service_additions.sql", sql: INVOICE_SERVICE_ADDITIONS_SQL, checksum: checksumOf(INVOICE_SERVICE_ADDITIONS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_LINEAGE_MIGRATIONS);
+    await applyRuntimeMigrationFiles(getPool(), PRESCRIPTION_ISSUANCE_MIGRATIONS);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0126", name: "commission_case_participations", filename: "0126_commission_case_participations.sql", sql: COMMISSION_CASE_PARTICIPATIONS_SQL, checksum: checksumOf(COMMISSION_CASE_PARTICIPATIONS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0136", name: "grouped_lab_orders", filename: "0136_grouped_lab_orders.sql", sql: GROUPED_LAB_ORDER_SQL, checksum: checksumOf(GROUPED_LAB_ORDER_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
