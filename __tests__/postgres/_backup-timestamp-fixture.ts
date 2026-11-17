@@ -73,12 +73,14 @@ export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv)
       const { rows: [empty] } = await pool.query<{ count: number }>(
         "SELECT COUNT(*)::int AS count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'");
       if (empty.count !== 0) throw new Error("Backup timestamp fixture must be pristine.");
-      return pool;
+      // Hand callers an immutable copy for pre-write identity rechecks.
+      return { pool, identity: Object.freeze({ ...rows[0] }) };
     };
     const source = await open();
     const sqlTarget = await open();
     const archiveTarget = await open();
-    return { source, sqlTarget, archiveTarget, close };
+    return { source: source.pool, sqlTarget: sqlTarget.pool, archiveTarget: archiveTarget.pool,
+      archiveIdentity: archiveTarget.identity, close };
   } catch (error) {
     try { await close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Backup timestamp fixture setup/cleanup failed."); }
     throw error;

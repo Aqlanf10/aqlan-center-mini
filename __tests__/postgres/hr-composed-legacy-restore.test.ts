@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import type { Pool } from 'pg';
-import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
+import { assertBackupTimestampFixtureIdentity, openBackupTimestampFixture } from './_backup-timestamp-fixture';
 import { fullBackupBlocks } from '../../lib/fullBackup';
 import { stagedRestore } from '../../lib/restore/staging';
 import { parseTarBytes } from '../../lib/restore/archive';
@@ -97,6 +97,7 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   const identityBefore = (await fixture.archiveTarget.query<{ name: string; oid: string; owner: string }>(identitySql)).rows[0];
   const expectedName = decodeURIComponent(new URL(fixture.archiveTarget.options.connectionString!).pathname.slice(1));
   expect(/^aqlan_backup_precision_[a-f0-9]{32}$/.test(identityBefore.name) && identityBefore.name === expectedName).toBe(true);
+  assertBackupTimestampFixtureIdentity(fixture.archiveIdentity, identityBefore);
   const originalSequences = await sequenceCandidates(fixture.archiveTarget);
   // Never lower even the owned synthetic target while preparing this witness.
   expect(originalSequences.patientId <= 100001n).toBe(true);
@@ -114,6 +115,7 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   expect(await applicationRows(fixture.archiveTarget)).toEqual(beforeReplay);
   const sequencesAfter = await sequenceCandidates(fixture.archiveTarget);
   const identityAfter = (await fixture.archiveTarget.query<{ name: string; oid: string; owner: string }>(identitySql)).rows[0];
+  assertBackupTimestampFixtureIdentity(fixture.archiveIdentity, identityAfter);
   expect(identityAfter.name === identityBefore.name && identityAfter.oid === identityBefore.oid && identityAfter.owner === identityBefore.owner).toBe(true);
   const files = await loadMigrationFiles();
   expect(files.find(file => file.version === '0079')?.checksum).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');

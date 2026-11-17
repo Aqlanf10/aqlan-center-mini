@@ -21,3 +21,9 @@ those branches requires preserving a synthetic proof of the exact constraint
 failure without re-exposing database messages. PostgreSQL and full CI have not
 been run for this amendment; the high-water assertion may expose a regression
 and must not be weakened if it fails.
+
+The inherited CI-only fixture destroys its own identity-checked synthetic
+databases and staging directory during cleanup. Its temporary databases and
+files are therefore not retained as evidence after runner teardown. The
+creation-time name/OID/owner are checked again before the sequence mutation and
+after replay; existing external databases and evidence are not selected.
