@@ -164,7 +164,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
   try {
     archive = options.archiveSnapshot ?? await readTarGzEntries(options.archivePath);
   } catch (error) {
-    result.errors.push(restoreDiagnostic("archive", error));
+    result.errors.push(`الأرشيف تالف أو مبتر: ${restoreDiagnostic("archive", error)}`);
     return result;
   }
   const validated = validateBackupArchive(archive, { documentsDir: options.stagingDir });
@@ -292,16 +292,18 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
           "SELECT value FROM settings WHERE key = $1", ["clinic.login_photo_asset"],
         );
         const photoProblem = loginPhotoRestoreProblem(photoSettings[0]?.value ?? "", validated.documents);
-        if (photoProblem) throw new RestorePhotoError();
+        if (photoProblem) throw new RestorePhotoError(photoProblem);
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK").catch(() => {});
         throw error;
       }
     } catch (error) {
-      result.errors.push(error instanceof RestorePhotoError ? "بيانات صورة الدخول المستعادة غير صالحة؛ الاستعادة مرفوضة."
-        : error && typeof error === "object" && "code" in error && error.code === "partial_staff_authority_schema"
-          ? "partial_staff_authority_schema" : restoreDiagnostic(phase, error));
+      const knownError = error instanceof Error && ["historical_0079_registry_mismatch", "restore_source_identity_present"].includes(error.message) ? error.message : null;
+      const diagnostic = restoreDiagnostic(phase, error);
+      result.errors.push(error instanceof RestorePhotoError ? error.message
+        : knownError ?? (error && typeof error === "object" && "code" in error && error.code === "partial_staff_authority_schema"
+          ? "partial_staff_authority_schema" : diagnostic.includes("SQLSTATE 23505") ? `اصطدام مفتاح مكرر: ${diagnostic}` : diagnostic));
       return result;
     }
 
@@ -344,6 +346,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     result.cutoverSteps = cutoverStepsFor(options, result);
     return result;
   } catch (error) {
+    if (phase === "documents") throw new Error(restoreDiagnostic(phase, error));
     result.errors.push(restoreDiagnostic(phase, error));
     return result;
   } finally {

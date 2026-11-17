@@ -7,7 +7,7 @@ import path from 'node:path';
 import { tarGzBytes } from './helpers/backup-tar';
 
 const target = vi.hoisted(() => ({ connect: vi.fn(), query: vi.fn(), end: vi.fn() }));
-vi.mock('pg', () => ({ Client: class { connect = target.connect; query = target.query; end = target.end; } }));
+vi.mock('pg', async () => ({ DatabaseError: (await vi.importActual<typeof import('pg')>('pg')).DatabaseError, Client: class { connect = target.connect; query = target.query; end = target.end; } }));
 import { backupStateDir } from '../lib/backupVolume';
 import { upsertBackupHistoryRecord } from '../lib/backupHistory';
 import { runAdminRestoreDrill } from '../lib/restore/admin';

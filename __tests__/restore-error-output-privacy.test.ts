@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { DatabaseError } from 'pg-protocol';
+import { DatabaseError } from 'pg';
 import { restoreDiagnostic } from '../lib/restore/error-diagnostic.mjs';
 
 const marker = 'SYNTHETIC_PRIVATE_MARKER';

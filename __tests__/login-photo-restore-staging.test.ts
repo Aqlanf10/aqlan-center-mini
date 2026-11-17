@@ -3,7 +3,7 @@ import { stagedRestore } from "../lib/restore/staging";
 
 const state = vi.hoisted(() => ({ raw: "", partialIdentity: false, calls: [] as string[], mkdir: vi.fn(), write: vi.fn(), end: vi.fn() }));
 vi.mock("node:fs/promises", () => ({ mkdir: state.mkdir, writeFile: state.write, readFile: vi.fn(), rm: vi.fn() }));
-vi.mock("pg", () => ({ Client: class {
+vi.mock("pg", async () => ({ DatabaseError: (await vi.importActual<typeof import("pg")>("pg")).DatabaseError, Client: class {
   async connect() {}
   async end() { state.end(); }
   async query(sql: string) {
