@@ -12,6 +12,7 @@ import { parseTarBytes } from '../../lib/restore/archive';
 import { loadMigrationFiles, migrate } from '../../lib/migrations';
 import { tarGzBytes } from '../helpers/backup-tar';
 import { SYNTHETIC_DUPLICATE_PATIENT_ID, SYNTHETIC_DUPLICATE_PATIENT_SQL } from '../helpers/restore-late-constraint';
+import { nextSequenceCandidate } from '../helpers/restore-sequence-observation';
 
 vi.mock('next/headers', () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
 
@@ -23,6 +24,14 @@ async function applicationRows(pool: Pool) {
   const result: Record<string, unknown[]> = {};
   for (const { tablename } of tables) result[tablename] = (await pool.query(`SELECT to_jsonb(t)::text AS value FROM "${tablename}" t ORDER BY to_jsonb(t)::text`)).rows;
   return result;
+}
+async function sequenceCandidates(pool: Pool) {
+  const patientId = await pool.query<{ last_value: string; is_called: boolean }>('SELECT last_value::text, is_called FROM patients_id_seq');
+  const patientNumber = await pool.query<{ last_value: string; is_called: boolean }>('SELECT last_value::text, is_called FROM patient_number_seq');
+  return {
+    patientId: nextSequenceCandidate(patientId.rows[0].last_value, patientId.rows[0].is_called),
+    patientNumber: nextSequenceCandidate(patientNumber.rows[0].last_value, patientNumber.rows[0].is_called),
+  };
 }
 beforeAll(async () => {
   fixture = await openBackupTimestampFixture({ ...process.env });
@@ -87,11 +96,22 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   expect((await fixture.archiveTarget.query('SELECT EXISTS(SELECT 1 FROM patients WHERE id=$1) AS present', [SYNTHETIC_DUPLICATE_PATIENT_ID])).rows[0].present).toBe(false);
   expect((await fixture.archiveTarget.query("SELECT EXISTS(SELECT 1 FROM patients WHERE patient_number='SYN-ROLLBACK-PROBE') AS present")).rows[0].present).toBe(false);
   const beforeReplay = await applicationRows(fixture.archiveTarget);
+  const sequencesBefore = await sequenceCandidates(fixture.archiveTarget);
   const registryBefore = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
   const result = await stagedRestore({ archivePath: path, targetUrl: fixture.archiveTarget.options.connectionString!, stagingDir: join(directory, 'failed-documents'), allowNonEmptyTarget: true });
   expect(result.validationErrors).toEqual([]); expect(result.ok).toBe(false); expect(result.readyForCutover).toBe(false);
   expect(result.errors.join(' ')).toContain('duplicate key value violates unique constraint "patients_pkey"');
   expect(await applicationRows(fixture.archiveTarget)).toEqual(beforeReplay);
+  const sequencesAfter = await sequenceCandidates(fixture.archiveTarget);
+  for (const key of ['patientId', 'patientNumber'] as const) {
+    // setval is not transactional. Notice any advancement without printing values;
+    // an increase is evidence, not a decision that it is acceptable policy.
+    if (sequencesAfter[key] > sequencesBefore[key]) {
+      try { process.stdout.write(`::notice title=Synthetic restore sequence::sequence=${key} state=advanced\n`); }
+      catch { /* Reporting must not change the rollback witness. */ }
+    }
+    expect(sequencesAfter[key] >= sequencesBefore[key]).toBe(true);
+  }
   const files = await loadMigrationFiles();
   expect(files.find(file => file.version === '0079')?.checksum).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');
   const registryAfter = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
