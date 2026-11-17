@@ -31,7 +31,7 @@ export function disclosureFromSourceCatalogs(catalogs: DetailedSchemaCatalog[]):
 export async function generatePreflightDisclosure(): Promise<FingerprintDisclosurePolicy> {
   const target = validateOwnershipHarnessEnvironment();
   const suffix = `${process.pid}_${Date.now().toString(36)}`;
-  const names = { migrations: `aqlan_schema_ownership_disclosure_migrations_${suffix}`, runtime: `aqlan_schema_ownership_disclosure_runtime_${suffix}` };
+  const names = { migrations: `aqlan_schema_ownership_disclosure_migrations_${suffix}`, runtime: `aqlan_schema_ownership_disclosure_runtime_${suffix}`, historical: `aqlan_schema_ownership_disclosure_historical_${suffix}` };
   const urlFor = (name: string) => { const url = new URL(target.testUrl); url.pathname = `/${name}`; return url.toString(); };
   return withGeneratedDatabasePair(new Client({ connectionString: target.maintenanceUrl.toString(), ssl: false }), names,
     async (client) => {
@@ -47,6 +47,12 @@ export async function generatePreflightDisclosure(): Promise<FingerprintDisclosu
       const pool = new Pool({ connectionString: urlFor(names.migrations), ssl: false });
       try { await migrate(pool, { apply: true, files: await loadMigrationFiles() }); } finally { await pool.end(); }
       await initializeGeneratedRuntimeSchema(target, names.runtime, process.env);
+      // Only the pinned historical 0079 contract may create this third schema.
+      // It is generated from template0 and the same reviewed immutable files,
+      // never learned from an arbitrary live database or existing fixture.
+      const historical = new Pool({ connectionString: urlFor(names.historical), ssl: false });
+      try { await migrate(historical, { apply: true, files: await loadMigrationFiles(), historical0079: true }); }
+      finally { await historical.end(); }
       const catalogs: DetailedSchemaCatalog[] = [];
       for (const name of Object.values(names)) {
         const client = new Client({ connectionString: urlFor(name), ssl: false }); await client.connect();
@@ -59,7 +65,7 @@ export async function generatePreflightDisclosure(): Promise<FingerprintDisclosu
         } finally { await client.end(); }
       }
       return disclosureFromSourceCatalogs(catalogs);
-    }, { template0: true });
+    }, { template0: true, additional: [names.historical] });
 }
 
 export async function assertPristineDisclosureDatabase(client: Client): Promise<void> {

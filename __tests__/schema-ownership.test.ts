@@ -400,6 +400,30 @@ describe("schema ownership harness safety", () => {
     expect(calls.at(-1)).toBe("end");
   });
 
+  it("creates the optional historical database from template0 and cleans up only after ownership is established", async () => {
+    const calls: string[] = [];
+    const names = { migrations: "aqlan_schema_ownership_migrations_test", runtime: "aqlan_schema_ownership_runtime_test" };
+    const historical = "aqlan_schema_ownership_history_test";
+    const client = { async connect() {}, async query(sql: string) { calls.push(sql); }, async end() { calls.push("end"); } };
+    await withGeneratedDatabasePair(client, names, async () => ({ major: 18, version: "18" }), async () => undefined,
+      { template0: true, additional: [historical] });
+    expect(calls.filter(call => call.startsWith("CREATE DATABASE"))).toEqual([
+      `CREATE DATABASE "${names.migrations}" TEMPLATE template0`, `CREATE DATABASE "${names.runtime}" TEMPLATE template0`,
+      `CREATE DATABASE "${historical}" TEMPLATE template0`,
+    ]);
+    expect(calls.filter(call => call.startsWith("DROP DATABASE"))).toHaveLength(3);
+
+    const collisionCalls: string[] = [];
+    const collision = { async connect() {}, async query(sql: string) { collisionCalls.push(sql); if (sql.startsWith(`CREATE DATABASE "${historical}"`)) throw new Error("collision"); }, async end() {} };
+    await expect(withGeneratedDatabasePair(collision, names, async () => ({ major: 18, version: "18" }), async () => undefined,
+      { template0: true, additional: [historical] })).rejects.toThrow("collision");
+    expect(collisionCalls.some(call => call.startsWith(`DROP DATABASE IF EXISTS "${historical}"`))).toBe(false);
+    await expect(withGeneratedDatabasePair(client, names, async () => ({ major: 18, version: "18" }), async () => undefined,
+      { additional: [names.runtime] })).rejects.toThrow("DUPLICATE_DATABASE_NAME");
+    await expect(withGeneratedDatabasePair(client, names, async () => ({ major: 18, version: "18" }), async () => undefined,
+      { additional: [historical, "aqlan_schema_ownership_another_test"] })).rejects.toThrow("ADDITIONAL_LIMIT");
+  });
+
   it("migration provenance is byte-sensitive", () => {
     const sql = "SELECT 1;\n";
     const files = [{

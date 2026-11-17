@@ -8,7 +8,7 @@ import { checksumOf, loadMigrationFiles } from "../lib/migration-files";
 import { inspectSchemaReadOnly, SchemaPreflightError, type SchemaPreflightReport } from "../lib/schema-preflight";
 import { preflightSourceDigests } from "../lib/preflight-provenance";
 import type { validatePreflightArtifact } from "../lib/preflight-artifact";
-import { fingerprintBucketResponse, type FingerprintBucketSelection } from "../lib/schema-fingerprint";
+import type { FingerprintBucketSelection } from "../lib/schema-fingerprint";
 
 async function bounded<T>(operation: Promise<T>, milliseconds: number, timeout: SchemaPreflightError, destroy: () => void): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -93,7 +93,7 @@ export async function runPreflightCli(args = process.argv.slice(2), env = proces
     report = await bounded(Promise.race([
       (async () => {
         await client.connect();
-        return inspectSchemaReadOnly(client, files, { fingerprintDrilldown, purchaseReceiptsReadiness, patientNumberingReadiness });
+        return inspectSchemaReadOnly(client, files, { ...(fingerprintDrilldown ? { fingerprintBuckets: selection ?? null } : {}), purchaseReceiptsReadiness, patientNumberingReadiness });
       })(),
       connectionFailure,
     ]), 40_000, new SchemaPreflightError("CLIENT_TIMEOUT", "Preflight client deadline exceeded."), destroy);
@@ -106,8 +106,10 @@ export async function runPreflightCli(args = process.argv.slice(2), env = proces
   }
   if (failure) throw failure;
   // Publish evidence only after bounded cleanup also succeeds.
-  const output = JSON.stringify({ ...report,
-    ...(fingerprintDrilldown ? { fingerprintDrilldown: fingerprintBucketResponse(report!.fingerprintDrilldown!, selection), provenance } : {}),
+  const { fingerprintBuckets, ...publicReport } = report!;
+  if (fingerprintDrilldown && !fingerprintBuckets) throw Object.assign(new Error("Missing fingerprint evidence."), { code: "FINGERPRINT_PROJECTION_INVALID" });
+  const output = JSON.stringify({ ...publicReport,
+    ...(fingerprintDrilldown ? { fingerprintDrilldown: fingerprintBuckets, provenance } : {}),
     ...((purchaseReceiptsReadiness || patientNumberingReadiness) ? { provenance } : {}),
     targetEnvironment: connection.environment, tls: connection.tls }, null, fingerprintDrilldown ? undefined : 2);
   if ((fingerprintDrilldown || purchaseReceiptsReadiness || patientNumberingReadiness) && Buffer.byteLength(output, "utf8") + 1 > 48 * 1024) {

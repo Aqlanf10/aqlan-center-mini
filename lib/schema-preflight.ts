@@ -2,7 +2,7 @@ import { patientNumberingReadiness } from "./patient-numbering-readiness";
 import { createHash } from "node:crypto";
 import { projectDetailedSchemaReadOnly, type ReadOnlyCatalogClient, type DetailedSchemaCatalog } from "./schema-manifest";
 import type { MigrationFile } from "./migration-files";
-import { fingerprintCatalog, type SchemaFingerprintDrilldown } from "./schema-fingerprint";
+import { fingerprintBucketCatalog, fingerprintCatalog, type FingerprintBucketSelection, type SchemaFingerprintDrilldown } from "./schema-fingerprint";
 
 import { inspectPurchaseSchemaReadiness, type PurchaseSchemaReadiness } from "./purchase-schema-readiness";
 
@@ -87,6 +87,7 @@ export interface SchemaPreflightReport {
   adoptionAssessment: "NOT_PERFORMED";
   schemaEquivalence: "NOT_ASSESSED";
   fingerprintDrilldown?: SchemaFingerprintDrilldown;
+  fingerprintBuckets?: ReturnType<typeof fingerprintBucketCatalog>;
   purchaseReceiptsReadiness?: PurchaseSchemaReadiness;
   patientNumberingReadiness?: Awaited<ReturnType<typeof patientNumberingReadiness>>;
 }
@@ -129,7 +130,7 @@ function summarizeCatalog(catalog: DetailedSchemaCatalog): SchemaPreflightReport
 export async function inspectSchemaReadOnly(
   client: ReadOnlyCatalogClient,
   files: Pick<MigrationFile, "version" | "name" | "checksum">[],
-  options: { fingerprintDrilldown?: boolean; purchaseReceiptsReadiness?: boolean; patientNumberingReadiness?: boolean } = {},
+  options: { fingerprintDrilldown?: boolean; fingerprintBuckets?: FingerprintBucketSelection | null; purchaseReceiptsReadiness?: boolean; patientNumberingReadiness?: boolean } = {},
 ): Promise<SchemaPreflightReport> {
   if (!files.length || new Set(files.map((file) => file.version)).size !== files.length) {
     throw new SchemaPreflightError("PROVENANCE_INVALID", "Invalid migration provenance.");
@@ -211,6 +212,7 @@ export async function inspectSchemaReadOnly(
     };
     if (options.patientNumberingReadiness) report.patientNumberingReadiness = await patientNumberingReadiness(client);
     if (options.fingerprintDrilldown) report.fingerprintDrilldown = fingerprintCatalog(catalog, Number(rows[0].version));
+    if (options.fingerprintBuckets !== undefined) report.fingerprintBuckets = fingerprintBucketCatalog(catalog, Number(rows[0].version), options.fingerprintBuckets ?? undefined);
     if (options.purchaseReceiptsReadiness) {
       // The general projector intentionally omits views/foreign relations. A
       // same-name non-table must not masquerade as an absent 0065 table.

@@ -95,10 +95,15 @@ export async function withGeneratedDatabasePair<T>(
   names: { migrations: string; runtime: string },
   verifyServer: (client: GeneratedDatabaseLifecycleClient) => Promise<{ major: number; version: string }>,
   operation: (server: { major: number; version: string }) => Promise<T>,
-  options: { template0?: boolean } = {},
+  options: { template0?: boolean; additional?: readonly string[] } = {},
 ): Promise<T> {
   validateGeneratedDatabaseName(names.migrations);
   validateGeneratedDatabaseName(names.runtime);
+  const additional = [...(options.additional ?? [])];
+  if (additional.length > 1) throw new Error("SCHEMA_OWNERSHIP_ADDITIONAL_LIMIT");
+  for (const name of additional) validateGeneratedDatabaseName(name);
+  if (new Set([names.migrations, names.runtime, ...additional]).size !== 2 + additional.length) throw new Error("SCHEMA_OWNERSHIP_DUPLICATE_DATABASE_NAME");
+  const createdAdditional: string[] = [];
   let primaryFailure: unknown;
   let result: T | undefined;
   const cleanupFailures: unknown[] = [];
@@ -110,12 +115,16 @@ export async function withGeneratedDatabasePair<T>(
     const template = options.template0 ? " TEMPLATE template0" : "";
     await maintenance.query(`CREATE DATABASE ${quoteGeneratedDatabase(names.migrations)}${template}`);
     await maintenance.query(`CREATE DATABASE ${quoteGeneratedDatabase(names.runtime)}${template}`);
+    for (const name of additional) {
+      await maintenance.query(`CREATE DATABASE ${quoteGeneratedDatabase(name)}${template}`);
+      createdAdditional.push(name);
+    }
     result = await operation(server);
   } catch (error) {
     primaryFailure = error;
   } finally {
     if (connected) {
-      for (const name of [names.migrations, names.runtime]) {
+      for (const name of [names.migrations, names.runtime, ...createdAdditional]) {
         try {
           await maintenance.query(`DROP DATABASE IF EXISTS ${quoteGeneratedDatabase(name)} WITH (FORCE)`);
         } catch (error) {
