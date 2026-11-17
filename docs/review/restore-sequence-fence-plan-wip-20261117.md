@@ -45,6 +45,18 @@ establish the state of any production or patient database.
   cached value on one subsequent allocation. This does not attribute cache
   behavior to the increment rewrite alone. This is not application integration, a complete
   cache/session proof, or a successful full CI.
+- [CI 44119899948](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/44119899948)
+  at `fbbc2cff4258e2d2f579ecb879896e141155ad0a` passed the standalone job
+  (three files, 6/6 tests), including one pending patient-number allocation
+  witness. On owned synthetic targets with policy and retired-number floors,
+  it observed replay waiting for the specifically identified actor, then
+  reported replay success after that observed wait and a rollback request;
+  a subsequent allocation did not reuse the allocated or retired number.
+  The known busy/nonempty outcomes were not observed in that execution.
+  JavaScript response ordering does not prove exact server completion order,
+  and the synthetic `application_name` URL has not been tested with the
+  independently developing destination guard. This is not a complete CI
+  result or a product fix and does not require forbidding allowed gaps.
 
 On the reviewed application revision, `stagedRestore` runs
 `migrate(...apply:true)` before the transaction containing `dataSql` replay.
