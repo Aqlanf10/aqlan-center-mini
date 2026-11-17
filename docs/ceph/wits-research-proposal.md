@@ -22,3 +22,17 @@ landmark observer reproducibility, calibration validation, clinical reference
 fixtures and independent clinical review remain blockers. The original Jacobson
 1975 abstract supports perpendicular projection onto the occlusal plane, but it
 is insufficient for clinical activation of this prototype.
+
+## Follow-up verification
+
+99 targeted tests now pass. Compound cases explicitly verify zero and negative
+separation after horizontal and vertical reflection, both in the test-only
+projection witness and the versioned proposal. For the oblique line y=x+10,
+independent simultaneous Cartesian line equations give AO=(22.5,32.5) and
+BO=(35,45) for A=(5,50), B=(0,80). Tests check both coordinates, line incidence
+and perpendicularity rather than relying only on the resulting separation.
+
+This closes the listed arithmetic test gaps only. Clinically locating the
+functional occlusal plane remains unvalidated; these arbitrary synthetic lines
+are not anatomical landmark constructions and must not be presented as such.
+No legacy code, stored result, application integration or clinical gate changed.

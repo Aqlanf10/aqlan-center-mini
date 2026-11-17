@@ -49,6 +49,33 @@ describe("Wits projection witness, without clinical or historical reinterpretati
     expect(() => witness(A, B, P, P)).toThrow();
     expect(() => witness(A, B, P, Q, 0)).toThrow();
   });
+  it("checks AO and BO coordinates against independent Cartesian equations", () => {
+    // Oblique line y = x + 10. The perpendicular through (x,y) has
+    // equation yFoot = -xFoot + x + y, hence xFoot=(x+y-10)/2.
+    const p = { x: 0, y: 10 }, q = { x: 20, y: 30 };
+    for (const [point, expected] of [
+      [{ x: 5, y: 50 }, { x: 22.5, y: 32.5 }],
+      [{ x: 0, y: 80 }, { x: 35, y: 45 }],
+    ]) {
+      const foot = projectOntoLine(point, p, q);
+      expect(foot.x).toBeCloseTo(expected.x, 12);
+      expect(foot.y).toBeCloseTo(expected.y, 12);
+      expect(foot.y - foot.x).toBeCloseTo(10, 12);
+      expect((point.x - foot.x) + (point.y - foot.y)).toBeCloseTo(0, 12);
+    }
+    expect(witness(A, B, p, q)).toBeCloseTo(-12.5 * Math.sqrt(2), 12);
+  });
+  it("preserves zero and negative results after either image reflection", () => {
+    for (const reflect of [(p: Pt) => ({ x: -p.x, y: p.y }), (p: Pt) => ({ x: p.x, y: -p.y })]) {
+      const a0 = reflect({ x: 0, y: 50 });
+      const rp = reflect(P), rq = reflect(Q);
+      expect(witness(a0, reflect(B), rp, rq)).toBeCloseTo(0, 12);
+      expect(witness(reflect(B), reflect(A), rp, rq)).toBeCloseTo(-5, 12);
+      const ao = projectOntoLine(a0, rp, rq), bo = projectOntoLine(reflect(B), rp, rq);
+      expect(ao.x).toBeCloseTo(bo.x, 12);
+      expect(ao.y).toBeCloseTo(bo.y, 12);
+    }
+  });
   it("does not depend on N and does not mutate legacy inputs", () => {
     const original: LandmarkMap = Object.freeze({ A, B, OcclP: P, OcclA: Q, N: { x: 0, y: 0 } });
     const before = measure("WITS", original, 1);

@@ -12,6 +12,15 @@ describe("versioned research-only directed projection proposal", () => {
   it("preserves anatomical sign under transformations including mirror", () => {
     for (const fn of [(p: Point2D) => ({ x: -p.x, y: p.y }), (p: Point2D) => ({ x: -p.y, y: p.x }), (p: Point2D) => ({ x: p.x + 100, y: p.y - 35 })]) expect(evaluateWitsResearch(map(fn)).value).toBeCloseTo(5, 10);
   });
+  it("keeps zero and negative separation under both image reflections", () => {
+    for (const reflect of [(p: Point2D) => ({ x: -p.x, y: p.y }), (p: Point2D) => ({ x: p.x, y: -p.y })]) {
+      const reflected = map(reflect);
+      const zero = evaluateWitsResearch({ ...reflected, a: reflect({ x: 0, y: 50 }) });
+      const negative = evaluateWitsResearch({ ...reflected, a: reflected.b, b: reflected.a });
+      expect(zero).toMatchObject({ status: "ok", value: 0, clinicalUseAllowed: false });
+      expect(negative).toMatchObject({ status: "ok", value: -5, clinicalUseAllowed: false });
+    }
+  });
   it("uses physical aspect and correct calibration under anisotropic resizing", () => {
     expect(evaluateWitsResearch({ ...map(p => ({ x: p.x * 2, y: p.y * 3 })), calibration: { basis: "synthetic-grid", xMmPerUnit: 0.5, yMmPerUnit: 1 / 3 } }).value).toBeCloseTo(5, 10);
     const t = Math.PI / 18;
