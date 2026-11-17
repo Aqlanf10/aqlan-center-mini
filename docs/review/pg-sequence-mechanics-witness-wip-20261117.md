@@ -18,8 +18,10 @@ it prints only a fixed category and does not require either cache outcome.
 
 The environment guard executes before connecting. Every case creates a new
 randomly named database on the dedicated local PostgreSQL 18 CI service,
-verifies name/OID/owner/current role, and records its identity in a unique
-temporary directory. A statement timeout is configured only on that newly
+verifies name/OID/owner/current role, and records an intent before creation and
+the observed identity immediately after creation in a unique temporary
+directory. If the catalog lookup itself fails, only the intent is available.
+A statement timeout is configured only on that newly
 created database before the test connections. Connections are closed but no
 database or evidence file is removed; CI's disposable runner and database
 service are ephemeral and this is not an external-retention guarantee. The

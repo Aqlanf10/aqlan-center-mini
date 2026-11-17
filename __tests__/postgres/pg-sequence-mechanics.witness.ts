@@ -31,15 +31,17 @@ async function fixture() {
     const url=new URL(checked.testUrl);url.pathname=`/${name}`;
     validateLocalVerificationTarget(url.toString(),process.env,{varName:'OWNED_SYNTHETIC_SEQUENCE',databaseName:name});
     expect((await admin.query('SELECT 1 FROM pg_database WHERE datname=$1',[name])).rowCount).toBe(0);
+    // Retain an intent even if creation succeeds but catalog lookup fails.
+    const directory=await mkdtemp(path.join(tmpdir(),'synthetic-pg-sequence-mechanics-'));
+    await writeFile(path.join(directory,'intent.json'),JSON.stringify({name})+'\n');
     await admin.query(`CREATE DATABASE "${name}" TEMPLATE template0`);
     const identity=(await admin.query("SELECT oid::text,datdba::text AS owner,(SELECT oid::text FROM pg_roles WHERE rolname=current_user) AS role FROM pg_database WHERE datname=$1",[name])).rows[0];
     if(!identity) throw new Error('Synthetic database identity missing');
     expect(identity.owner===identity.role).toBe(true);
+    await writeFile(path.join(directory,'identity.json'),JSON.stringify({name,...identity})+'\n');
     // A timeout applies only to future connections to this just-created DB.
     await admin.query(`ALTER DATABASE "${name}" SET statement_timeout = '55s'`);
     pool=new Pool({connectionString:url.toString(),ssl:false,max:2});
-    const directory=await mkdtemp(path.join(tmpdir(),'synthetic-pg-sequence-mechanics-'));
-    await writeFile(path.join(directory,'identity.json'),JSON.stringify({name,...identity})+'\n');
     async function verify(client:Pool|Client){
       const row=(await client.query("SELECT current_database() AS name,oid::text,datdba::text AS owner,(SELECT oid::text FROM pg_roles WHERE rolname=current_user) AS role,current_setting('transaction_isolation') AS isolation FROM pg_database WHERE datname=current_database()")).rows[0];
       expect(row?.name===name && row?.oid===identity.oid && row?.owner===identity.owner && row?.role===identity.owner && row?.isolation==='read committed').toBe(true);
