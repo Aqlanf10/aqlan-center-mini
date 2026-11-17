@@ -7,6 +7,19 @@ import ts from 'typescript';
 const ALLOWED = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const SOURCE = /\.(?:js|jsx|ts|tsx)$/;
 
+/** Bound source paths must stay inside real lib directories, never via links. */
+export function readPagesCoreSource(root, relative) {
+  if (!/^lib\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.ts$/.test(relative)) throw new Error('invalid Pages API core path');
+  const parts=relative.split('/'); let current=root;
+  for (let i=0;i<parts.length;i++) {
+    current=path.join(current,parts[i]); let stat;
+    try { stat=fs.lstatSync(current); } catch { throw new Error('Pages API core handler source missing'); }
+    if (stat.isSymbolicLink() || (i===parts.length-1 ? !stat.isFile() : !stat.isDirectory()))
+      throw new Error('unsafe Pages API core handler source');
+  }
+  return fs.readFileSync(current,'utf8');
+}
+
 // Pages may inspect transport metadata and delegate a still-unconsumed request
 // only to the reviewed shared body adapter. This rejects common raw stream and
 // aliasing paths; it is a lexical guard, not proof of all downstream behavior.
@@ -100,21 +113,21 @@ function coreEvidence(root, file, source, methods) {
     if (!bindings || !ts.isNamedImports(bindings)) continue;
     for (const item of bindings.elements) if (!item.isTypeOnly && !item.propertyName) imported.set(item.name.text,statement.moduleSpecifier.text);
   }
-  const output={};
+  const output={}, coreFiles=new Set();
   for (const [method,body] of Object.entries(methods)) {
     const callNode=ts.createSourceFile(file,`const probe = ${body}`,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
     const fn=callNode.statements[0]?.declarationList?.declarations[0]?.initializer;
     const target=fn?.body?.arguments?.[3]?.text;
     const specifier=imported.get(target);
     if (!specifier || !/^@\/lib\/[a-zA-Z0-9_/-]+$/.test(specifier)) throw new Error('Pages API core handler must be an unaliased lib import');
-    const coreFile=path.join(root,`${specifier.slice(2)}.ts`);
-    if (!fs.existsSync(coreFile)) throw new Error('Pages API core handler source missing');
-    const core=ts.createSourceFile(coreFile,fs.readFileSync(coreFile,'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
+    const coreFile=`${specifier.slice(2)}.ts`, coreSource=readPagesCoreSource(root,coreFile);
+    coreFiles.add(coreFile);
+    const core=ts.createSourceFile(coreFile,coreSource,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
     const declarations=core.statements.filter(s=>ts.isFunctionDeclaration(s)&&s.name?.text===target&&s.modifiers?.some(m=>m.kind===ts.SyntaxKind.ExportKeyword));
     if (declarations.length!==1) throw new Error('Pages API core handler source ambiguous');
     output[method]=`${body}\n${declarations[0].getText(core)}`;
   }
-  return output;
+  return { methods:output, coreFiles:[...coreFiles].sort() };
 }
 
 export function discoverPagesApi(root) {
@@ -133,7 +146,7 @@ export function discoverPagesApi(root) {
       const route = `/api${suffix ? `/${suffix}` : ''}`;
       if (/\[\.\.\.|\[\[/.test(route)) { issues.push({file,reason:'unsupported Pages API route',classification:'unknown'}); continue; }
       try { const source=fs.readFileSync(full,'utf8'), methods=inspectPagesHandler(file,source);
-        entries.push({file,route,methods:coreEvidence(root,file,source,methods)}); }
+        entries.push({file,route,...coreEvidence(root,file,source,methods)}); }
       catch (error) { issues.push({file,reason:error.message,classification:'unknown'}); }
     }
   }

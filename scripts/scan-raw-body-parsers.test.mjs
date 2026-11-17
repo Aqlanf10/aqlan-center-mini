@@ -1,7 +1,7 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,4 +32,9 @@ test('retains bounded Pages handler and rejects raw App Router body access',()=>
   core('return readJsonBody(request, LIMIT);'); assert.match(check(),/مسار API/);
   writeFileSync(path.join(root,'app/api/synthetic/route.ts'),'export async function POST(request) { return request.json(); }');
   assert.throws(check,error=>error.status===1 && error.stderr.includes('app/api/synthetic/route.ts'));
+}));
+test('rejects raw body access in a helper within the bound core module',()=>fixture((core,check,root)=>{
+  core('return helper(request);');
+  appendFileSync(path.join(root,'lib/documents-core.ts'),'\nasync function helper(req) { return req.text(); }\n');
+  assert.throws(check,error=>error.status===1 && error.stderr.includes('pages/api/documents/[id].ts'));
 }));

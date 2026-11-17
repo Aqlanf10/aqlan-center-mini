@@ -1,6 +1,6 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { discoverPagesApi, inspectPagesHandler } from './pages-api-inventory.mjs';
@@ -26,6 +26,19 @@ test('extracts only static dispatcher methods and rejects ambiguous dispatch and
     valid.replace('return handler(null,res)', 'return null'),
   ]) assert.throws(()=>inspectPagesHandler('x.ts',invalid));
 });
+test('rejects a symlinked bound core file or ancestor', () => {
+  const root=mkdtempSync(path.join(tmpdir(),'pages-api-symlink-'));
+  try {
+    mkdirSync(path.join(root,'pages/api/documents'),{recursive:true}); mkdirSync(path.join(root,'lib')); mkdirSync(path.join(root,'actual-lib'));
+    writeFileSync(path.join(root,'pages/api/documents/[id].ts'),valid);
+    writeFileSync(path.join(root,'actual-lib/documents-core.ts'),`export async function documentGet() {}\nexport async function documentDelete() {}`);
+    symlinkSync('../actual-lib/documents-core.ts',path.join(root,'lib/documents-core.ts'));
+    assert.equal(discoverPagesApi(root).issues.length,1);
+    rmSync(path.join(root,'lib'),{recursive:true});
+    symlinkSync('actual-lib',path.join(root,'lib'));
+    assert.equal(discoverPagesApi(root).issues.length,1);
+  } finally { rmSync(root,{recursive:true,force:true}); }
+});
 test('discovers actual dynamic route and scans the exact per-method core source', () => {
   const root=mkdtempSync(path.join(tmpdir(),'pages-api-inventory-'));
   try {
@@ -33,6 +46,7 @@ test('discovers actual dynamic route and scans the exact per-method core source'
     writeFileSync(path.join(root,'pages/api/documents/[id].ts'),valid);
     writeFileSync(path.join(root,'lib/documents-core.ts'),`export async function documentGet() { return 'GET-ONLY'; }\nexport async function documentDelete() { return 'DELETE-ONLY'; }`);
     const result=discoverPagesApi(root); assert.deepEqual(result.issues,[]); assert.equal(result.entries[0].route,'/api/documents/[id]');
+    assert.deepEqual(result.entries[0].coreFiles,['lib/documents-core.ts']);
     assert.match(result.entries[0].methods.GET,/GET-ONLY/); assert.doesNotMatch(result.entries[0].methods.GET,/DELETE-ONLY/);
     assert.match(result.entries[0].methods.DELETE,/DELETE-ONLY/); assert.doesNotMatch(result.entries[0].methods.DELETE,/GET-ONLY/);
     writeFileSync(path.join(root,'pages/api/documents/unsafe.ts'),`${prefix}export default req => req.body;`);

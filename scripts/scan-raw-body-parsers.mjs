@@ -17,7 +17,7 @@
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { discoverPagesApi } from "./audits/pages-api-inventory.mjs";
+import { discoverPagesApi, readPagesCoreSource } from "./audits/pages-api-inventory.mjs";
 
 const API_DIR = join(process.cwd(), "app", "api");
 
@@ -52,13 +52,14 @@ const pages = discoverPagesApi(process.cwd());
 const files = [...(statSync(API_DIR) ? walk(API_DIR) : []), ...pages.entries.map(entry => join(process.cwd(),entry.file))];
 for (const issue of pages.issues) offenders.push(`${issue.file}: ${issue.reason}`);
 
-// Pages discovery binds each statically declared method to its exact exported
-// core handler. The wrapper file alone does not contain that handler's body.
+// Pages discovery binds each declared method to its exact core module. Scan
+// that entire module, including helpers, as the original App route was scanned.
 for (const entry of pages.entries) {
-  for (const [method, source] of Object.entries(entry.methods)) {
+  for (const coreFile of entry.coreFiles) {
+    const source = readPagesCoreSource(process.cwd(), coreFile);
     if (RAW_PATTERNS.some((pattern) => pattern.test(source))
       && !ALLOWLIST.some((item) => item.file === entry.file)) {
-      offenders.push(`${entry.file} [${method} core]`);
+      offenders.push(`${entry.file} [bound core module]`);
     }
   }
 }
