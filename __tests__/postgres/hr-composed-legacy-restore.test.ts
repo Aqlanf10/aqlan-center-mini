@@ -11,6 +11,7 @@ import { stagedRestore } from '../../lib/restore/staging';
 import { parseTarBytes } from '../../lib/restore/archive';
 import { loadMigrationFiles, migrate } from '../../lib/migrations';
 import { tarGzBytes } from '../helpers/backup-tar';
+import { SYNTHETIC_DUPLICATE_PATIENT_ID, SYNTHETIC_DUPLICATE_PATIENT_SQL } from '../helpers/restore-late-constraint';
 
 vi.mock('next/headers', () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
 
@@ -71,7 +72,7 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   const parsed = parseTarBytes(gunzipSync(archive));
   const sql = Buffer.from(parsed.entries.get('database.sql')!.data).toString('utf8');
   expect(sql).toContain('COMMIT;');
-  const faultySql = Buffer.from(sql.replace(/COMMIT;\s*$/, 'SELECT 1 / 0;\nCOMMIT;\n'));
+  const faultySql = Buffer.from(sql.replace(/COMMIT;\s*$/, `${SYNTHETIC_DUPLICATE_PATIENT_SQL}\nCOMMIT;\n`));
   const manifest = JSON.parse(Buffer.from(parsed.entries.get('manifest.json')!.data).toString('utf8'));
   manifest.databaseSha256 = createHash('sha256').update(faultySql).digest('hex');
   manifest.databaseBytes = faultySql.length;
@@ -81,11 +82,15 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   // Snapshot the current schema-owned seed before replay; it must survive exactly,
   // while none of the archived application rows may survive the late failure.
   await migrate(fixture.archiveTarget, { apply: true });
+  // The archived source row must be inserted before the injected duplicate;
+  // otherwise this would not exercise rollback after replay has begun.
+  expect((await fixture.archiveTarget.query('SELECT EXISTS(SELECT 1 FROM patients WHERE id=$1) AS present', [SYNTHETIC_DUPLICATE_PATIENT_ID])).rows[0].present).toBe(false);
+  expect((await fixture.archiveTarget.query("SELECT EXISTS(SELECT 1 FROM patients WHERE patient_number='SYN-ROLLBACK-PROBE') AS present")).rows[0].present).toBe(false);
   const beforeReplay = await applicationRows(fixture.archiveTarget);
   const registryBefore = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
   const result = await stagedRestore({ archivePath: path, targetUrl: fixture.archiveTarget.options.connectionString!, stagingDir: join(directory, 'failed-documents'), allowNonEmptyTarget: true });
   expect(result.validationErrors).toEqual([]); expect(result.ok).toBe(false); expect(result.readyForCutover).toBe(false);
-  expect(result.errors.join(' ')).toContain('division by zero');
+  expect(result.errors.join(' ')).toContain('duplicate key value violates unique constraint "patients_pkey"');
   expect(await applicationRows(fixture.archiveTarget)).toEqual(beforeReplay);
   const files = await loadMigrationFiles();
   expect(files.find(file => file.version === '0079')?.checksum).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');
