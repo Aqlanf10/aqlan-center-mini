@@ -20,6 +20,7 @@ import { tarGzBytes } from "../helpers/backup-tar";
 // All targets are newly owned, identity-verified synthetic PostgreSQL databases.
 let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
 let db: typeof import("../../lib/db"), coverage: typeof import("../../lib/ortho-followup-coverage-db");
+let historicalWriter: typeof import("./_historical-followup-coverage-writer");
 let directory: string, sql: string, actor: SessionPayload;
 let patient: number, mergedPatient: number, ortho: number, visit: number, adjustment: number, invoice: number;
 let firstCommand: FollowupCoverageCommand, rejectedCommand: FollowupCoverageCommand;
@@ -46,6 +47,7 @@ beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "ortho-followup-restore-"));
   process.env.SKIP_SEED = "true";
   db = await import("../../lib/db"); coverage = await import("../../lib/ortho-followup-coverage-db");
+  historicalWriter = await import("./_historical-followup-coverage-writer");
   await activate(fixture.source);
   await fixture.source.query("UPDATE schema_migrations SET applied_at='2025-03-04T05:06:07.123456Z' WHERE version='0079'");
   initialReset = await db.resetClinicData({ actor: "synthetic-empty-reset", actorRole: "admin" }, async () => {
@@ -74,7 +76,7 @@ beforeAll(async () => {
       expectedSourceFingerprint: fingerprint, scope: "routine_adjustments", decision, reason: "Synthetic explicit historical contract decision",
     };
     if (decision === "included") firstCommand = command;
-    return coverage.appendFollowupCoverage({ session: actor, patientId: patient, orthoCaseId: ortho, command });
+    return historicalWriter.appendFollowupCoverage({ session: actor, patientId: patient, orthoCaseId: ortho, command });
   }
   firstRevision = (await decide("included")).revision.id;
   visit = (await q("INSERT INTO visits(patient_name,patient_id,doctor_id,chief_complaint,diagnosis) VALUES('Synthetic coverage restore',$1,$2,'Synthetic return','Synthetic review') RETURNING id", [patient, provider]))[0].id;
@@ -84,7 +86,7 @@ beforeAll(async () => {
   adjustment = (await q("SELECT id FROM ortho_adjustments WHERE visit_id=$1", [visit]))[0].id;
   await decide("excluded");
   rejectedCommand = { ...firstCommand, commandId: randomUUID() };
-  await expect(coverage.appendFollowupCoverage({ session: actor, patientId: patient, orthoCaseId: ortho, command: rejectedCommand })).rejects.toMatchObject({ code: "stale_coverage" });
+  await expect(historicalWriter.appendFollowupCoverage({ session: actor, patientId: patient, orthoCaseId: ortho, command: rejectedCommand })).rejects.toMatchObject({ code: "stale_coverage" });
   expect((await q("SELECT command_id::text FROM ortho_followup_coverage_rejections"))).toEqual([{ command_id: rejectedCommand.commandId }]);
   // Exercise the supported merge writer: immutable recorded ownership must
   // survive even after the old patient record has actually been removed.
