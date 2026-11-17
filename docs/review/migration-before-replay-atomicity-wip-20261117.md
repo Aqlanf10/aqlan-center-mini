@@ -30,18 +30,21 @@ archive from the source and a separate archive with a writer-shaped late
 duplicate, each retained with its hash. The target retains a stage marker and
 an existing patient row. After invoking staged restore with nonempty explicitly
 allowed, the test requires the exact synthetic late primary-key error; it then
-checks that old registry fields and the existing row survived and observes the
-0080 registry row and table. It never drops a database or removes the retained
+checks that old registry fields and the existing row survived and classifies
+whether the 0080 registry row and table appeared, or the registry remained
+unchanged. It never drops a database or removes the retained
 witness files. The backup writer removes its own private temporary working
 directory; the runner and its isolated DBs are ephemeral after CI completes.
 
-The assertion about `0080` documents current ordering if the witness reaches
-it. It is **not** an endorsement that migration-before-failure is acceptable.
-If a future reviewed design provides whole-operation atomicity or refuses a
-nonempty target before migrating, this investigation witness must be rewritten
-with that explicit contract rather than used to force the old behavior.
+The `0080` classification documents the observed ordering if the witness
+reaches it; the test does not require the migrations to remain committed. It is
+**not** an endorsement that migration-before-failure is acceptable. If a
+future reviewed design refuses a nonempty target before replay, this witness
+must distinguish that safe refusal from a late-failure result rather than
+claiming the latter was exercised.
 The test checks a named table and selected data; it does not inspect every
-catalog object, all sequences, replication-session settings, or every failure.
+catalog object, all sequences, replication-session settings, source registry,
+other application tables, or every failure; it does not prove their preservation.
 The strict constraint-message match is specific to this base; integration
 with privacy diagnostics must use trusted bounded codes without leaking raw
 database messages.

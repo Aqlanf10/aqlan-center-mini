@@ -94,14 +94,18 @@ it('records whether target migrations remain committed after a late legacy repla
     const afterHistory=(await fixture.target.pool.query('SELECT version,name,checksum,applied_at::text,adopted FROM schema_migrations ORDER BY version')).rows;
     const oldVersions=new Set(beforeHistory.map(row=>row.version));
     expect(sha(Buffer.from(JSON.stringify(afterHistory.filter(row=>oldVersions.has(row.version)))))===sha(Buffer.from(JSON.stringify(beforeHistory)))).toBe(true);
-    expect(afterHistory.length>beforeHistory.length && afterHistory.some(row=>row.version==='0080')).toBe(true);
-    expect((await fixture.target.pool.query("SELECT to_regclass('public.patient_numbering_policy') IS NOT NULL AS present")).rows[0].present).toBe(true);
+    const has0080=afterHistory.some(row=>row.version==='0080');
+    const policyExists=(await fixture.target.pool.query("SELECT to_regclass('public.patient_numbering_policy') IS NOT NULL AS present")).rows[0].present;
+    const migrated=afterHistory.length>beforeHistory.length && has0080 && policyExists;
+    const unchanged=sha(Buffer.from(JSON.stringify(afterHistory)))===sha(Buffer.from(JSON.stringify(beforeHistory))) && !policyExists;
     expect(sha(Buffer.from(JSON.stringify((await fixture.target.pool.query('SELECT id::text,patient_number,full_name FROM patients ORDER BY id')).rows)))===sha(Buffer.from(JSON.stringify(beforeRows)))).toBe(true);
     expect(sha(Buffer.from(JSON.stringify((await fixture.source.pool.query('SELECT id::text,patient_number,full_name FROM patients ORDER BY id')).rows)))===sha(Buffer.from(JSON.stringify(sourceRows)))).toBe(true);
     expect(sha(await readFile(originalPath))===sha(original) && sha(await readFile(archivePath))===sha(altered)).toBe(true);
     expect(sha(await readFile(markerPath))===sha(marker)).toBe(true);
     const afterIdentity=(await fixture.target.pool.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=current_database()')).rows[0];
     expect(afterIdentity.oid===targetIdentity.oid && afterIdentity.owner===targetIdentity.owner).toBe(true);
-    console.log('SYNTHETIC_TARGET_MIGRATIONS_COMMITTED_BEFORE_REPLAY_FAILURE');
+    if(migrated) console.log('SYNTHETIC_TARGET_MIGRATIONS_COMMITTED_BEFORE_REPLAY_FAILURE');
+    else if(unchanged) console.log('SYNTHETIC_TARGET_MIGRATIONS_UNCHANGED_AFTER_REPLAY_FAILURE');
+    else throw new Error('SYNTHETIC_TARGET_MIGRATION_STATE_UNCLASSIFIED');
   } finally {await fixture.close();}
 },180_000);
