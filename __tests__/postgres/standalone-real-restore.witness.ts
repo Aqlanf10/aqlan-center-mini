@@ -12,6 +12,8 @@ import type { Pool } from "pg";
 import { openBackupTimestampFixture } from "./_standalone-retained-fixture";
 import { validateStandaloneWitnessEnvironment } from "./_standalone-restore-witness-guard";
 import { fullBackupBlocks } from "../../lib/fullBackup";
+import { prepareBackupSql } from "../../lib/restore/sql.mjs";
+import { validateBackupArchive } from "../../lib/restore/validate";
 import type { FollowupCoverageCommand } from "../../lib/ortho-followup-coverage";
 import type { SessionPayload } from "../../lib/auth";
 import { applyRuntimeMigrationFiles, loadMigrationFiles, migrate } from "../../lib/migrations";
@@ -298,6 +300,11 @@ it("standalone HTTP restores old and fresh synthetic archives and rejects traver
   const invalidVolume = join(directory, "synthetic-invalid-volume"), invalidBackupDir = join(invalidVolume, "backups");
   await mkdir(backupStateDir(invalidBackupDir), { recursive: true });
   await mkdir(join(invalidVolume, "documents"), { recursive: true });
+  const validatedInvalid = validateBackupArchive(parseTarBytes(gunzipSync(invalidArchive)), { documentsDir: join(invalidVolume, "documents") });
+  expect(validatedInvalid.ok).toBe(true);
+  if (!validatedInvalid.ok) throw new Error("synthetic inconsistent archive failed structural validation");
+  expect(() => prepareBackupSql(Buffer.from(validatedInvalid.sql).toString("utf8"), { inspectHistorical0079: true }))
+    .toThrow(/Historical 0079 data without its exact migration registry record/);
   const invalidId = "production-backup-20261117-010203-004-abcde123-abcdef12.tar.gz";
   await register(invalidId, invalidArchive, invalidBackupDir);
   server = spawn(process.execPath, [serverEntry], { cwd: directory, env: { ...env,
@@ -312,8 +319,8 @@ it("standalone HTTP restores old and fresh synthetic archives and rejects traver
   }
   await assertOwnedTarget(fixture.invalidTarget, invalidIdentity);
   const invalid = await post(invalidId);
-  expect(invalid.status).toBeGreaterThanOrEqual(400);
-  expect(await invalid.json()).toMatchObject({ok:false});
+  expect(invalid.status).toBe(500);
+  expect(await invalid.json()).toMatchObject({ok:false, reason:"archive-integrity-mismatch"});
   expect((await fixture.invalidTarget.query("SELECT to_regclass('public.synthetic_restore_sentinel') IS NOT NULL AS present")).rows).toEqual([{present:true}]);
   expect((await fixture.invalidTarget.query("SELECT value FROM synthetic_restore_sentinel")).rows).toEqual([{value:"synthetic-must-remain"}]);
   expect(await snapshots(fixture.archiveTarget)).toEqual(before);

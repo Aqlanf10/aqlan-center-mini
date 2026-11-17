@@ -10,8 +10,11 @@ PostgreSQL databases on an additional disposable CI service: historical
 source, fresh source, historical restore target, fresh restore target, and a
 separate inconsistent-archive target. The two successful results use
 different targets and storage volumes. An archive with 0079 effects but its
-registry row removed has updated archive metadata and is submitted to the
-actual standalone endpoint; a synthetic target sentinel must survive rejection.
+registry row removed has updated archive metadata. Before submitting it to the
+actual standalone endpoint, the witness requires structural validation success
+and confirms that the historical SQL check rejects precisely the missing row.
+The endpoint must return `archive-integrity-mismatch` and a synthetic target
+sentinel must survive rejection.
 The two earlier targets are checked again. The witness retains its synthetic
 databases and files for the lifetime of the CI runner; hosted CI normally
 disposes of that runner and its service after the job. It does not upload
