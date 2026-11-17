@@ -38,7 +38,8 @@ beforeEach(async () => {
   await resetPoolForTesting();
   // ensureSchema first reads the staff-authority catalogue footprint: answer as a marker-free schema.
   boundary.poolQuery.mockImplementation(async (sql: string) => ({ rows: sql.includes("AS markers") ? [{ markers: "0", users_kind: null, parties_kind: null }] : [] }));
-  boundary.query.mockImplementation(async(sql:string)=>({rows:sql.includes("AS present")?[{present:false}]:[]}));
+  boundary.query.mockImplementation(async(sql:string)=>({rows:sql.includes("AS column_types")
+    ? [{tables:0,columns:0,column_types:0,triggers:0}] : sql.includes("AS present")?[{present:false}]:[]}));
   boundary.connect.mockResolvedValue({ query: boundary.query, release: boundary.release });
   await ensureSchema();
   // The real additive bootstrap now reserves a migration connection. Start

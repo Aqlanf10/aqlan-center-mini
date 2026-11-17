@@ -428,16 +428,17 @@ export async function runSchemaOwnershipCharacterization(
 
     const provenance = migrationProvenance(files);
     const registryByVersion = new Map(migrationCatalog.registry.rows.map((row) => [row.version, row]));
-    for (const item of provenance) {
+    const activeProvenance = provenance.filter(item => item.version !== "0079");
+    for (const item of activeProvenance) {
       const row = registryByVersion.get(item.version);
       if (!row || row.name !== item.name || row.checksum !== item.checksum || row.adopted) {
         throw new Error(`SCHEMA_OWNERSHIP_REGISTRY_MISMATCH: ${item.version}.`);
       }
     }
-    if (migrationCatalog.registry.rows.length !== provenance.length) {
+    if (migrationCatalog.registry.rows.length !== activeProvenance.length) {
       throw new Error("SCHEMA_OWNERSHIP_REGISTRY_MISMATCH: unexpected registry row count.");
     }
-    const runtimeExtensions = provenance.filter(item => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082', '0087', '0089'].includes(item.version));
+    const runtimeExtensions = provenance.filter(item => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0080', '0081', '0082', '0087', '0089'].includes(item.version));
     if (runtimeCatalog.registry.rows.length !== runtimeExtensions.length || runtimeExtensions.some(item =>
       !runtimeCatalog.registry.rows.some(row => row.version === item.version && row.name === item.name
         && row.checksum === item.checksum && row.adopted === false))) {

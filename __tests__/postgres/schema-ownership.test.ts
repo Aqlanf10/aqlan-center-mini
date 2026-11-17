@@ -303,7 +303,8 @@ describe("PG18 schema ownership characterization", () => {
       '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082', '0087', '0089',
     ]);
     expect(report.migrationRegistry.present).toBe(true);
-    expect(report.migrationRegistry.rows).toHaveLength(71);
+    expect(report.migrationRegistry.rows).toHaveLength(70);
+    expect(report.migrationRegistry.rows.some(row => row.version === "0079")).toBe(false);
     expect(report.migrationRegistry.rows.every((row) => row.adopted === false)).toBe(true);
 
     const migrationApplicationTables = report.migrationCatalog.tables
@@ -315,7 +316,9 @@ describe("PG18 schema ownership characterization", () => {
     expect(runtimeApplicationTables).toHaveLength(145);
     for (const catalog of [migrationApplicationTables, runtimeApplicationTables]) {
       expect(catalog.some(entry => entry.table === "inventory_purchase_receipts")).toBe(true);
-      for (const table of ["ortho_followup_coverage_revisions", "ortho_followup_coverage_rejections", "lab_work_intents", "lab_work_members", "lab_prescription_source_memberships", "lab_work_commands", "lab_work_intent_schema"]) {
+      for (const retired of ["ortho_followup_coverage_revisions", "ortho_followup_coverage_rejections"])
+        expect(catalog.some(entry => entry.table === retired)).toBe(false);
+      for (const table of ["lab_work_intents", "lab_work_members", "lab_prescription_source_memberships", "lab_work_commands", "lab_work_intent_schema"]) {
         expect(catalog.some(entry => entry.table === table)).toBe(true);
       }
     }
@@ -328,7 +331,7 @@ describe("PG18 schema ownership characterization", () => {
       expect(runtimeApplicationTables.some(entry=>entry.table===table)).toBe(true);
     }
     expect(report.runtimeCatalog.registry.present).toBe(true);
-    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082', '0087', '0089'].includes(row.version)));
+    expect(report.runtimeCatalog.registry.rows).toEqual(report.migrationRegistry.rows.filter(row => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0080', '0081', '0082', '0087', '0089'].includes(row.version)));
 
     expect(report.comparison.characterizationOk).toBe(true);
     expect(report.comparison.applicationSchemaEqual).toBe(false);

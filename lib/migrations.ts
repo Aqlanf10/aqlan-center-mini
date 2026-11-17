@@ -1,6 +1,8 @@
+import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "./ortho-followup-coverage-schema";
 import { createHash } from "node:crypto";
 import { guardOrthoRevisionMigration, validateOrthoRevisionRegistry } from "./ortho-revision-migration-guard";
-import { BASELINE_VERSION, loadMigrationFiles, type MigrationFile } from "./migration-files";
+import { BASELINE_VERSION, HISTORICAL_0079_SHA256, loadMigrationFiles, type MigrationFile } from "./migration-files";
+export { HISTORICAL_0079_SHA256 } from "./migration-files";
 import type { DbClient, DbPool } from "./db";
 import { runBaselineSchemaProbe, describeBaselineDiff, type BaselineSchemaDiff } from "./baseline-probe";
 
@@ -83,7 +85,6 @@ export interface MigrationRunResult {
 // Retired feature: keep the exact published contract to recognize old registries,
 // but never install it in normal fresh migrations. Only archive restoration may
 // request the historical schema after validating its source registry.
-export const HISTORICAL_0079_SHA256 = "5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99";
 const historical0079Name = "ortho_followup_coverage";
 function validateHistorical0079(file: MigrationFile | undefined, row?: AppliedMigrationRow): void {
   if (file && (file.version !== "0079" || file.name !== historical0079Name
@@ -97,12 +98,15 @@ function validateHistorical0079(file: MigrationFile | undefined, row?: AppliedMi
 /** A registry alone is not proof of installed protection. Conversely, never
  * adopt a hand-installed or partial footprint when there is no registry row. */
 async function validateHistorical0079Footprint(client: DbClient, row?: AppliedMigrationRow): Promise<void> {
-  const { rows: [state] } = await client.query<{ tables: number; columns: number; triggers: number }>(`SELECT
+  const { rows: [state] } = await client.query<{ tables: number; columns: number; column_types: number; triggers: number }>(`SELECT
     (SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
        WHERE n.nspname='public' AND c.relkind IN ('r','p') AND c.relname IN ('ortho_followup_coverage_revisions','ortho_followup_coverage_rejections')) AS tables,
     (SELECT count(*)::int FROM information_schema.columns WHERE table_schema='public' AND
        ((table_name='ortho_adjustments' AND column_name='followup_coverage_revision_id') OR
         (table_name='visits' AND column_name='ortho_followup_coverage_proof'))) AS columns,
+    (SELECT count(*)::int FROM information_schema.columns WHERE table_schema='public' AND is_nullable='YES' AND
+       ((table_name='ortho_adjustments' AND column_name='followup_coverage_revision_id' AND data_type='bigint') OR
+        (table_name='visits' AND column_name='ortho_followup_coverage_proof' AND data_type='jsonb'))) AS column_types,
     (SELECT count(*)::int FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
        WHERE n.nspname='public' AND NOT t.tgisinternal AND t.tgenabled='O'
        AND (c.relname,t.tgname) IN (('visits','ortho_followup_visit_manifest'),('visits','ortho_followup_manifest_children'),('visits','ortho_followup_visit_no_truncate'),
@@ -110,9 +114,52 @@ async function validateHistorical0079Footprint(client: DbClient, row?: AppliedMi
          ('ortho_followup_coverage_revisions','ortho_followup_coverage_no_rewrite'),('ortho_followup_coverage_revisions','ortho_followup_coverage_no_truncate'),
          ('ortho_followup_coverage_revisions','ortho_followup_coverage_chain'),('ortho_followup_coverage_revisions','ortho_followup_coverage_00_command'),
          ('ortho_followup_coverage_rejections','ortho_followup_rejection_immutable'),('ortho_followup_coverage_rejections','ortho_followup_rejection_no_truncate'))) AS triggers`);
-  if (!state || (row ? state.tables !== 2 || state.columns !== 2 || state.triggers !== 12
+  if (!state || (row ? state.tables !== 2 || state.columns !== 2 || state.column_types !== 2 || state.triggers !== 12
     : state.tables !== 0 || state.columns !== 0 || state.triggers !== 0))
     throw new Error("HISTORICAL_0079_FOOTPRINT_MISMATCH");
+  if (!row) return;
+  // Compare the exact function bodies from the checksum-pinned published SQL,
+  // plus language, signature and invoker privileges. A same-named no-op guard
+  // must never count as the immutable history contract.
+  const expected = new Map<string, string>();
+  const pattern = /CREATE FUNCTION ([a-z_]+)\(\) RETURNS trigger LANGUAGE plpgsql AS \$\$([\s\S]*?)\$\$;/g;
+  for (const match of ORTHO_FOLLOWUP_COVERAGE_SQL.matchAll(pattern)) expected.set(match[1], match[2]);
+  if (expected.size !== 7 || createHash("sha256").update(ORTHO_FOLLOWUP_COVERAGE_SQL).digest("hex") !== HISTORICAL_0079_SHA256)
+    throw new Error("HISTORICAL_0079_SOURCE_MISMATCH");
+  const { rows: functions } = await client.query<{ name: string; body: string; language: string; return_type: string; arguments: number; security_definer: boolean }>(
+    `SELECT p.proname AS name,p.prosrc AS body,l.lanname AS language,pg_catalog.format_type(p.prorettype,NULL) AS return_type,
+       p.pronargs::int AS arguments,p.prosecdef AS security_definer
+     FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+       JOIN pg_catalog.pg_language l ON l.oid=p.prolang WHERE n.nspname='public' AND p.proname=ANY($1::text[])`, [[...expected.keys()]]);
+  if (functions.length !== expected.size || functions.some(fn => fn.body !== expected.get(fn.name) || fn.language !== "plpgsql"
+    || fn.return_type !== "trigger" || fn.arguments !== 0 || fn.security_definer))
+    throw new Error("HISTORICAL_0079_FOOTPRINT_MISMATCH");
+  const bindings: Record<string, [string, number, boolean]> = {
+    ortho_followup_coverage_no_rewrite: ["guard_ortho_followup_coverage_append_only", 27, false],
+    ortho_followup_coverage_no_truncate: ["guard_ortho_followup_coverage_append_only", 34, false],
+    ortho_followup_visit_manifest: ["guard_ortho_followup_visit_manifest", 31, false],
+    ortho_followup_adjustment_proof: ["guard_ortho_followup_adjustment_proof", 31, false],
+    ortho_followup_manifest_children: ["check_ortho_followup_manifest_children", 21, true],
+    ortho_followup_proof_parent: ["check_ortho_followup_manifest_children", 21, true],
+    ortho_followup_coverage_chain: ["guard_ortho_followup_coverage_chain", 7, false],
+    ortho_followup_adjustment_no_truncate: ["guard_ortho_followup_proof_truncate", 34, false],
+    ortho_followup_visit_no_truncate: ["guard_ortho_followup_proof_truncate", 34, false],
+    ortho_followup_coverage_00_command: ["guard_ortho_followup_command_terminal", 7, false],
+    ortho_followup_rejection_immutable: ["guard_ortho_followup_command_terminal", 31, false],
+    ortho_followup_rejection_no_truncate: ["guard_ortho_followup_command_terminal", 34, false],
+  };
+  const { rows: triggers } = await client.query<{ name: string; fn: string; namespace: string; type: number; deferrable: boolean; deferred: boolean; args: number; condition: string | null }>(
+    `SELECT t.tgname AS name,p.proname AS fn,nf.nspname AS namespace,t.tgtype::int AS type,
+       t.tgdeferrable AS deferrable,t.tginitdeferred AS deferred,t.tgnargs::int AS args,t.tgqual::text AS condition
+     FROM pg_catalog.pg_trigger t JOIN pg_catalog.pg_class c ON c.oid=t.tgrelid
+       JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_proc p ON p.oid=t.tgfoid
+       JOIN pg_catalog.pg_namespace nf ON nf.oid=p.pronamespace
+     WHERE n.nspname='public' AND NOT t.tgisinternal AND t.tgname=ANY($1::text[])`, [[...Object.keys(bindings)]]);
+  if (triggers.length !== 12 || triggers.some(t => {
+    const contract = bindings[t.name];
+    return !contract || t.namespace !== "public" || t.fn !== contract[0] || t.type !== contract[1]
+      || t.deferrable !== contract[2] || t.deferred !== contract[2] || t.args !== 0 || t.condition !== null;
+  })) throw new Error("HISTORICAL_0079_FOOTPRINT_MISMATCH");
 }
 /** Check the retired runtime contract without applying or adopting it. */
 export async function validateRuntimeHistorical0079(pool: DbPool, file: MigrationFile): Promise<void> {

@@ -57,7 +57,8 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     expect(result.adoptedBaseline).toBe(false);
     expect(result.appliedVersions).toContain(BASELINE_VERSION);
     for (const file of realFiles) {
-      expect(result.appliedVersions).toContain(file.version);
+      if (file.version === "0079") expect(result.appliedVersions).not.toContain(file.version);
+      else expect(result.appliedVersions).toContain(file.version);
     }
 
     const status = await migrationStatus(pool, realFiles);
@@ -98,7 +99,7 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     const result = await migrate(pool, { apply: true, files: realFiles });
     expect(result).toEqual({
       adoptedBaseline: true,
-      appliedVersions: realFiles.filter(file => !before.some(row => row.version === file.version)).map(file => file.version),
+      appliedVersions: realFiles.filter(file => file.version !== "0079" && !before.some(row => row.version === file.version)).map(file => file.version),
       alreadyUpToDate: false,
     });
     expect(await listUsers()).toEqual(seeded);
@@ -247,7 +248,7 @@ describe("نظام الهجرات المُرقَّمة", { timeout: 60_000 }, ()
     await expect(migrate(pool, { apply: true, files: realFiles })).rejects.toThrow(/BASELINE_SCHEMA_MISMATCH/);
     // No baseline adoption on drift. Only the pre-existing runtime extensions remain.
     const { rows } = await pool.query<{ version: string }>('SELECT version FROM schema_migrations ORDER BY version');
-    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082', '0087', '0089']);
+    expect(rows.map(row => row.version)).toEqual(['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0080', '0081', '0082', '0087', '0089']);
     expect(rows.some(row => row.version === BASELINE_VERSION)).toBe(false);
   });
 

@@ -1,9 +1,9 @@
 import {readFileSync} from 'node:fs';
 import {expect,it} from 'vitest';
 import {ORTHO_FOLLOWUP_COVERAGE_SQL} from '../lib/ortho-followup-coverage-schema';
-import {checksumOf,loadMigrationFiles} from '../lib/migration-files';
+import {assertHistorical0079Source,checksumOf,loadMigrationFiles} from '../lib/migration-files';
 import {ORTHO_FOLLOWUP_HISTORY_TABLES,RESET_KEEP_TABLES,RESET_WIPE_TABLES} from '../lib/clinic-reset';
-it('registers exact reviewed 0079 bytes without changing adjacent migrations or adopting proposal tables',async()=>{
+it('retains exact reviewed historical 0079 bytes without automatic activation',async()=>{
  const files=await loadMigrationFiles();
  expect(checksumOf(ORTHO_FOLLOWUP_COVERAGE_SQL)).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');
  expect(readFileSync('migrations/0079_ortho_followup_coverage.sql','utf8')).toBe(ORTHO_FOLLOWUP_COVERAGE_SQL);
@@ -11,12 +11,19 @@ it('registers exact reviewed 0079 bytes without changing adjacent migrations or 
  expect(files.filter(f=>f.version>='0078').map(f=>f.version)).toEqual(['0078','0079','0080','0081','0082','0087','0089']);
  const runtime=readFileSync('lib/db.ts','utf8');
  expect(runtime).toContain('sql: ORTHO_FOLLOWUP_COVERAGE_SQL, checksum: checksumOf(ORTHO_FOLLOWUP_COVERAGE_SQL)');
- expect(runtime.indexOf('version: "0078"')).toBeLessThan(runtime.indexOf('version: "0079"'));
- expect(runtime.indexOf('version: "0079"')).toBeLessThan(runtime.indexOf('version: "0080"'));
+ expect(runtime).toContain("validateRuntimeHistorical0079(getPool()");
+ expect(runtime).not.toContain('applyRuntimeMigrationFiles(getPool(), [{ version: "0079"');
  expect(ORTHO_FOLLOWUP_COVERAGE_SQL).not.toMatch(/DISABLE TRIGGER|session_replication_role|CREATE TABLE IF NOT EXISTS|UPDATE visits SET|UPDATE ortho_adjustments SET/);
  expect(ORTHO_FOLLOWUP_COVERAGE_SQL).toContain('DEFERRABLE INITIALLY DEFERRED');
 });
 it('keeps both immutable success and refusal history outside reset wipe ownership',()=>{
  expect(ORTHO_FOLLOWUP_HISTORY_TABLES).toEqual(['ortho_followup_coverage_revisions','ortho_followup_coverage_rejections']);
  for(const table of ORTHO_FOLLOWUP_HISTORY_TABLES){expect(RESET_KEEP_TABLES).toContain(table);expect(RESET_WIPE_TABLES).not.toContain(table);}
+});
+
+it('default source assertion refuses a missing or modified historical contract',async()=>{
+ const files=await loadMigrationFiles();
+ expect(()=>assertHistorical0079Source(files)).not.toThrow();
+ expect(()=>assertHistorical0079Source(files.filter(f=>f.version!=='0079'))).toThrow('HISTORICAL_0079_SOURCE_MISSING_OR_MISMATCH');
+ expect(()=>assertHistorical0079Source(files.map(f=>f.version==='0079'?{...f,sql:f.sql+'\n'}:f))).toThrow('HISTORICAL_0079_SOURCE_MISSING_OR_MISMATCH');
 });

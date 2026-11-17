@@ -1,5 +1,5 @@
+import { GROUPED_LAB_ORDER_SQL } from "../../lib/grouped-lab-order-schema";
 import { LAB_WORK_INTENT_SQL } from "../../lib/lab-work-intent-schema";
-import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "../../lib/ortho-followup-coverage-schema";
 import { PATIENT_NUMBERING_SQL } from "../../lib/patient-numbering-schema";
 import { INVOICE_ARCHIVE_SQL } from "../../lib/invoice-archive-schema";
 import { INVOICE_SERVICE_ADDITIONS_SQL } from "../../lib/invoice-service-additions-schema";
@@ -50,7 +50,6 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0069", name: "unpaid_currency_transitions", checksum: createHash("sha256").update(UNPAID_CURRENCY_TRANSITION_SQL).digest("hex") },
     { version: "0074", name: "lab_work_intents", checksum: createHash("sha256").update(LAB_WORK_INTENT_SQL).digest("hex") },
     { version: "0078", name: "agreement_reconciliation", checksum: createHash("sha256").update(AGREEMENT_RECONCILIATION_SQL).digest("hex") },
-    { version: "0079", name: "ortho_followup_coverage", checksum: createHash("sha256").update(ORTHO_FOLLOWUP_COVERAGE_SQL).digest("hex") },
     { version: "0080", name: "patient_numbering", checksum: createHash("sha256").update(PATIENT_NUMBERING_SQL).digest("hex") },
     { version: "0081", name: "invoice_archive", checksum: createHash("sha256").update(INVOICE_ARCHIVE_SQL).digest("hex") },
     { version: "0082", name: "invoice_service_additions", checksum: createHash("sha256").update(INVOICE_SERVICE_ADDITIONS_SQL).digest("hex") },
@@ -72,7 +71,7 @@ it('runtime and full migrator serialize on one lock across actual gaps, with one
   try {
     await Promise.all([applyRuntimeMigrationFiles(fixture.sqlTarget, bundled), migrate(competitor, { apply: true, files })]);
     const registered = (await fixture.sqlTarget.query('SELECT version,checksum FROM schema_migrations ORDER BY version')).rows;
-    expect(registered).toEqual(files.map(file => ({ version: file.version, checksum: file.checksum })));
+    expect(registered).toEqual(files.filter(file => file.version !== "0079").map(file => ({ version: file.version, checksum: file.checksum })));
     expect((await migrate(competitor, { apply: true, files })).appliedVersions).toEqual([]);
     expect(await applyRuntimeMigrationFiles(fixture.sqlTarget, bundled)).toEqual([]);
   } finally { await competitor.end(); }
