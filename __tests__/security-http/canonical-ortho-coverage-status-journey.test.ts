@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, expect, it } from "vitest";
 import { seedCanonicalCoverage } from "../fixtures/canonical-ortho-coverage";
+import { prepareHistoricalCoverage } from "./_historical-coverage-fixture";
 import { openCanonicalJourney, type CanonicalJourney } from "./_canonical-journey-harness";
 import type { FollowupCoverageCommand } from "../../lib/ortho-followup-coverage";
 const GRANTS={"finance.agreements.manage":true,"finance.patient-ledger.view":true};
@@ -12,7 +13,7 @@ const ACCOUNTS={
  read:{username:"canon-cstatus-read",password:"Canon#StatusRead1",role:"admin",display:"قارئ تجريبي",patientScope:"all",grants:{"clinical.ortho.view":true}},
 }as const;
 let journey:CanonicalJourney<keyof typeof ACCOUNTS>,patientId:number,caseId:number,command:FollowupCoverageCommand,sourceSnapshot:unknown,sequence=0;
-beforeAll(async()=>{journey=await openCanonicalJourney({portOffset:95,secret:"canonical-coverage-status-0123456789abcdef",accounts:ACCOUNTS,ownerKey:"owner",async seed(){}});},300000);
+beforeAll(async()=>{journey=await openCanonicalJourney({portOffset:95,secret:"canonical-coverage-status-0123456789abcdef",accounts:ACCOUNTS,ownerKey:"owner",async seed(db){await prepareHistoricalCoverage(db);}});},300000);
 beforeEach(async()=>{
  patientId=(await journey.db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,'مريض تجريبي',$2) RETURNING id",["SYN-CSTATUS-"+(++sequence),journey.parties.own])).rows[0].id;
  const observed={query:async(sql:string,values?:unknown[])=>{const result=await journey.db.query(sql,values);if(sql.startsWith("WITH candidates AS MATERIALIZED"))sourceSnapshot=result.rows[0]?.sources?.[0]?.snapshot;return result;}};
@@ -31,6 +32,14 @@ const fingerprint=()=>createHash("sha256").update(JSON.stringify({patientId,orth
 async function saved(){const s=command.source;return(await journey.db.query(`INSERT INTO ortho_followup_coverage_revisions(patient_id,ortho_case_id,clinical_case_id,plan_id,plan_item_id,invoice_id,version,scope,decision,source_fingerprint,source_snapshot,reason,actor_user_id,created_by,command_id,request_fingerprint)
  VALUES($1,$2,$3,$4,$5,$6,1,'routine_adjustments',$7,$8,$9::jsonb,$10,$11,$12,$13,$14) RETURNING id::text`,[patientId,caseId,s.clinicalCaseId,s.planId,s.planItemId,s.invoiceId,command.decision,command.expectedSourceFingerprint,JSON.stringify(sourceSnapshot),command.reason,journey.ids.own,ACCOUNTS.own.username,command.commandId,fingerprint()])).rows[0].id;}
 const snapshot=async()=>(await journey.db.query("SELECT (SELECT jsonb_agg(to_jsonb(r) ORDER BY id) FROM ortho_followup_coverage_revisions r) revisions,(SELECT jsonb_agg(to_jsonb(r) ORDER BY command_id) FROM ortho_followup_coverage_rejections r) rejections,(SELECT jsonb_agg(to_jsonb(i) ORDER BY id) FROM invoices i) invoices,(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM treatment_plans p) plans,(SELECT jsonb_agg(to_jsonb(a) ORDER BY id) FROM audit_log a) audit")).rows;
+it("HTTP: concurrent exact status reads preserve the historical receipt and audit",async()=>{
+ await saved();const cookie=(await journey.login("own")).cookie,before=await snapshot();
+ const read=()=>journey.api(path(),cookie,{method:"PUT",body:JSON.stringify(command)});
+ const responses=await Promise.all([read(),read()]);
+ const outcomes=await Promise.all(responses.map(async response=>{expect(response.status).toBe(200);return response.json();}));
+ expect(outcomes[0]).toMatchObject({state:"committed",revision:{commandId:command.commandId,createdBy:ACCOUNTS.own.username}});
+ expect(outcomes[1]).toEqual(outcomes[0]);expect(await snapshot()).toEqual(before);expect(await journey.ddlLog()).toEqual([]);
+});
 it("HTTP: anonymous, none and adjacent role cannot read even a known receipt",async()=>{
  await saved();const cookies={none:(await journey.login("none")).cookie,read:(await journey.login("read")).cookie},before=await snapshot();expect((await journey.api(path(),"",{method:"PUT",body:JSON.stringify(command)})).status).toBe(401);for(const key of["none","read"]as const){const response=await journey.api(path(),cookies[key],{method:"PUT",body:JSON.stringify(command)});expect(response.status).toBe(403);expect(await response.text()).not.toContain("SYN");}expect(await snapshot()).toEqual(before);
 });
