@@ -12,7 +12,7 @@ import { CONSENT_TEMPLATES } from "../lib/consent-templates";
 const readers = vi.hoisted(() => ({ patient: vi.fn(), settings: vi.fn(), prescription: vi.fn(), referral: vi.fn(), appointment: vi.fn(), appointments: vi.fn(), expense: vi.fn(), document: vi.fn(), file: vi.fn(), contract: vi.fn(), addenda: vi.fn(), session: vi.fn(), access: vi.fn(), printCount: vi.fn() }));
 vi.mock("@/lib/session", () => ({ requireSession: readers.session }));
 vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", getPatient: readers.patient, getSettingsSafe: readers.settings,
-  getPrescription: readers.prescription, getReferral: readers.referral, getAppointment: readers.appointment,
+  getPrescription: readers.prescription, getPrescriptionPrintSettings: readers.settings, getReferral: readers.referral, getAppointment: readers.appointment,
   patientAppointmentsFrom: readers.appointments, getExpense: readers.expense, getDocumentForDownload: readers.document, printCount: readers.printCount }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: readers.access }));
 vi.mock("@/lib/files", () => ({ readFileByKey: readers.file }));
@@ -36,7 +36,7 @@ const settings = { ...SETTING_DEFAULTS, "clinic.name": "مركز عقلان — 
 const patient = { id: 99001, fullName: "مريض صناعي طويل الاسم لفحص الطباعة فقط", patientNumber: "SYNTHETIC-NONTABLE-99001", phone: "000-111222",
   birthYear: 1990, birthDate: "1990-01-01", gender: "male", createdAt: "2030-12-04T10:00:00Z", medicalAlert: "SYNTHETIC-MEDICAL-ALERT-PRIVATE", balanceMinor: 987654321 };
 const prescription = { id: 99002, patientId: patient.id, visitId: 99003, diagnosis: "تشخيص صناعي للاختبار فقط", notes: "ملاحظة وصفة صناعية محفوظة", instructionsLang: "both", status: "active", voidReason: null,
-  createdBy: "طبيب الوصفة المحفوظ صناعي", createdAt: "2031-01-04T10:00:00Z", items: [
+  createdBy: "طبيب الوصفة المحفوظ صناعي", prescribingDoctorName: "طبيب الوصفة المحفوظ صناعي", createdAt: "2031-01-04T10:00:00Z", items: [
     { name: "SYNTHETIC-DRUG-A (NOT FOR USE)", dose: "TEST-DOSE", form: "Synthetic tablets", frequency: "SYNTHETIC FREQUENCY — NOT MEDICAL ADVICE", duration: "SYNTHETIC DURATION", instructions: "تعليمات عربية صناعية لا تستخدم للعلاج", instructionsEn: "Synthetic instructions, not for treatment" },
   ] };
 const appointment = { id: 99004, patientId: patient.id, patientName: patient.fullName, scheduledDate: "2031-02-08", scheduledTime: "09:30", durationMinutes: 45,
@@ -86,11 +86,16 @@ describe("actual non-table print routes retain source semantics (synthetic SSR)"
   it.each(["active", "void"])("saved %s prescription preserves source items, medical alert, language and clinician", async status => {
     const source = { ...prescription, status, voidReason: status === "void" ? "سبب إبطال صناعي محفوظ" : null };
     readers.prescription.mockResolvedValue(source); const before = structuredClone(source);
-    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002", diagnosis: "UNTRUSTED-OVERRIDE", notes: "UNTRUSTED-NOTES", lang: "ar" }) }));
+    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002", doctorName: "UNTRUSTED-OVERRIDE", date: "1900-01-01", lang: "ar" }) }));
     for (const text of [patient.medicalAlert, source.diagnosis, source.notes, source.createdBy, ...Object.values(source.items[0])]) expect(html).toContain(text);
-    expect(html).not.toContain("UNTRUSTED-OVERRIDE"); expect(html).not.toContain("UNTRUSTED-NOTES"); expect(html).toContain("Signature &amp; Stamp");
+    expect(html).not.toContain("UNTRUSTED-OVERRIDE"); expect(html).not.toContain("1900-01-01"); expect(html).toContain("Signature &amp; Stamp");
     if (status === "void") expect(html).toContain("VOIDED"); else expect(html).not.toContain("UNAPPROVED DRAFT");
     expect(source).toEqual(before); artifact(`prescription-${status}`, html, "A5");
+  });
+  it.each(["diagnosis", "notes"])("refuses clinical %s URL overrides without reading records", async key => {
+    await expect(PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002", [key]: "UNTRUSTED-CLINICAL" }) })).rejects.toThrow("synthetic-not-found");
+    expect(readers.patient).not.toHaveBeenCalled();
+    expect(readers.prescription).not.toHaveBeenCalled();
   });
   it("long saved prescription retains all 20 instructions across natural page breaks", async () => {
     const source = { ...prescription, items: Array.from({ length: 20 }, (_, index) => ({ ...prescription.items[0], name: `SYNTHETIC-DRUG-${String(index + 1).padStart(2, "0")} (NOT FOR USE)`, instructions: `تعليمات عربية صناعية طويلة لفحص التفاف النص وترقيم الصفحات فقط، لا تستخدم للعلاج — بند ${index + 1}` })) };
