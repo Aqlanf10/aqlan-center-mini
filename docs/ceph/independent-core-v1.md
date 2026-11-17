@@ -2,7 +2,7 @@
 
 Status: **research / engineering only**. Clinical use is explicitly disabled in every result.
 Baseline: `c6c886121bcc50aa548f64b0b0fbd7b5beb1f324`.
-Engine: `steiner-core-8/0.1.0-research`.
+Engine: `steiner-core-8/0.1.1-research`.
 
 ## Scope and non-goals
 
@@ -124,3 +124,32 @@ Do not silently relabel an old result as this new version or recompute an approv
 6. Add compatibility-aware comparison and calibration-preserving rigid/structural overlays as separate modules, not promises of growth or treatment effect from a numeric difference alone.
 7. Expand named analyses with source-specific Go/Gn/Po/Pm and occlusal-plane definitions, then separately assess tracing contours, reporting, VTO and 3D. No model coefficients or predictions are inferred from vendor screenshots.
 8. Integrate behind an explicit feature gate only after scientific review, security/privacy checks and relevant unit, PostgreSQL, route, print and end-to-end tests. No merge or deployment is authorized by this document.
+
+## Independent verification supplement, 2026-11-17
+
+The 0.1.1 research patch rejects coordinate multiplication underflow explicitly as
+`numeric-range-exceeded`. A red test showed a positive finite column scale could
+round a non-zero crown coordinate to zero, producing an apparently valid zero
+distance. The patch rejects only dependent results; valid source zero coordinates
+remain allowed. This is an extreme numerical-range guard, not evidence of a
+clinical calibration error rate or a change to the measurement definitions.
+
+A separate test file checks 2,304 integer-vector pairs against a cosine oracle,
+169 signed distances against a Cartesian line equation, and all eight measures
+on a hand-calculated non-normative integer grid. These witnesses do not reuse
+the engine's angle helper for expected values. They supplement, not replace,
+the original synthetic transformation tests. The synthetic grid is not a patient
+and does not establish a normal range.
+
+Primary source recheck: Steiner 1960, printed pp. 723–724, distinguishes incisor
+linear position and long-axis inclination and uses NB for the lower incisor.
+That text does not resolve the exact crown extremum selection or every atypical
+ray branch. Those gates remain open. DICOM PS3.3 2026b, 10.7.1.1–3, confirms
+row/column order and that absence of calibration evidence cannot establish
+correction for magnification; a spacing pair alone is not enough to enable
+patient-plane distances. No new statistical norms or clinical approvals follow
+from this verification. Go/Gn are still excluded, not substituted by Go/Me.
+
+Verification environment for this supplement: Node 24.22.1, while the project
+requests Node 22. Results from this environment must not be represented as
+passing the required Node 22 CI gate. The clinical-use flag remains false.

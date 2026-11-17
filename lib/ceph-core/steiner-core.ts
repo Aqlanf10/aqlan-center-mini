@@ -8,7 +8,7 @@ import {
   unitVector, vector, type Point2D,
 } from "./geometry";
 
-export const STEINER_CORE_VERSION = "steiner-core-8/0.1.0-research" as const;
+export const STEINER_CORE_VERSION = "steiner-core-8/0.1.1-research" as const;
 export const CORE_LANDMARK_IDS = [
   "S", "N", "A", "B", "U1_TIP", "U1_APEX", "U1_LABIAL", "L1_TIP", "L1_APEX", "L1_LABIAL",
 ] as const;
@@ -69,7 +69,7 @@ export type CoreIssueCode =
   | "unverified-patient-calibration" | "invalid-landmark-collection" | "unknown-landmark-id"
   | "duplicate-landmark-id" | "missing-landmark" | "uncalibrated-patient-distance"
   | "anb-branch-ambiguous" | "incisor-axis-review" | "invalid-coordinate"
-  | "non-finite-geometry" | "degenerate-vector" | "invalid-scale";
+  | "non-finite-geometry" | "degenerate-vector" | "invalid-scale" | "numeric-range-exceeded";
 export interface CoreIssue { readonly code: CoreIssueCode; readonly landmark?: CoreLandmarkId }
 interface ResultBase {
   readonly id: CoreMeasurementId;
@@ -139,6 +139,9 @@ function prepare(input: unknown): Context {
       // Correct physical aspect before angles. Display zoom, pan and overlay are not inputs.
       const point = { x: sign * p.column * columnScale, y: -p.row * rowScale };
       if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return fail("non-finite-geometry", id);
+      // Positive finite scales can still underflow a non-zero source coordinate.
+      // Reject that loss rather than manufacturing a zero linear measurement.
+      if ((p.column !== 0 && point.x === 0) || (p.row !== 0 && point.y === 0)) return fail("numeric-range-exceeded", id);
       return point;
     },
   };
