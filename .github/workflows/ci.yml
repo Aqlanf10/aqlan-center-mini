@@ -1157,6 +1157,47 @@ jobs:
       - name: Restore synthetic historical and fresh archives through standalone HTTP
         run: npx vitest run --config vitest.config.standalone-restore-witness.mts
 
+  # Independent, focused diagnostic. The full PostgreSQL job and all existing
+  # required gates remain unchanged; this job uses a fresh service and fixture.
+  focused_rollback_witness:
+    name: Synthetic focused late-rollback witness
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 55473:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
+      SYNTHETIC_LATE_ROLLBACK_WITNESS: '1'
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run focused synthetic restore witness
+        run: npx vitest run --config vitest.config.focused-rollback-witness.mts
+
   # Actual shared contract components, synthetic fixtures only. No app session,
   # database, customer PDF or external network is used by the renderer.
   contract_print_visual:

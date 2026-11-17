@@ -27,3 +27,11 @@ databases and staging directory during cleanup. Its temporary databases and
 files are therefore not retained as evidence after runner teardown. The
 creation-time name/OID/owner are checked again before the sequence mutation and
 after replay; existing external databases and evidence are not selected.
+
+The separate focused CI job provisions its own PostgreSQL 18 service. Its
+Vitest setup checks the dedicated loopback URL, CI markers, original aliases
+and deployment markers before the existing global setup opens a client. This
+guard is intended for the GitHub-hosted job; environment strings alone cannot
+prove ownership of a locally spoofed or tunnelled endpoint. The existing full
+PostgreSQL job, HTTP jobs and required-completion gate remain unchanged. This
+focused job is diagnostic and is not added as a required-completion input.
