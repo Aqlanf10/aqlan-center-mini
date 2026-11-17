@@ -52,6 +52,17 @@ const pages = discoverPagesApi(process.cwd());
 const files = [...(statSync(API_DIR) ? walk(API_DIR) : []), ...pages.entries.map(entry => join(process.cwd(),entry.file))];
 for (const issue of pages.issues) offenders.push(`${issue.file}: ${issue.reason}`);
 
+// Pages discovery binds each statically declared method to its exact exported
+// core handler. The wrapper file alone does not contain that handler's body.
+for (const entry of pages.entries) {
+  for (const [method, source] of Object.entries(entry.methods)) {
+    if (RAW_PATTERNS.some((pattern) => pattern.test(source))
+      && !ALLOWLIST.some((item) => item.file === entry.file)) {
+      offenders.push(`${entry.file} [${method} core]`);
+    }
+  }
+}
+
 for (const file of files) {
   const rel = relative(process.cwd(), file).replaceAll("\\", "/");
   const text = readFileSync(file, "utf8");
