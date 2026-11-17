@@ -541,7 +541,7 @@ export function splitShareByParticipation(share: DoctorShareItem, participation:
   }));
 }
 
-export type ParticipationUnderReviewShare = { invoiceId: number; caseId: number; lineDoctorId: number; currency: Currency; amountMinor: number };
+export type ParticipationUnderReviewShare = { invoiceId: number; caseId: number; lineDoctorId: number; currency: Currency; amountMinor: number; category: string | null };
 
 /**
  * The shares an invoice actually pays commission on (owner decision 2026-11-11, point 3): a line
@@ -562,10 +562,12 @@ export function effectiveDoctorShares(
     if (participation.status !== "approved" || caseParticipationProblem(participation.participants) !== null) {
       // Owner #483 6905003552: a pending decision holds nothing. The line stays with its recorded doctor,
       // exactly as with no decision, and is reported as under review.
-      onUnderReview?.({ invoiceId: invoice.id, caseId: line.caseId!, lineDoctorId: line.doctorId, currency: invoice.currency, amountMinor: line.amountMinor });
       // A record marked approved whose shares do not add up is a storage fault the database check forbids;
       // it is never paid on. Only a pending decision keeps the line with its doctor.
-      if (participation.status === "pending") shares.push(line);
+      if (participation.status === "pending") {
+        onUnderReview?.({ invoiceId: invoice.id, caseId: line.caseId!, lineDoctorId: line.doctorId, currency: invoice.currency, amountMinor: line.amountMinor, category: line.category ?? null });
+        shares.push(line);
+      }
       continue;
     }
     shares.push(...splitShareByParticipation(line, participation));
@@ -638,7 +640,7 @@ export interface CommissionEngineOptions {
   /** (Owner decision 2026-11-11, point 3) the approved split of a shared case at a given time. */
   participationAt?: CaseParticipationResolver;
   /** Called for every line share of a case whose participation decision is pending: paid to its line doctor, under review. */
-  onUnderReview?: (held: { invoiceId: number; caseId: number; lineDoctorId: number; currency: Currency; amountMinor: number }) => void;
+  onUnderReview?: (line: ParticipationUnderReviewShare) => void;
 }
 
 /**

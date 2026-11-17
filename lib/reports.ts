@@ -6181,7 +6181,9 @@ async function commissionDetailCenterReport(ctx: ReportContext): Promise<ReportR
       invoice: line.invoiceNumber ?? `#${line.invoiceId}`,
       doctorName: line.doctorName,
       serviceName: line.serviceName ?? "—",
-      context: [line.categoryLabel, line.caseTitle ?? line.planTitle].filter(Boolean).join(" · ") || "—",
+      context: [line.categoryLabel, line.caseTitle ?? line.planTitle,
+        detail.underReviewParticipations.some(item => item.invoiceId === line.invoiceId && item.caseId === line.caseId && item.patientId === line.patientId && item.lineDoctorId === line.doctorId && item.currency === line.currency && item.category === line.category)
+          ? "قرار المشاركة قيد المراجعة" : null].filter(Boolean).join(" · ") || "—",
       currency: line.currency,
       amountMinor: line.amountMinor,
       labMinor: line.labDeducted ? line.labCostMinor : 0,
