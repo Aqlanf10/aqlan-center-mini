@@ -5,7 +5,7 @@ import { Client } from "pg";
 import { loadMigrationFiles, migrate, migrationStatus } from "../migrations";
 import { parseDatabaseHost } from "../db-tls";
 import { restoreClientConfigFor } from "./client-config";
-import { readTarGzEntries } from "./archive";
+import { readTarGzEntries, type ParsedArchive } from "./archive";
 import { validateBackupArchive, type ValidationOk } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
 import { finalizeRestoredStaffIdentityInTransaction } from "../staff-authority-lifecycle.mjs";
@@ -34,6 +34,8 @@ import { loginPhotoRestoreProblem } from "./login-photo";
 
 export interface StagedRestoreOptions {
   archivePath: string;
+  /** Already-read snapshot, revalidated here; avoids re-reading a mutable archive. */
+  archiveSnapshot?: ParsedArchive;
   targetUrl: string;
   stagingDir: string;
   /** يرفض الهدف غير الفارغ افتراضًا — لا استعادة فوق بيانات بلا علم صريح. */
@@ -157,7 +159,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
   // ── الخطوة ١: قراءة الأرشيف كاملًا وتحقيقه — قبل أي لمس للهدف.
   let archive;
   try {
-    archive = await readTarGzEntries(options.archivePath);
+    archive = options.archiveSnapshot ?? await readTarGzEntries(options.archivePath);
   } catch (error) {
     result.errors.push(`تعذّرت قراءة الأرشيف — الملف تالف أو مقطوع أو ليس gzip سليمًا: ${error instanceof Error ? error.message : String(error)}`);
     return result;

@@ -9,9 +9,11 @@ import {
   backupStateDir,
   readJsonFile,
   resolveBackupArchivePath,
-  verifyBackupArchiveFile,
 } from "../backupVolume";
 import { stagedRestore } from "./staging";
+import { readTarGzSnapshot } from "./archive";
+import { validateBackupArchive } from "./validate";
+import { prepareBackupSql } from "./sql.mjs";
 
 export const RESTORE_DRILL_STATE_FILE = "restore-drill-state.json";
 
@@ -163,23 +165,30 @@ export async function runAdminRestoreDrill(input: {
   }
 
   const stagingDir = path.join(backupStateDir(input.backupDir), "restore-drill-current");
-  await rm(stagingDir, { recursive: true, force: true });
-  await mkdir(stagingDir, { recursive: true });
-
-  let verified;
+  let archiveSnapshot: Awaited<ReturnType<typeof readTarGzSnapshot>>["archive"];
   try {
-    verified = await verifyBackupArchiveFile(archivePath, stagingDir);
+    // One immutable read supplies both verification and restoration. Otherwise
+    // replacing the on-disk archive between precheck and reset could invalidate
+    // the precheck. No target or prior staged document is touched in this block.
+    const snapshot = await readTarGzSnapshot(archivePath);
+    if (snapshot.bytes !== record.archiveBytes || snapshot.sha256 !== record.archiveSha256) {
+      return { ok: false, reason: "archive-integrity-mismatch" };
+    }
+    archiveSnapshot = snapshot.archive;
+    const validated = validateBackupArchive(archiveSnapshot, { documentsDir: stagingDir });
+    if (!validated.ok || validated.sqlSha256 !== record.databaseSha256
+        || validated.documents.length !== record.documentCount) {
+      return { ok: false, reason: "archive-integrity-mismatch" };
+    }
+    // Reject a forged, missing or contradictory historical 0079 record BEFORE
+    // reset; stagedRestore rechecks this same snapshot before its own writes.
+    prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), { inspectHistorical0079: true });
   } catch {
     return { ok: false, reason: "archive-integrity-mismatch" };
   }
-  if (
-    verified.sha256 !== record.archiveSha256
-    || verified.bytes !== record.archiveBytes
-    || verified.databaseSha256 !== record.databaseSha256
-    || verified.documents !== record.documentCount
-  ) {
-    return { ok: false, reason: "archive-integrity-mismatch" };
-  }
+
+  await rm(stagingDir, { recursive: true, force: true });
+  await mkdir(stagingDir, { recursive: true });
 
   const startedAt = new Date();
   const running: RestoreDrillState = {
@@ -203,6 +212,7 @@ export async function runAdminRestoreDrill(input: {
     await resetDedicatedTarget(targetUrl);
     const result = await stagedRestore({
       archivePath,
+      archiveSnapshot,
       targetUrl,
       stagingDir,
       allowNonEmptyTarget: false,

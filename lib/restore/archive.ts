@@ -1,6 +1,8 @@
 import { createGunzip } from "node:zlib";
-import { createReadStream, createWriteStream } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { Transform, Writable } from "node:stream";
+import { constants, createReadStream, createWriteStream } from "node:fs";
+import { mkdtemp, open, readFile, rm, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -23,6 +25,61 @@ export interface ParsedArchive {
   entries: Map<string, TarEntry>;
   order: string[];
   truncated: boolean;
+}
+
+/** Hash and parse the very same compressed byte stream. The decompressed tar
+ * uses the existing temporary-file boundary rather than accumulating gzip
+ * output chunks in memory. No new archive size limit is imposed. */
+export async function readTarGzSnapshot(gzipPath: string): Promise<{ archive: ParsedArchive; sha256: string; bytes: number }> {
+  // O_NONBLOCK ensures a substituted FIFO cannot hang the verification thread.
+  // Inspect and stream the same open descriptor to avoid a path-swap race.
+  const input = await open(gzipPath, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const source = await input.stat();
+    if (!source.isFile() || source.size <= 0) throw new Error("Invalid archive file.");
+    const stage = await mkdtemp(path.join(tmpdir(), "aqlan-restore-"));
+    try {
+      const tarPath = path.join(stage, "archive.tar"), hash = createHash("sha256");
+      const tar = await open(tarPath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600);
+      try {
+        // The file is ours alone; on POSIX unlinking its private name prevents
+        // another process from replacing or modifying the parsed tar by path.
+        if (process.platform !== "win32") await unlink(tarPath);
+        let bytes = 0;
+        const witness = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+          bytes += chunk.length;
+          hash.update(chunk);
+          callback(null, chunk);
+        } });
+        let tarOffset = 0;
+        const output = new Writable({ write(chunk: Buffer, _encoding, callback) {
+          void (async () => {
+            let offset = 0;
+            while (offset < chunk.length) {
+              const written = await tar.write(chunk, offset, chunk.length - offset, tarOffset);
+              if (written.bytesWritten === 0) throw new Error("Incomplete tar snapshot write.");
+              offset += written.bytesWritten;
+              tarOffset += written.bytesWritten;
+            }
+          })().then(() => callback(), error => callback(error));
+        } });
+        await pipeline(input.createReadStream({ autoClose: false }), witness, createGunzip(), output);
+        if (bytes !== source.size) throw new Error("Archive size changed during reading.");
+        const size = (await tar.stat()).size;
+        if (!Number.isSafeInteger(size) || size < 0) throw new Error("Invalid tar size.");
+        const body = Buffer.allocUnsafe(size);
+        let offset = 0;
+        while (offset < size) {
+          const read = await tar.read(body, offset, size - offset, offset);
+          if (read.bytesRead === 0) throw new Error("Incomplete tar snapshot.");
+          offset += read.bytesRead;
+        }
+        return { archive: parseTarBytes(body), sha256: hash.digest("hex"), bytes };
+      } finally { await tar.close(); }
+    } finally {
+      await rm(stage, { recursive: true, force: true });
+    }
+  } finally { await input.close(); }
 }
 
 export async function readTarGzEntries(gzipPath: string): Promise<ParsedArchive> {
