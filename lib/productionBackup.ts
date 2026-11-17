@@ -137,7 +137,7 @@ export async function readDocumentWithRealpathGuard(
     throw new Error("مفتاح مستند بنمط غير آمن في مسار النسخة.");
   }
   const documentsRoot = await realpath(documentsDir);
-  const documentPath = path.resolve(documentsRoot, storageKey);
+  const documentPath = path.resolve(/*turbopackIgnore: true*/ documentsRoot, storageKey);
   const realDocumentPath = await realpath(documentPath);
   if (!isSameOrInside(documentsRoot, realDocumentPath)) {
     throw new Error("مستند يخرج من دليل المستندات عبر رابط رمزي — النسخة مرفوضة.");
