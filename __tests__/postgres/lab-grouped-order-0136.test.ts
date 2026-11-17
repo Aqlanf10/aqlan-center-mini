@@ -75,6 +75,32 @@ const payables = (patientId: number) => q("SELECT p.amount_minor::int AS amount,
 const report = async (doctorId: number) => (await db.commissionReport("2020-01-01", "2999-12-31")).find(row => row.doctorId === doctorId && row.currency === "YER")!;
 
 describe("0136 grouped lab order from one invoice entry", () => {
+  it("keeps each member price append-only on the migrated PostgreSQL schema", async () => {
+    const w = await world({ unitMinor: 200, currency: "YER" });
+    const result = await save(w, grouped(w));
+    const orderId = result.labWork![0].orderId;
+    const memberId = result.labWork![0].memberIds[0];
+
+    const trigger = await q(`SELECT t.tgenabled AS enabled, t.tgtype::int AS type,
+      t.tgfoid = 'public.aqlan_lab_append_only()'::regprocedure AS expected_function
+      FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+      JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relname='lab_order_member_prices'
+        AND t.tgname='lab_order_member_prices_append_only' AND NOT t.tgisinternal`);
+    // 27 = row-level, BEFORE, DELETE and UPDATE; O = enabled for ordinary writes.
+    expect(trigger).toEqual([{ enabled: "O", type: 27, expected_function: true }]);
+
+    const selectPrice = () => q("SELECT to_jsonb(p) AS price FROM lab_order_member_prices p WHERE lab_order_id=$1 AND member_id=$2", [orderId, memberId]);
+    const before = await selectPrice();
+    expect(before).toHaveLength(1);
+    await expect(q("UPDATE lab_order_member_prices SET unit_cost_minor=unit_cost_minor+1 WHERE lab_order_id=$1 AND member_id=$2", [orderId, memberId]))
+      .rejects.toMatchObject({ code: "P0001", message: expect.stringContaining("append-only") });
+    expect(await selectPrice()).toEqual(before);
+    await expect(q("DELETE FROM lab_order_member_prices WHERE lab_order_id=$1 AND member_id=$2", [orderId, memberId]))
+      .rejects.toMatchObject({ code: "P0001", message: expect.stringContaining("append-only") });
+    expect(await selectPrice()).toEqual(before);
+  });
+
   it("T1+T3: five crowns open one order with five members, priced 5 × unit in the rule currency, with one payable", async () => {
     const w = await world({ unitMinor: 200, currency: "YER" });
     const result = await save(w, grouped(w));
