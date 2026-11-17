@@ -34,13 +34,9 @@ VALUES example was confirmed accepted by that parser, before tightening.
 An impossible 0079 timestamp and multiple calendar/offset overflow cases were
 also observed accepted by the previous parser before the timestamp check.
 
-The independent PostgreSQL witness creates new uniquely named source and
-target databases after a loopback guard, records and checks OID/owner, and
-intentionally retains the databases and synthetic evidence files. It covers
-empty and populated unknown-0090 source archives, and separately exercises the
-12-case numbering high-water matrix including both called states and replay
-twice with source/target patient-document links and bytes. The allocator
-matrix calls the SQL generator directly; it is not a full archive round trip.
-**Neither PostgreSQL witness nor built HTTP, full typecheck, inventory refresh,
-build, or CI has been run on this head.** Never substitute an existing or
-preserved database for these disposable synthetic owned targets.
+The independent PostgreSQL witnesses are being prepared separately and are not
+part of this candidate. **No PostgreSQL witness, built HTTP, full typecheck,
+build, or CI has been run on this head.** The permissions inventory was
+regenerated after the source changes; its readiness and classifications remain
+unchanged. Never substitute an existing or preserved database for disposable
+synthetic owned targets.
