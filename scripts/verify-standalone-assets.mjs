@@ -10,6 +10,12 @@ const isSafeRelative = (name) => typeof name === "string" && name !== "" && !nam
   && !path.posix.isAbsolute(name) && name.split("/").every((part) => part !== "" && part !== "." && part !== "..");
 const fail = (code) => { throw new Error(code); };
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const safeAssetCodes = new Set([
+  "BUILD_ID_MISMATCH", "INVALID_HISTORICAL_0079", "INVALID_MIGRATION_CATALOG", "INVALID_PATH", "INVALID_PREFLIGHT_LIST",
+  "PREFLIGHT_RUNNER_MISMATCH", "PREFLIGHT_SOURCE_MISMATCH", "RAW_TYPESCRIPT_IN_RUNTIME", "REQUIRED_FILE_MISSING",
+  "REQUIRED_FILE_NOT_REGULAR", "SHIPPED_ASSET_MISMATCH", "SYNTHETIC_TRACE_MARKER", "UNEXPECTED_RAW_ENTRY", "UNSAFE_RUNTIME_SYMLINK",
+]);
+export const safeAssetDiagnostic = error => error instanceof Error && safeAssetCodes.has(error.message) ? error.message : "STANDALONE_ASSET_CHECK_FAILED";
 
 // Parse the actual checked-in declaration; reject nonliteral/ambiguous lists.
 // Do not maintain a duplicate allowlist that might silently lag the provenance gate.
@@ -153,6 +159,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === ownFile) {
         onUnexpectedRoot: ({ category, kind }) => console.error(`UNEXPECTED_RAW_CATEGORY=${category};KIND=${kind}`),
       });
       console.log(`Standalone verified: ${result.migrationCount} migrations, ${result.preflightSourceCount} provenance sources.`);
-    } catch (error) { console.error(error.message); process.exitCode = 1; }
+    } catch (error) { console.error(safeAssetDiagnostic(error)); process.exitCode = 1; }
   }
 }

@@ -5,7 +5,8 @@ import { test } from "vitest";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { verifyStandaloneAssets } from "./verify-standalone-assets.mjs";
+import { spawnSync } from "node:child_process";
+import { safeAssetDiagnostic, verifyStandaloneAssets } from "./verify-standalone-assets.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const historical = await readFile(path.join(root, "migrations/0079_ortho_followup_coverage.sql"));
@@ -79,6 +80,18 @@ test("diagnoses an unknown private-looking root without exposing its name or byt
   await rejects(verifyStandaloneAssets(source, shipped, { onUnexpectedRoot: diagnostic => diagnostics.push(diagnostic) }), "UNEXPECTED_RAW_ENTRY");
   assert.deepEqual(diagnostics, [{ category: "other", kind: "file" }]);
   assert.ok(!JSON.stringify(diagnostics).includes(secret));
+});
+test("CLI hides unexpected filesystem errors while keeping failure status", () => {
+  const secret = "SYNTHETIC_PRIVATE_PATH";
+  const source = `import fs from 'node:fs'; export const lstat=fs.promises.lstat, readFile=fs.promises.readFile; export const readdir=async()=>{throw new Error('${secret}');};`;
+  const preload = `import {registerHooks} from 'node:module';registerHooks({load(url,context,next){if(url==='node:fs/promises')return {format:'module',shortCircuit:true,source:${JSON.stringify(source)}};return next(url,context);}});`;
+  const hook = `data:text/javascript;base64,${Buffer.from(preload).toString("base64")}`;
+  const result = spawnSync(process.execPath, ["--import", hook, path.join(root, "scripts/verify-standalone-assets.mjs")], {encoding: "utf8"});
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr.trim(), "STANDALONE_ASSET_CHECK_FAILED");
+  assert.ok(!result.stderr.includes(secret));
+  assert.equal(safeAssetDiagnostic(new Error("UNEXPECTED_RAW_ENTRY")), "UNEXPECTED_RAW_ENTRY");
+  assert.equal(safeAssetDiagnostic(new Error(secret)), "STANDALONE_ASSET_CHECK_FAILED");
 });
 test("rejects duplicate migration versions and an altered historical source", async (t) => {
   const { source, shipped, put } = await fixture(t);
