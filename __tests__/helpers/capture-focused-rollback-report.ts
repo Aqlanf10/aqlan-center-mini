@@ -1,4 +1,5 @@
-import { lstat, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, readdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Client } from 'pg';
 import { validateFocusedRollbackWitnessEnvironment } from '../postgres/_focused-rollback-witness-guard';
@@ -14,10 +15,13 @@ export function selectSyntheticWitnessDirectory(names: string[], runId: string, 
 }
 
 async function ownedFile(file: string, maximum: number): Promise<string> {
-  const info = await lstat(file);
-  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1 || info.size <= 0 || info.size > maximum
-      || typeof process.getuid !== 'function' || info.uid !== process.getuid()) throw new Error('Invalid synthetic witness.');
-  return readFile(file, 'utf8');
+  const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.nlink !== 1 || info.size <= 0 || info.size > maximum
+        || typeof process.getuid !== 'function' || info.uid !== process.getuid()) throw new Error('Invalid synthetic witness.');
+    return await handle.readFile('utf8');
+  } finally { await handle.close(); }
 }
 
 /** Upload only a strict fixed-field report; raw archives and databases stay local. */
@@ -45,8 +49,9 @@ export async function captureFocusedRollbackReport(env: NodeJS.ProcessEnv): Prom
   // Recheck the same owned service and all three database identities before
   // producing anything eligible for upload. No URL or query result is output.
   const client = new Client({ connectionString: env.TEST_DATABASE_URL!, ssl: false });
-  await client.connect();
+  let closeFailed = false, closeError: unknown;
   try {
+    await client.connect();
     const { rows: [server] } = await client.query<{ database: string; user: string; version: string }>(
       "SELECT current_database() AS database, current_user AS \"user\", current_setting('server_version_num') AS version",
     );
@@ -60,7 +65,11 @@ export async function captureFocusedRollbackReport(env: NodeJS.ProcessEnv): Prom
     if (rows.length !== 3 || recorded.some(item => !rows.some(row => row.name === item.name && row.oid === item.oid && row.owner === item.owner && row.owned))) {
       throw new Error('Invalid synthetic witness.');
     }
-  } finally { await client.end(); }
+  } finally {
+    try { await client.end(); }
+    catch (error) { closeFailed = true; closeError = error; }
+  }
+  if (closeFailed) throw closeError;
   const output = path.join(root, `focused-rollback-report-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}.json`);
   await writeFile(output, safe, { flag: 'wx', mode: 0o600 });
 }

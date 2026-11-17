@@ -35,6 +35,10 @@ fixed-field report with hashes, counts and statuses is eligible for artifact
 upload after the dedicated environment and three recorded identities pass
 validation; raw archives, SQL, databases, URLs, environment and logs are never
 uploaded. The report cannot reconstruct any database.
+Individual input files are opened without following the final symlink and read
+through their verified file descriptors. These checks do not establish immunity
+to an adversarial process replacing an ancestor directory during capture; the
+operation is limited to the isolated synthetic GitHub-hosted runner.
 
 The separate focused CI job provisions its own PostgreSQL 18 service. Its
 Vitest setup checks the dedicated loopback URL, CI markers, original aliases

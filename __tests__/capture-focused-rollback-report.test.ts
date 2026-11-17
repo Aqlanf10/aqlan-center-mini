@@ -1,9 +1,11 @@
+import { constants } from 'node:fs';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const fake = vi.hoisted(() => ({
   files: new Map<string, string>(), writes: [] as { path: string; data: string }[],
   databases: [] as { name: string; oid: string; owner: string; owned: boolean }[],
-  clients: 0, connections: 0, endings: 0, badDirectory: false,
+  clients: 0, connections: 0, endings: 0, closedFiles: 0, badDirectory: false,
+  connectionFails: false, endingFails: false,
 }));
 
 vi.mock('node:fs/promises', () => ({
@@ -16,10 +18,15 @@ vi.mock('node:fs/promises', () => ({
     isSymbolicLink: () => fake.badDirectory && value.endsWith('Ab12Cd'), nlink: 1,
     size: fake.files.get(value)?.length ?? 0, uid: process.getuid?.(),
   }),
-  readFile: async (value: string) => {
+  open: async (value: string, flags: number) => {
+    if ((flags & constants.O_NOFOLLOW) === 0) throw new Error('synthetic-unsafe-open');
     const content = fake.files.get(value);
     if (content === undefined) throw new Error('synthetic-file-missing');
-    return content;
+    return {
+      stat: async () => ({ isFile: () => true, nlink: 1, size: content.length, uid: process.getuid?.() }),
+      readFile: async () => content,
+      close: async () => { fake.closedFiles++; },
+    };
   },
   writeFile: async (value: string, data: string, options: { flag: string }) => {
     if (options.flag !== 'wx' || fake.files.has(value)) throw new Error('synthetic-overwrite-refused');
@@ -30,8 +37,8 @@ vi.mock('node:fs/promises', () => ({
 vi.mock('pg', () => ({
   Client: class {
     constructor() { fake.clients++; }
-    async connect() { fake.connections++; }
-    async end() { fake.endings++; }
+    async connect() { fake.connections++; if (fake.connectionFails) throw new Error('synthetic-connect-failure'); }
+    async end() { fake.endings++; if (fake.endingFails) throw new Error('synthetic-end-failure'); }
     async query(sql: string) {
       if (sql.includes('server_version_num')) return { rows: [{ database: 'aqlan_p1_test', user: 'ci', version: '180000' }] };
       if (sql.includes('FROM pg_database')) return { rows: fake.databases };
@@ -53,7 +60,8 @@ const env: NodeJS.ProcessEnv = {
 const directory = '/tmp/synthetic-runner/hr-composed-legacy-restore-12345-1-Ab12Cd';
 
 beforeEach(() => {
-  fake.files.clear(); fake.writes.length = 0; fake.clients = 0; fake.connections = 0; fake.endings = 0; fake.badDirectory = false;
+  fake.files.clear(); fake.writes.length = 0; fake.clients = 0; fake.connections = 0; fake.endings = 0; fake.closedFiles = 0;
+  fake.badDirectory = false; fake.connectionFails = false; fake.endingFails = false;
   fake.databases = ['a', 'b', 'c'].map((letter, index) => ({ name: `aqlan_backup_precision_${letter.repeat(32)}`, oid: String(100 + index), owner: '10', owned: true }));
   for (const { name, oid, owner } of fake.databases) fake.files.set(`${directory}/identity-${name}.json`, JSON.stringify({ name, oid, owner }));
   fake.files.set(`${directory}/synthetic-rollback-report.json`, JSON.stringify({ ...initialRetainedRollbackReport(), databases: 3,
@@ -64,6 +72,7 @@ beforeEach(() => {
 it('copies only the strictly bounded report after checking all owned identities', async () => {
   await captureFocusedRollbackReport(env);
   expect(fake.connections).toBe(1); expect(fake.endings).toBe(1); expect(fake.writes).toHaveLength(1);
+  expect(fake.closedFiles).toBe(4);
   const data = fake.writes[0].data;
   expect(data.includes('regressed')).toBe(true);
   expect(/postgres|password|synthetic-runner|aqlan_backup_precision|\/tmp\//i.test(data)).toBe(false);
@@ -87,5 +96,17 @@ it('rejects untrusted report fields and symlinked directories before connection'
 it('fails closed when a recorded database identity no longer matches', async () => {
   fake.databases[1].oid = '999';
   await expect(captureFocusedRollbackReport(env)).rejects.toThrow();
+  expect(fake.connections).toBe(1); expect(fake.endings).toBe(1); expect(fake.writes).toHaveLength(0);
+});
+
+it('closes the client and preserves the connection error without writing, even if close fails', async () => {
+  fake.connectionFails = true; fake.endingFails = true;
+  await expect(captureFocusedRollbackReport(env)).rejects.toThrow('synthetic-connect-failure');
+  expect(fake.connections).toBe(1); expect(fake.endings).toBe(1); expect(fake.writes).toHaveLength(0);
+});
+
+it('does not write the report if closing an otherwise successful client fails', async () => {
+  fake.endingFails = true;
+  await expect(captureFocusedRollbackReport(env)).rejects.toThrow('synthetic-end-failure');
   expect(fake.connections).toBe(1); expect(fake.endings).toBe(1); expect(fake.writes).toHaveLength(0);
 });
