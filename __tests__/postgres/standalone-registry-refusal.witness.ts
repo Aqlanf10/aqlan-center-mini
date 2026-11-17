@@ -75,7 +75,7 @@ beforeAll(async () => {
     const data = Buffer.from(originalSql.replace(original,mutations[kind]));
     const manifest = JSON.parse(Buffer.from(tar.entries.get('manifest.json')!.data).toString('utf8'));
     manifest.databaseSha256 = hash(data); manifest.databaseBytes = data.length;
-    archives[kind] = tarGzBytes(tar.order.map(name => ({name,data:name === 'database.sql' ? data : name === 'manifest.json' ? Buffer.from(JSON.stringify(manifest)) : tar.entries.get(name)!.data})));
+    archives[kind] = Buffer.from(tarGzBytes(tar.order.map(name => ({name,data:name === 'database.sql' ? data : name === 'manifest.json' ? Buffer.from(JSON.stringify(manifest)) : tar.entries.get(name)!.data}))));
   }
   for (const kind of variants) await writeFile(path.join(directory,`synthetic-${kind}.tar.gz`),archives[kind]);
 },180000);
