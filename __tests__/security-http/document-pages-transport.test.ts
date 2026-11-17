@@ -10,8 +10,8 @@ import { JSON_BODY_LIMIT_BYTES } from "../../lib/security-limits";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
 const tokenOf = (cookie: string) => cookie.slice(cookie.indexOf("=") + 1);
 const headers = (cookie: string) => ({ cookie, Origin: baseUrl, "Sec-Fetch-Site": "same-origin" });
-async function upload(base: string, patient: number, cookie: string) {
-  const form = new FormData(); form.set("file", new File([new Uint8Array(PNG)], "synthetic.png", { type: "image/png" }));
+async function upload(base: string, patient: number, cookie: string, bytes = PNG) {
+  const form = new FormData(); form.set("file", new File([new Uint8Array(bytes)], "synthetic.png", { type: "image/png" }));
   form.set("kind", "xray"); form.set("title", "Synthetic pages document");
   const r = await fetch(`${base}/api/patients/${patient}/documents`, { method: "POST", headers: { cookie, Origin: base }, body: form, redirect: "manual" });
   expect(r.status).toBe(201); return (await r.json()).id as number;
@@ -22,6 +22,28 @@ async function chunkedTooLarge(url: string, cookie: string, origin = baseUrl) {
     req.on("error", reject); req.write('{"note":"');
     for (let left=JSON_BODY_LIMIT_BYTES+1;left>0;left-=4096) req.write("x".repeat(Math.min(left,4096)));
     req.end('"}');
+  });
+}
+async function conflictingFraming(url: string, cookie: string, origin = baseUrl) {
+  return new Promise<number>((resolve, reject) => {
+    const req = nodeRequest(url, { method:'DELETE', headers:{ cookie, Origin:origin, 'Content-Type':'application/json', 'Transfer-Encoding':'chunked', 'Content-Length':'4' } }, res => {
+      res.resume(); res.on('end', () => resolve(res.statusCode!));
+    });
+    req.on('error', reject); req.end('{}');
+  });
+}
+async function slowDownload(url:string, cookie:string, disconnect:boolean) {
+  return new Promise<{ status:number; bytes:Buffer; closedEarly:boolean }>((resolve,reject) => {
+    const req=nodeRequest(url,{headers:{cookie,'Accept-Encoding':'identity'}},res=>{
+      const chunks:Buffer[]=[];let ended=false;
+      res.pause();
+      res.on('data',(chunk:Buffer)=>{chunks.push(chunk);if(disconnect)res.destroy();});
+      res.on('end',()=>{ended=true;resolve({status:res.statusCode!,bytes:Buffer.concat(chunks),closedEarly:false});});
+      res.on('close',()=>{if(!ended)resolve({status:res.statusCode!,bytes:Buffer.concat(chunks),closedEarly:true});});
+      res.on('error',error=>{if(!disconnect)reject(error);});
+      setTimeout(()=>res.resume(),300);
+    });
+    req.on('error',reject);req.end();
   });
 }
 
@@ -59,10 +81,27 @@ describe("legacy document transport on a real built server", () => {
     expect((await fetch(url,{method:"DELETE",headers:{...headers(h.sessions.doctorA.cookie),"Content-Type":"application/json"},body:JSON.stringify({note:"Synthetic reason"})})).status).toBe(403);
     expect((await fetch(url,{method:"DELETE",headers:{cookie:h.sessions.admin.cookie,Origin:"https://foreign.example", "Content-Type":"application/json"},body:JSON.stringify({note:"Synthetic reason"})})).status).toBe(403);
     expect(await chunkedTooLarge(url,h.sessions.admin.cookie)).toBe(413);
+    expect(await conflictingFraming(url,h.sessions.admin.cookie)).toBe(400);
     expect((await db.query("SELECT removed_at FROM patient_documents WHERE id=$1",[doc])).rows[0].removed_at).toBeNull();
     const hidden=await fetch(url,{method:"DELETE",headers:{...headers(h.sessions.admin.cookie),"Content-Type":"application/json"},body:JSON.stringify({note:"Synthetic reason"})});
     expect(hidden.status).toBe(200);expect((await fetch(url,{headers:{cookie:h.sessions.doctorA.cookie}})).status).toBe(404);
   });
+  it("keeps exact length for a compressible payload larger than the compression threshold", async () => {
+    const bytes = Buffer.concat([PNG, Buffer.alloc(65536)]), id = await upload(baseUrl,patient,h.sessions.doctorA.cookie,bytes);
+    const response = await fetch(`${baseUrl}/api/documents/${id}`, { headers: { cookie:h.sessions.doctorA.cookie, 'Accept-Encoding':'gzip, br' } });
+    expect(response.status).toBe(200);expect(response.headers.get('content-length')).toBe(String(bytes.length));
+    expect(response.headers.get('content-encoding')).toBeNull();expect(response.headers.get('transfer-encoding')).toBeNull();
+    expect(response.headers.get('cache-control')).toContain('private');expect(response.headers.get('cache-control')).toContain('no-transform');
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(bytes);
+  });
+  it('survives a slow download and a disconnected client without changing the stored file', async () => {
+    const bytes=Buffer.concat([PNG,Buffer.alloc(8*1024*1024)]),id=await upload(baseUrl,patient,h.sessions.doctorA.cookie,bytes);
+    const url=`${baseUrl}/api/documents/${id}`;
+    const slow=await slowDownload(url,h.sessions.doctorA.cookie,false);expect(slow.status).toBe(200);expect(slow.closedEarly).toBe(false);expect(slow.bytes).toEqual(bytes);
+    const interrupted=await slowDownload(url,h.sessions.doctorA.cookie,true);expect(interrupted.status).toBe(200);expect(interrupted.closedEarly).toBe(true);expect(interrupted.bytes.length).toBeLessThan(bytes.length);
+    const after=await fetch(url,{headers:{cookie:h.sessions.doctorA.cookie}});expect(after.status).toBe(200);expect(after.headers.get('content-length')).toBe(String(bytes.length));expect(Buffer.from(await after.arrayBuffer())).toEqual(bytes);
+    expect((await db.query('SELECT removed_at FROM patient_documents WHERE id=$1',[id])).rows[0].removed_at).toBeNull();
+  },120000);
 });
 
 const ACCOUNTS = {
@@ -87,6 +126,9 @@ describe("canonical document transport on an independent built server",()=>{
     }
     const head=await fetch(url,{method:"HEAD",headers:{cookie:own}});expect(head.status).toBe(200);expect(head.headers.get("content-length")).toBe(String(PNG.length));expect((await head.arrayBuffer()).byteLength).toBe(0);
     const denied=await fetch(url,{headers:{cookie:stranger,authorization:`Bearer ${tokenOf(own)}`}});expect([403,404]).toContain(denied.status);
+    expect([403,404]).toContain((await fetch(url,{headers:{cookie:`${own}; ${stranger}`}})).status);
+    expect((await fetch(url,{headers:{cookie:`${stranger}; ${own}`}})).status).toBe(200);
+    expect((await fetch(url,{headers:{cookie:'aqlan_flow_session=invalid',authorization:`Bearer ${tokenOf(own)}`}})).status).toBe(200);
     const bogus=Buffer.from(JSON.stringify({durableIdentity:{invalid:true}})).toString("base64url");
     const forged=`${bogus}.${createHmac("sha256",secret).update(bogus).digest("base64url")}`;
     const noFallback=await fetch(url,{headers:{cookie:`aqlan_flow_session=${forged}`,authorization:`Bearer ${tokenOf(own)}`}});expect([401,403]).toContain(noFallback.status);
@@ -98,9 +140,17 @@ describe("canonical document transport on an independent built server",()=>{
     expect((await fetch(url,{method:"DELETE",headers:{cookie:own,Origin:j.baseUrl,...json},body:JSON.stringify({note:"Synthetic reason"})})).status).toBe(403);
     expect((await fetch(url,{method:"DELETE",headers:{cookie:owner,Origin:"https://foreign.example",...json},body:JSON.stringify({note:"Synthetic reason"})})).status).toBe(403);
     expect(await chunkedTooLarge(url,owner,j.baseUrl)).toBe(413);
+    expect(await conflictingFraming(url,owner,j.baseUrl)).toBe(400);
     expect((await j.db.query("SELECT removed_at FROM patient_documents WHERE id=$1",[doc])).rows[0].removed_at).toBeNull();
     const hidden=await fetch(url,{method:"DELETE",headers:{authorization:`Bearer ${tokenOf(owner)}`,Origin:j.baseUrl,...json},body:JSON.stringify({note:"Synthetic reason"})});
     expect(hidden.status).toBe(200);expect((await fetch(url,{headers:{cookie:own}})).status).toBe(404);
     expect(await j.ddlLog()).toEqual([]);
+  });
+  it("keeps exact canonical payload length even when compression is requested",async()=>{
+    const bytes=Buffer.concat([PNG,Buffer.alloc(65536)]), id=await upload(j.baseUrl,patient,own,bytes);
+    const r=await fetch(`${j.baseUrl}/api/documents/${id}`,{headers:{cookie:own,'Accept-Encoding':'gzip, br'}});
+    expect(r.status).toBe(200);expect(r.headers.get('content-length')).toBe(String(bytes.length));expect(r.headers.get('content-encoding')).toBeNull();
+    expect(r.headers.get('transfer-encoding')).toBeNull();expect(r.headers.get('cache-control')).toContain('private');expect(r.headers.get('cache-control')).toContain('no-transform');
+    expect(Buffer.from(await r.arrayBuffer())).toEqual(bytes);
   });
 });
