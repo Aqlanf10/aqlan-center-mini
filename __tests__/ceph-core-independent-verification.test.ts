@@ -47,6 +47,18 @@ describe("independent integer-grid verification (not clinical validation)", () =
     });
     expect(result.normsStatus).toBe("not-enabled");
   });
+  it("does not silently accept unresolved Gn/Me constructions or expose a mandibular-plane metric", () => {
+    const baseline = evaluateSteinerCore(study);
+    expect(baseline.measures.map(m => m.id)).not.toContain("SNGOGN");
+    for (const id of ["Go", "Gn", "Me"]) {
+      for (const row of [25, 70]) {
+        const result = evaluateSteinerCore({ ...study, landmarks: [...study.landmarks.slice(0, -1), { id, column: 40, row }] });
+        expect(result.clinicalUseAllowed).toBe(false);
+        expect(result.measures.every(m => m.status === "not-computable" && m.issue?.code === "unknown-landmark-id")).toBe(true);
+      }
+    }
+    expect(evaluateSteinerCore(study)).toEqual(baseline);
+  });
   it("does not turn an underflowed crown coordinate into a valid zero distance", () => {
     const result = evaluateSteinerCore({ ...study,
       calibration: { ...study.calibration, columnScale: Number.MIN_VALUE },

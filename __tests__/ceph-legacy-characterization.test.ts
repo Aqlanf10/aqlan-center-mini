@@ -15,6 +15,26 @@ describe("legacy baseline characterization, not a clinical specification", () =>
     expect(measure("SNGOGN", p, 1)).toBeCloseTo(45, 10);
     expect(measure("SNGOGN", { ...p, Gn: { x: -50, y: 60 } }, 1)).toBe(measure("SNGOGN", p, 1));
   });
+  it("separates Gn-only and Me-only perturbations without reinterpreting legacy snapshots", () => {
+    // Synthetic coordinates copied from ceph.test.ts, not patient landmarks.
+    const base: LandmarkMap = { S: { x: 0, y: 0 }, N: { x: 69, y: -8 },
+      Go: { x: -17.03, y: 69.08 }, Me: { x: 60, y: 105 }, Gn: { x: 61.5, y: 95.5 } };
+    // Independent line-inclination witness, not a new clinical metric implementation.
+    const inclination = (q: { x: number; y: number }) =>
+      (Math.atan2(q.y - 69.08, q.x + 17.03) - Math.atan2(-8, 69)) * 180 / Math.PI;
+    const historical = measure("SNGOGN", base, 1);
+    expect(historical).toBeCloseTo(31.6, 1);
+    expect(historical).toBeCloseTo(inclination(base.Me!), 10);
+    expect(inclination(base.Gn!)).toBeCloseTo(25.208, 3);
+    const gnOnly = { ...base, Gn: { x: 61.5, y: 110 } };
+    expect(measure("SNGOGN", gnOnly, 1)).toBe(historical);
+    expect(inclination(gnOnly.Gn)).not.toBeCloseTo(inclination(base.Gn!), 5);
+    const meOnly = { ...base, Me: { x: 60, y: 90 } };
+    expect(measure("SNGOGN", meOnly, 1)).toBeCloseTo(inclination(meOnly.Me), 10);
+    expect(measure("SNGOGN", meOnly, 1)).not.toBeCloseTo(historical, 5);
+    expect(inclination(meOnly.Gn!)).toBe(inclination(base.Gn!));
+    expect(measure("SNGOGN", base, 1)).toBe(historical);
+  });
   it("legacy Wits returns NaN for coincident valid projections", () => {
     expect(measure("WITS", { OcclA: { x: 10, y: 0 }, OcclP: { x: 0, y: 0 }, A: { x: 5, y: 2 }, B: { x: 5, y: 8 } }, 1)).toBeNaN();
   });
