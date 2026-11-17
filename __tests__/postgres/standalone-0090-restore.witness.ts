@@ -17,6 +17,7 @@ import { upsertBackupHistoryRecord } from "../../lib/backupHistory";
 import { createSessionToken, sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 import { SESSION_COOKIE } from "../../lib/sessionCookie";
 import { normalizedRegistryCountDigest } from "../helpers/standalone-0090-comparison";
+import { read0090ColumnErrorCode } from "../helpers/standalone-0090-column-probe";
 
 // A historical published migration, copied byte-for-byte for synthetic test
 // setup only. This file is never included in the application's migration set.
@@ -68,9 +69,12 @@ beforeAll(async () => {
     await source.query("COMMIT");
   } catch (error) { await source.query("ROLLBACK"); throw error; }
   const after = (await source.query("SELECT version,name,checksum,applied_at::text,adopted FROM schema_migrations ORDER BY version")).rows;
-  expect(after.filter(row => row.version !== "0090")).toEqual(before);
-  expect(after).toHaveLength(before.length + 1);
-  expect(after.filter(row => row.version === "0090")).toMatchObject([{version:"0090",name:"booking_request_preferences",checksum:HASH_0090,adopted:false}]);
+  expect(sha(Buffer.from(JSON.stringify(after.filter(row => row.version !== "0090")))))
+    .toBe(sha(Buffer.from(JSON.stringify(before))));
+  expect(after.length).toBe(before.length + 1);
+  const historicalRows = after.filter(row => row.version === "0090");
+  expect(historicalRows.length).toBe(1);
+  expect(historicalRows[0].name === "booking_request_preferences" && historicalRows[0].checksum === HASH_0090 && historicalRows[0].adopted === false).toBe(true);
   expect((await source.query("SELECT COUNT(*)::int AS n FROM booking_requests")).rows[0].n).toBe(0);
   const empty = await archive();
   // With no booking rows, the source application's SQL must be equivalent to
@@ -111,9 +115,9 @@ it.each(["control", "empty", "populated"] as const)("checks source history 0090 
     const url = new URL(urlText);
     if (url.hostname !== "127.0.0.1" || url.port !== "55472" || !/^\/aqlan_0090_witness_[a-f0-9]{32}$/.test(url.pathname)) throw new Error("Synthetic owned loopback database required");
   }
-  expect(sourceUrl).not.toBe(targetUrl);
+  expect(sourceUrl !== targetUrl).toBe(true);
   const identity = (await target.pool.query("SELECT current_database() AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=current_database()")).rows[0];
-  expect(identity).toEqual(target.identity);
+  expect(identity.name === target.identity.name && identity.oid === target.identity.oid && identity.owner === target.identity.owner).toBe(true);
   if (kind !== "control") {
     await target.pool.query("CREATE TABLE synthetic_0090_sentinel (value text NOT NULL)");
     await target.pool.query("INSERT INTO synthetic_0090_sentinel VALUES ('synthetic-must-remain')");
@@ -158,21 +162,37 @@ it.each(["control", "empty", "populated"] as const)("checks source history 0090 
     if (Date.now() > deadline) throw new Error("Synthetic 0090 server startup timed out");
     await new Promise(resolve => setTimeout(resolve, 200));
   }
-  expect((await target.pool.query("SELECT current_database() AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=current_database()")).rows[0]).toEqual(identity);
+  const beforeRequestIdentity = (await target.pool.query("SELECT current_database() AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=current_database()")).rows[0];
+  expect(beforeRequestIdentity.name === identity.name && beforeRequestIdentity.oid === identity.oid && beforeRequestIdentity.owner === identity.owner).toBe(true);
   const response = await fetch(`${base}/api/settings/backup/restore`, {method:"POST",headers:{cookie:`${SESSION_COOKIE}=${createSessionToken(actor)}`,Origin:base,"Sec-Fetch-Site":"same-origin","Content-Type":"application/json"},body:JSON.stringify({backupId:archiveId,confirmation:archiveId})});
-  const body = await response.json().catch(() => null);
+  const body = await response.json().catch(() => null) as {ok?:unknown; reason?:unknown; readyForCutover?:unknown} | null;
   if (kind === "control") {
     expect(response.status).toBe(200);
-    expect(body).toMatchObject({ok:true,readyForCutover:true});
-    expect((await target.pool.query("SELECT version FROM schema_migrations WHERE version='0090'")).rows).toEqual([]);
+    expect(body?.ok === true && body.readyForCutover === true).toBe(true);
+    expect((await target.pool.query("SELECT version FROM schema_migrations WHERE version='0090'")).rows.length).toBe(0);
     return;
   }
   expect.soft(response.status).toBe(500);
-  expect.soft(body).toMatchObject({ok:false,reason:"archive-integrity-mismatch"});
+  expect.soft(body?.ok === false && body.reason === "archive-integrity-mismatch").toBe(true);
   const table = (await target.pool.query("SELECT to_regclass('public.synthetic_0090_sentinel') IS NOT NULL AS present")).rows[0].present;
   expect.soft(table).toBe(true);
-  if (table) expect.soft((await target.pool.query("SELECT value FROM synthetic_0090_sentinel")).rows).toEqual([{value:"synthetic-must-remain"}]);
+  if (table) {
+    const sentinel = (await target.pool.query("SELECT value FROM synthetic_0090_sentinel")).rows;
+    expect.soft(sentinel.length === 1 && sentinel[0].value === "synthetic-must-remain").toBe(true);
+  }
   const stageBytes = await readFile(path.join(stage, "synthetic-prior-document.txt")).catch(() => null);
-  expect.soft(stageBytes).toEqual(STAGE_MARKER);
-  expect.soft((await target.pool.query("SELECT current_database() AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=current_database()")).rows[0]).toEqual(identity);
+  expect.soft(stageBytes !== null && stageBytes.equals(STAGE_MARKER)).toBe(true);
+  const afterIdentity = (await target.pool.query("SELECT current_database() AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=current_database()")).rows[0];
+  expect.soft(afterIdentity.name === identity.name && afterIdentity.oid === identity.oid && afterIdentity.owner === identity.owner).toBe(true);
+  if (kind === "populated" && !response.ok) {
+    if (afterIdentity.name !== identity.name || afterIdentity.oid !== identity.oid || afterIdentity.owner !== identity.owner) throw new Error("Synthetic target identity changed");
+    const relation = (await target.pool.query("SELECT to_regclass('public.booking_requests') IS NOT NULL AS present")).rows[0].present;
+    // A correct pre-reset refusal leaves this new target without the table;
+    // only diagnose the missing column if the table actually exists afterwards.
+    if (relation) {
+      const code = await read0090ColumnErrorCode(sql => target.pool.query(sql));
+      console.log(`SYNTHETIC_0090_COLUMN_SQLSTATE=${code ?? "NONE"}`);
+      expect.soft(code).toBe("42703");
+    }
+  }
 }, 300000);

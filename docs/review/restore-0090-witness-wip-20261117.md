@@ -51,3 +51,14 @@ HTTP case: the SQL generator's migration-row count comment changed after the
 normalizes that single comment and compares SHA-256 digests of all remaining
 SQL; its focused unit tests include a changed-row negative control. The updated
 witness itself has not yet been run against PostgreSQL or CI.
+
+Hosted run `44080733511` on `08ba2ac7` passed the 0079 witness and the
+pre-0090 control. The empty-booking case returned 200 and lost its synthetic
+sentinel and stage; the populated case returned `restore-failed`, lost both,
+and reported a missing `request_key`. That endpoint result did not expose
+SQLSTATE 42703. This follow-up adds a bounded, read-only column probe on the
+identity-checked populated target after rejection, only if the booking table
+exists; 42703 would be the subsequent probe's code, not the endpoint's. A
+correct pre-reset refusal leaves this newly created target without that table,
+so the probe is not a requirement to create a table after rejection. The
+updated probe has not yet been run against PostgreSQL or CI.
