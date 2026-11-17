@@ -2,6 +2,7 @@ import type { ReactElement,ReactNode } from "react";
 import { afterEach,beforeEach,describe,expect,it,vi } from "vitest";
 import { makeCanonicalCoverageDraft } from "../lib/canonical-ortho-coverage-draft";
 import { OrthoFollowupCoveragePanel } from "../components/OrthoFollowupCoveragePanel";
+import { followupCoverageJournal } from "../lib/ortho-followup-coverage-recovery";
 const state=vi.hoisted(()=>({session:{username:"synthetic-admin",role:"admin",permissions:{}} as {username:string;role:string;permissions:object;canonical?:boolean;isOwner?:boolean;capabilities?:string[];patientScope?:"none"|"own"|"all"}|null}));
 vi.mock("../components/SessionProvider",()=>({useSession:()=>state.session}));
 const persistence=vi.hoisted(()=>({rows:new Map<string,import("../lib/financial-command-journal").FinancialJournal>(),fail:false,acknowledged:0}));
@@ -51,6 +52,16 @@ async function open(){click(button('نطاق المتابعات'));await settle(
 function fill(){change('مصدر تغطية المتابعات','601:501');render();change('قرار نطاق المتابعات','included');render();change('سبب اعتماد نطاق المتابعات','Synthetic explicit agreement');render();const box=find(n=>n.type==='input'&&n.props.type==='checkbox');(box.props.onChange as (e:{target:{checked:boolean}})=>void)({target:{checked:true}});render();}
 beforeEach(()=>{clear();hooks.key='';persistence.rows.clear();persistence.fail=false;persistence.acknowledged=0;props={patientId:101,orthoCaseId:201,onSaved:vi.fn()};state.session={username:'synthetic-admin',role:'admin',permissions:{}};fetchMock.mockReset().mockImplementation(()=>json(read()));vi.stubGlobal('fetch',fetchMock);vi.stubGlobal('window',new EventTarget());});
 afterEach(()=>{clear();vi.useRealTimers();vi.unstubAllGlobals();});
+it("keeps a historical journal when the retired substrate returns 503",async()=>{
+  const attempt={actor:'synthetic-admin',patientId:101,orthoCaseId:201,command:{schemaVersion:1 as const,commandId:'12345678-1234-4123-8123-123456789012',expectedRevisionId:null,source:{patientId:101,orthoCaseId:201,clinicalCaseId:301,planId:401,planItemId:501,invoiceId:601},expectedSourceFingerprint:'a'.repeat(64),scope:'routine_adjustments' as const,decision:'included' as const,reason:'Synthetic previous command'}};
+  const command=followupCoverageJournal(attempt);persistence.rows.set(JSON.stringify({actor:'synthetic-admin',patientId:101}),{revision:0,command});
+  fetchMock.mockImplementation((_url:string,init:RequestInit)=>init.method==='PUT'?json({code:'coverage_not_ready'},503):json({...read(),enabled:false,canEdit:false}));
+  render();await settle();await settle();
+  click(button('تحقق من نتيجة الطلب نفسه'));await settle();
+  expect(stored()).toEqual(command);expect(persistence.acknowledged).toBe(0);
+  expect(fetchMock.mock.calls.filter(([,init])=>init.method==='PUT')).toHaveLength(1);
+  expect(nodes(render()).some(n=>n.props.role==='alert'&&String(n.props.children).includes('الطلب محفوظ'))).toBe(true);
+});
 describe('explicit routine-followup coverage editor',()=>{
   it('does not offer the administrator action to a physician/reception and never auto-selects coverage',async()=>{
     state.session={username:'synthetic-doctor',role:'doctor',permissions:{}};expect(render()).toBeNull();expect(fetchMock).not.toHaveBeenCalled();

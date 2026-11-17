@@ -4,12 +4,18 @@ import type { Pool } from "pg";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
 import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
 import { seedCanonicalCoverage } from "../fixtures/canonical-ortho-coverage";
+import { applyRuntimeMigrationFiles, loadMigrationFiles } from "../../lib/migrations";
 import type { FollowupCoverageCommand } from "../../lib/ortho-followup-coverage";
 vi.mock("server-only",()=>({})); assertRealPostgresUrl(); stubPostgresEnv(); vi.stubEnv("SESSION_SECRET","synthetic-coverage-retirement-secret-0123456789");
 const db=await import("../../lib/db"), command=await import("../../lib/canonical-ortho-coverage-command"), status=await import("../../lib/canonical-ortho-coverage-status"), editor=await import("../../lib/canonical-ortho-coverage-editor");
 const accounts={owner:{username:"SYN-RETIRE-OWNER",role:"admin",doctor:true}, denied:{username:"SYN-RETIRE-DENIED",role:"reception",patientScope:"none"}} as const;
 let fx:CanonicalInventoryDatabase<keyof typeof accounts>;
-beforeAll(async()=>{fx=await openCanonicalInventoryDatabase(db,accounts,"owner");},180000);
+beforeAll(async()=>{
+ fx=await openCanonicalInventoryDatabase(db,accounts,"owner");
+ // Explicit historical fixture, independent of whether fresh bootstrap activates 0079.
+ const old=(await loadMigrationFiles()).find(f=>f.version==="0079");if(!old)throw new Error("Historical 0079 source required");
+ await applyRuntimeMigrationFiles(fx.pool,[old]);
+},180000);
 afterAll(async()=>{await fx?.close();});
 it("preserves exact historical receipts and rejects new or simultaneous requests without changing historical data",async()=>{
  const p=(await fx.pool.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-RETIRED-COV','Synthetic patient') RETURNING id")).rows[0].id;
@@ -38,5 +44,10 @@ it("preserves exact historical receipts and rejects new or simultaneous requests
  const results=await Promise.allSettled([command.commandCanonicalFollowupCoverage(owner,p,s.ortho,fresh),command.commandCanonicalFollowupCoverage(owner,p,s.ortho,fresh)]);
  expect(results).toHaveLength(2);for(const r of results){expect(r.status).toBe("rejected");if(r.status==="rejected")expect(r.reason).toMatchObject({code:"coverage_authoring_retired"});}
  await expect(command.commandCanonicalFollowupCoverage(owner,p,s.ortho,{...c,reason:"SYN tampered request"})).rejects.toMatchObject({code:"command_conflict"});
+ expect(await rows()).toEqual(before);
+ // An unavailable historical substrate must not be misreported as a terminal outcome.
+ await fx.pool.query("ALTER TABLE visits DISABLE TRIGGER ortho_followup_visit_manifest");
+ try { await expect(status.readCanonicalCoverageCommandStatus(owner,p,s.ortho,c)).rejects.toMatchObject({status:503,code:"coverage_not_ready"}); }
+ finally { await fx.pool.query("ALTER TABLE visits ENABLE TRIGGER ortho_followup_visit_manifest"); }
  expect(await rows()).toEqual(before);
 },180000);
