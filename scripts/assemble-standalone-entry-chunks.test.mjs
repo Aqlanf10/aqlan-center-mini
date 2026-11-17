@@ -28,7 +28,7 @@ test("copies a referenced build chunk and its map exactly, then is idempotent", 
   assert.deepEqual((await assembleStandaloneEntryChunks(root)).copied, []);
 }));
 test("fails closed on unknown, computed or traversing bootstrap references", () => {
-  for (const source of ['R.c(name)', 'R.c("server/chunks/../../outside.js")', 'R.c("/tmp/outside.js")', 'R . c ("server/chunks/a.js")']) assert.throws(() => entryChunks(source), /STANDALONE_ENTRY_REJECTED/);
+  for (const source of ['R.c(name)', 'R.c("server/chunks/../../outside.js")', 'R.c("/tmp/outside.js")', 'R . c ("server/chunks/a.js")', 'R.c("server/chunks/good.js")\nX.c("server/chunks/missing.js")']) assert.throws(() => entryChunks(source), /STANDALONE_ENTRY_REJECTED/);
 });
 test("rejects missing original chunk without writing anything", () => fixture(async ({root, build, shipped}) => {
   await rm(path.join(root, build, "chunks/ssr/synthetic.js"));
@@ -40,9 +40,9 @@ test("rejects altered shipped entries and altered existing chunks", () => fixtur
   await assert.rejects(assembleStandaloneEntryChunks(root), /entry differs from build/);
 }));
 test("rejects a missing or changed bootstrap syntax and a forged entry identity", () => fixture(async ({root, put, build, shipped, entry}) => {
-  for (const text of ['R.c("server/chunks/ssr/synthetic.js")\n', entry.replace("server/app/_global-error/page.js", "server/app/other/page.js"), entry.replace('R.c(', 'X.c(')]) {
+  for (const [text, reason] of [['R.c("server/chunks/ssr/synthetic.js")\n', /unrecognized entry bootstrap/], [entry.replace("server/app/_global-error/page.js", "server/app/other/page.js"), /unrecognized entry bootstrap/], [entry.replace('R.c(', 'X.c('), /unrecognized entry chunk syntax/]]) {
     await put(`${build}/app/_global-error/page.js`, text); await put(`${shipped}/app/_global-error/page.js`, text);
-    await assert.rejects(assembleStandaloneEntryChunks(root), /unrecognized entry bootstrap/);
+    await assert.rejects(assembleStandaloneEntryChunks(root), reason);
   }
 }));
 test("rejects an existing chunk with bytes different from its build original", () => fixture(async ({root, put, shipped}) => {
@@ -57,6 +57,11 @@ test("rejects a symlinked build map and a conflicting existing shipped map", () 
   await put(`${shipped}/chunks/ssr/synthetic.js.map`, '{"version":3,"sources":["different"],"mappings":""}');
   await assert.rejects(assembleStandaloneEntryChunks(root), /shipped map differs from build/);
   await assert.rejects(readFile(path.join(root, shipped, "chunks/ssr/synthetic.js")), {code:"ENOENT"});
+}));
+test("rejects a conflicting map even when its chunk already exists", () => fixture(async ({root, put, shipped}) => {
+  await put(`${shipped}/chunks/ssr/synthetic.js`, "synthetic chunk bytes\n");
+  await put(`${shipped}/chunks/ssr/synthetic.js.map`, '{"version":3,"sources":["different"],"mappings":""}');
+  await assert.rejects(assembleStandaloneEntryChunks(root), /shipped map differs from build/);
 }));
 test("rejects symlinked source files and destination files", () => fixture(async ({root, build, shipped}) => {
   const source = path.join(root, build, "chunks/ssr/synthetic.js");

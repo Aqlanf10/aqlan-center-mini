@@ -56,8 +56,9 @@ async function entries(base, relative) {
  * Unknown syntax fails rather than silently omitting a dependency. */
 export function entryChunks(source) {
   const calls = [...source.matchAll(/(?<![\w$])R\s*\.\s*c\s*\(/g)];
+  const objectCalls = [...source.matchAll(/(?<![\w$])[A-Za-z_$][\w$]*\s*\.\s*c\s*\(/g)];
   const lines = [...source.matchAll(/^R\.c\("([^"\r\n]+)"\)\s*;?\s*$/gm)];
-  if (calls.length !== lines.length) fail("unrecognized entry chunk syntax");
+  if (objectCalls.length !== calls.length || calls.length !== lines.length) fail("unrecognized entry chunk syntax");
   return lines.map(([, name]) => {
     if (!/^server\/chunks\/(?:[A-Za-z0-9_@.\[\]~-]+\/)*[A-Za-z0-9_@.\[\]~-]+\.js$/.test(name)
       || name.split("/").some(part => part === "." || part === "..")) fail("unsafe entry chunk path");
@@ -97,14 +98,12 @@ export async function assembleStandaloneEntryChunks(projectRoot) {
     const original = await checkedFile(build, name);
     const shipped = await checkedFile(standalone, name, true);
     if (shipped && digest(shipped) !== digest(original)) fail(`shipped chunk differs from build: ${name}`);
+    const map = await checkedFile(build, `${name}.map`, true);
+    const shippedMap = await checkedFile(standalone, `${name}.map`, true);
+    if (shippedMap && (!map || digest(shippedMap) !== digest(map))) fail(`shipped map differs from build: ${name}`);
     if (!shipped) {
       plan.push({ name, original });
-      const map = await checkedFile(build, `${name}.map`, true);
-      if (map) {
-        const shippedMap = await checkedFile(standalone, `${name}.map`, true);
-        if (shippedMap && digest(shippedMap) !== digest(map)) fail(`shipped map differs from build: ${name}`);
-        if (!shippedMap) plan.push({ name: `${name}.map`, original: map });
-      }
+      if (map && !shippedMap) plan.push({ name: `${name}.map`, original: map });
     }
   }
   for (const { name, original } of plan) {

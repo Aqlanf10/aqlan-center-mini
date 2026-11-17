@@ -14,6 +14,7 @@ export async function checkWrapperChunks(standaloneRoot, inventory) {
     const bootstrap = /^var R=require\("([^"\\]+)"\)\("([^"\\]+)"\)\r?$/.exec(lines[0]);
     const isWrapper = !!bootstrap && bootstrap[1].endsWith('/[turbopack]_runtime.js');
     const rCalls = text.match(/\bR\.c\s*\(/g) ?? [];
+    const objectCalls = text.match(/(?<![\w$])[A-Za-z_$][\w$]*\s*\.\s*c\s*\(/g) ?? [];
     if (!isWrapper && rCalls.length === 0) continue;
     ensure(isWrapper, `unknown runtime chunk syntax ${file}`);
     const entry = file.slice('.next/'.length);
@@ -25,7 +26,7 @@ export async function checkWrapperChunks(standaloneRoot, inventory) {
     ensure(Object.hasOwn(inventory, runtimeFile), `missing inventoried runtime ${runtimeFile}`);
     ensure(digest(await readFile(path.join(standaloneRoot, runtimeFile))) === inventory[runtimeFile], `changed runtime ${runtimeFile}`);
     const calls = lines.filter(line => /^R\.c\s*\(/.test(line));
-    ensure(calls.length === rCalls.length && calls.length > 0, `unknown chunk call ${file}`);
+    ensure(objectCalls.length === rCalls.length && calls.length === rCalls.length && calls.length > 0, `unknown chunk call ${file}`);
     entries++;
     for (const call of calls) {
       const match = /^R\.c\("(server\/chunks\/[a-zA-Z0-9_@.\/[\]~-]+\.js)"\)\r?$/.exec(call);

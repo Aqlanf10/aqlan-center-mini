@@ -23,6 +23,7 @@ describe('review-only turbopack wrapper references', () => {
     ['dynamic', 'R.c(variable)\n', true],
     ['traversal', 'R.c("server/chunks/../app/unsafe.js")\n', true],
     ['injection', 'R.c("server/chunks/ping.js");evil()\n', true],
+    ['mixed object', 'R.c("server/chunks/ping.js")\nX.c("server/chunks/missing.js")\n', true],
   ]) it(`fails closed on ${name}`, async () => { const f=await fixture(body,include); try { await expect(checkWrapperChunks(f.root,f.inventory)).rejects.toThrow(); } finally {await rm(f.root,{recursive:true,force:true});} });
   it('fails closed if a target changes after inventory', async () => { const f=await fixture(); try { await writeFile(join(f.root,chunk),'changed'); await expect(checkWrapperChunks(f.root,f.inventory)).rejects.toThrow(/changed chunk/); } finally {await rm(f.root,{recursive:true,force:true});} });
   it('fails closed if the entry runtime is missing', async () => { const f=await fixture(); try { await rm(join(f.root,runtime)); delete f.inventory[runtime]; await expect(checkWrapperChunks(f.root,f.inventory)).rejects.toThrow(/missing inventoried runtime/); } finally {await rm(f.root,{recursive:true,force:true});} });
