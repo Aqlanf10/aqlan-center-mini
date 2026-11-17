@@ -28,8 +28,10 @@ establish the state of any production or patient database.
   `ALTER SEQUENCE ... INCREMENT BY` of the existing increment followed by
   `setval`/`nextval` preserved state on rollback for both `is_called` values;
   commit and next-candidate checks passed for both; a concurrent nextval
-  waited until commit/rollback; and one prior-cache experiment did not observe
-  a previously cached value. This is not application integration, a complete
+  waited until commit/rollback; and one prior-cache experiment that changed
+  `CACHE 10` to `CACHE 1` along with the same increment did not observe an old
+  cached value on one subsequent allocation. This does not attribute cache
+  behavior to the increment rewrite alone. This is not application integration, a complete
   cache/session proof, or a successful full CI.
 
 On the reviewed application revision, `stagedRestore` runs
