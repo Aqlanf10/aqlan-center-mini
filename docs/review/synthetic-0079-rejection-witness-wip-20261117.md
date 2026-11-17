@@ -1,0 +1,9 @@
+# Synthetic 0079 rejection witness — WIP
+
+On 2026-11-17 a bounded synthetic PostgreSQL witness exercised `runAdminRestoreDrill` from source commit `f97d6657a541881281e537eda57b72956cb7f880`. A structurally valid, checksum-matching archive contained an 0079-dependent effect without the corresponding historical registry record. The SQL precheck rejected that specific inconsistency, and the restore function returned `archive-integrity-mismatch`.
+
+The test created a new isolated synthetic target database and staging directory. It verified that a sentinel row, a specific staged document, and the target database identity (including owner and OID) were unchanged after rejection. A read-only independent source and result review found no access to any other application database, but did not independently rerun the test or inspect network logs. The target, staging evidence and detailed local probe were retained. Two attempts failed before creating a database because the isolated execution environment did not expose Docker; the subsequent corrected attempt passed.
+
+This result covers one rejection path through the source function and a real synthetic PostgreSQL target. It does not establish that every target row or staged document is preserved, that a valid historical archive restores successfully, or that the built standalone HTTP endpoint was exercised. The separate CI witness and all existing security, HTTP and migration gates remain required. The local probe and database identity are intentionally not included in this branch; they contain environment-specific identifiers and connection details. No production or patient data was used.
+
+This report is a WIP evidence record, not approval to merge or deploy. CI on this documentation-only successor has not been run; CI results on any other head are not attributed to it.
