@@ -146,10 +146,14 @@ describe('administrative restore validation precedes target changes', () => {
     expect(snapshot.sha256).toBe(hash(archive)); expect(snapshot.bytes).toBe(archive.length);
     expect(Buffer.from(snapshot.archive.entries.get('database.sql')!.data)).toEqual(sql);
   });
-  it.each([false,true])('restores the same verified snapshot with project scope=%s even if the archive path changes before target reset', async scoped => {
+  it.each([false,true])('suspends the valid drill with project scope=%s before stage removal, connection or reset', async scoped => {
     if (scoped) vi.stubEnv('RAILWAY_PROJECT_ID', AQLAN_CENTER_MINI_RAILWAY_PROJECT_ID);
     const directory = await mkdtemp(path.join(tmpdir(), 'synthetic-admin-snapshot-'));
     const backups = path.join(directory, 'backups'); await mkdir(backupStateDir(backups), {recursive:true});
+    const stage=path.join(backupStateDir(backups),'restore-drill-current');
+    await mkdir(stage,{recursive:true}); await writeFile(path.join(stage,'prior.txt'),'SYNTHETIC PRIOR');
+    const previousState=path.join(backupStateDir(backups),'restore-drill-state.json');
+    await writeFile(previousState,'SYNTHETIC HISTORICAL STATE');
     const sql = Buffer.from('BEGIN;\nCOMMIT;\n');
     const manifest = { format:'aqlan-full-backup', version:1, createdAt:'2026-01-01T00:00:00.000Z', databaseSha256:hash(sql), documents:[] };
     const archive = tarGzBytes([{name:'database.sql',data:sql},{name:'manifest.json',data:Buffer.from(JSON.stringify(manifest))}]);
@@ -159,16 +163,13 @@ describe('administrative restore validation precedes target changes', () => {
     target.query.mockResolvedValue({rows:[]});
     const restore = vi.spyOn(staging, 'stagedRestore').mockResolvedValue({ok:true,readyForCutover:true,documentsVerified:0,verification:{tablesCount:1}} as never);
     const result = await runAdminRestoreDrill({backupDir:backups,backupId:id,actor:'synthetic',env:environment});
-    expect(result).toMatchObject({ok:true,readyForCutover:true});
-    expect(restore).toHaveBeenCalledOnce();
-    const call = restore.mock.calls[0][0];
-    const snapshot = call.archiveSnapshot;
-    expect(Buffer.from(snapshot!.entries.get('database.sql')!.data)).toEqual(sql);
-    expect(target.constructed).toHaveBeenCalledOnce();
-    expect(target.query).toHaveBeenCalledWith('DROP SCHEMA IF EXISTS public CASCADE');
-    expect(call.targetSnapshot?.config).toBe(target.constructed.mock.calls[0][0]);
-    expect(call.targetUrl).toBe(call.targetSnapshot?.targetUrl);
-    expect(await readFile(archivePath,'utf8')).toBe('replacement synthetic bytes');
+    expect(result).toEqual({ok:false,reason:'restore-temporarily-disabled'});
+    expect(restore).not.toHaveBeenCalled();
+    expect(target.constructed).not.toHaveBeenCalled();
+    expect(target.connect).not.toHaveBeenCalled(); expect(target.query).not.toHaveBeenCalled();
+    expect(await readFile(path.join(stage,'prior.txt'),'utf8')).toBe('SYNTHETIC PRIOR');
+    expect(await readFile(previousState,'utf8')).toBe('SYNTHETIC HISTORICAL STATE');
+    expect(await readFile(archivePath)).toEqual(archive);
   });
 });
 

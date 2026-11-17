@@ -3,6 +3,7 @@ import { Client, Pool } from "pg";
 import { assertPostgresMajorOrThrow, postgresMajorFromVersionNum } from "../../lib/env-contract";
 import { validateOperationalVerificationEnvironment } from "../../lib/verification-target-policy.mjs";
 import { validatePostgresTestTarget } from "./_safe-target";
+import { validateHistoryWitnessEnvironment } from "./_history-witness-guard";
 
 const NAME = /^aqlan_backup_precision_[a-f0-9]{32}(?![\s\S])/;
 type Identity = { name: string; oid: string; owner: string };
@@ -21,7 +22,15 @@ export function assertBackupTimestampFixtureIdentity(expected: Identity, actual:
 }
 
 /** CI-only fixture. No reset of a supplied database, app globals or migrations. */
-export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv) {
+export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv, options: {
+  retainOwned?: boolean;
+  onIntent?: (name: string) => Promise<void>;
+  onOwned?: (identity: Readonly<Identity>) => Promise<void>;
+} = {}) {
+  if (options.retainOwned) {
+    validateHistoryWitnessEnvironment(environment);
+    if (!options.onIntent || !options.onOwned) throw new Error("Retained backup fixture requires intent and identity recording.");
+  }
   // Check original aliases, classifications and Railway markers before connecting.
   const target = validateBackupTimestampFixtureTarget(environment);
   const admin = new Client({ connectionString: target.maintenanceUrl.toString(), ssl: false });
@@ -35,6 +44,7 @@ export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv)
     for (const database of [...owned].reverse()) {
       try {
         await database.pool?.end();
+        if (options.retainOwned) continue;
         if (!database.identity) throw new Error("New backup fixture identity unavailable; cleanup requires review.");
         const { rows } = await admin.query<Identity>(
           "SELECT datname AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=$1", [database.name]);
@@ -44,7 +54,7 @@ export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv)
         await admin.query(`DROP DATABASE "${database.name}"`);
       } catch (error) { failures.push(error); }
     }
-    if (connected) try { await admin.end(); } catch (error) { failures.push(error); }
+    if (connected || options.retainOwned) try { await admin.end(); } catch (error) { failures.push(error); }
     if (failures.length) throw new AggregateError(failures, "Backup timestamp fixture cleanup incomplete.");
   };
   try {
@@ -55,6 +65,7 @@ export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv)
     const open = async () => {
       const name = `aqlan_backup_precision_${randomUUID().replaceAll("-", "")}`;
       if (!NAME.test(name)) throw new Error("Unsafe backup timestamp fixture name.");
+      if (options.retainOwned) await options.onIntent!(name);
       await admin.query(`CREATE DATABASE "${name}" TEMPLATE template0`);
       const database: (typeof owned)[number] = { name };
       owned.push(database); // A collision fails before this database becomes owned.
@@ -62,6 +73,7 @@ export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv)
         "SELECT datname AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=$1", [name]);
       if (rows.length !== 1) throw new Error("New backup fixture identity unavailable.");
       database.identity = rows[0];
+      if (options.retainOwned) await options.onOwned!(Object.freeze({ ...rows[0] }));
       const url = new URL(target.testUrl); url.pathname = `/${name}`;
       const pool = new Pool({ connectionString: url.toString(), ssl: false, max: 1,
         connectionTimeoutMillis: 10_000, statement_timeout: 15_000 });

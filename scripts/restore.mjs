@@ -1,11 +1,21 @@
 #!/usr/bin/env node
-import "./load-env.mjs";
-import { readFileSync } from "node:fs";
-import { Client } from "pg";
-import { isCanonicalSourceSql, prepareBackupSql } from "../lib/restore/sql.mjs";
-import { loadRestoreMigrationChecksums } from "../lib/restore/migration-provenance.mjs";
-import { finalizeRestoredStaffIdentityInTransaction } from "../lib/staff-authority-lifecycle.mjs";
-import { assertSafeLegacyRestoreTarget } from "./security/synthetic-restore-target-guard.mjs";
+// Temporary fail-closed policy: this legacy importer cannot prove that an
+// initialized target is empty before connecting. Refuse even a fresh target.
+// Keep its implementation below for compatibility review; no argument or
+// environment variable enables it. Full-archive restore is a separate path.
+const RAW_RESTORE_TEMPORARILY_DISABLED = true;
+if (RAW_RESTORE_TEMPORARILY_DISABLED) {
+  console.error("الاستعادة من SQL الخام معطّلة مؤقتًا؛ لم يُقرأ ملف النسخة ولم يُفتح اتصال بالهدف.");
+  process.exitCode = 2;
+} else {
+
+await import("./load-env.mjs");
+const { readFileSync } = await import("node:fs");
+const { Client } = await import("pg");
+const { isCanonicalSourceSql, prepareBackupSql } = await import("../lib/restore/sql.mjs");
+const { loadRestoreMigrationChecksums } = await import("../lib/restore/migration-provenance.mjs");
+const { finalizeRestoredStaffIdentityInTransaction } = await import("../lib/staff-authority-lifecycle.mjs");
+const { assertSafeLegacyRestoreTarget } = await import("./security/synthetic-restore-target-guard.mjs");
 
 /**
  * استعادة نسخة احتياطية.
@@ -79,4 +89,5 @@ try {
   process.exitCode = 1;
 } finally {
   await client.end().catch(() => {});
+}
 }

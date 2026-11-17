@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and fixed Pages API dispatch tables and matrix entries; all app page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "b43a0342a26e8c20d2aecd5d8e524309c692687170f0c790f0b451f9469e9c6f",
+  "sourceDigest": "7b27cb368bc895af765e4132fbe665d4c4bd49bb0c9e8948ad07c9f1ee34555e",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",

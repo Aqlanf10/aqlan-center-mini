@@ -1,0 +1,103 @@
+name: Synthetic restore history retained witness
+
+on:
+  push:
+    branches: [codex-restore-history-retained-ci-wip-20261117]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify_review_branch:
+    name: Verify review branch
+    runs-on: ubuntu-latest
+    env:
+      REVIEW_REF: ${{ github.ref }}
+    steps:
+      - name: Refuse any other branch
+        run: |
+          if [ "$REVIEW_REF" != 'refs/heads/codex-restore-history-retained-ci-wip-20261117' ]; then
+            echo '::error::Synthetic restore witness is restricted to its review branch.'
+            exit 1
+          fi
+
+  raw_and_option_minimum_node:
+    name: Synthetic restore refusals on minimum Node
+    needs: verify_review_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up minimum supported Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify raw SQL and nonempty option refusals without a database
+        run: npx vitest run __tests__/restore-raw-temporary-refusal.test.ts __tests__/restore-full-nonempty-cli.test.ts --maxWorkers=1 --no-file-parallelism
+
+  retained_history:
+    needs: verify_review_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: aqlan_p1_test
+        ports:
+          - 55473:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
+      TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
+      SYNTHETIC_RESTORE_HISTORY_WITNESS: '1'
+      SYNTHETIC_WITNESS_ROOT: ${{ runner.temp }}
+      SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
+      CLINIC_TIME_ZONE: Asia/Aden
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify report redaction
+        run: node --test scripts/restore-history-report-test.mjs
+      - name: Run guarded synthetic restore cases
+        id: witness
+        run: npx vitest run --config vitest.config.restore-history-witness.mts --reporter=json --outputFile="$RUNNER_TEMP/restore-history-vitest.json"
+      - name: Create fixed-field result report
+        id: report
+        if: always() && steps.witness.outcome != 'skipped'
+        env:
+          SYNTHETIC_WITNESS_OUTCOME: ${{ steps.witness.outcome }}
+        run: node scripts/restore-history-report.mjs
+      - name: Preserve sanitized report
+        if: always() && steps.report.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-restore-history-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/restore-history-safe-report.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Require all five synthetic cases
+        if: always() && steps.report.outcome == 'success'
+        run: node scripts/restore-history-report.mjs --gate

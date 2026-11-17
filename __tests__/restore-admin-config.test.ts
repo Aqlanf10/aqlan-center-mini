@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { restoreDrillAvailability } from "../lib/restore/admin";
+import { restoreDrillAvailability, restoreDrillExecutionAvailability } from "../lib/restore/admin";
 
 const staging = "postgres://restore_user:secret@restore.internal:5432/restore_drill";
 const production = "postgres://prod_user:secret@prod.internal:5432/clinic";
@@ -32,12 +32,14 @@ describe("بوابة Restore Drill الإدارية", () => {
   });
 
   it("تقبل قاعدة مستقلة مخصصة ومصنفة staging", () => {
-    const result = restoreDrillAvailability({
+    const env = {
       DATABASE_URL: production,
       RESTORE_DRILL_DATABASE_URL: staging,
       RESTORE_DRILL_DATABASE_ENVIRONMENT: "staging",
       RESTORE_DRILL_DEDICATED_TARGET: "true",
-    });
+    };
+    const result = restoreDrillAvailability(env);
     expect(result).toEqual({ available: true, targetEnvironment: "staging", reason: null });
+    expect(restoreDrillExecutionAvailability(env)).toEqual({available:false,targetEnvironment:"staging",reason:"restore-temporarily-disabled"});
   });
 });

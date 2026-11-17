@@ -79,6 +79,7 @@ export async function POST(request: Request) {
     "unsafe-classification": "هدف الاستعادة غير آمن؛ يجب أن يكون staging أو test.",
     "target-not-dedicated": "هدف الاستعادة غير معلن كقاعدة مخصصة قابلة للمسح.",
     "production-collision": "هدف الاستعادة يطابق قاعدة الإنتاج؛ تم الرفض بنيويًا.",
+    "restore-temporarily-disabled": "تجربة الاستعادة الإدارية متوقفة مؤقتًا لحماية البيانات.",
     "backup-not-found": "النسخة غير موجودة أو لم تعد Verified ومتاحة.",
     "archive-integrity-mismatch": "فشل تحقق سلامة الأرشيف؛ لم تُلمس قاعدة الاستعادة.",
     "restore-failed": "فشل Restore Drill على الهدف المعزول. لم تُستعد بيانات فوق Production.",
@@ -89,6 +90,7 @@ export async function POST(request: Request) {
     "unsafe-classification",
     "target-not-dedicated",
     "production-collision",
+    "restore-temporarily-disabled",
   ].includes(result.reason);
   const status = result.reason === "backup-not-found" ? 404 : unavailable ? 503 : 500;
   return noStore({ ok: false, reason: result.reason, message: messages[result.reason] }, status);

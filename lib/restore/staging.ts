@@ -14,6 +14,7 @@ import { STAFF_AUTHORITY_RELATIONS, staffLifecycleLockKey } from "../legacy-staf
 import { RestoreHoldError, installRestoreHold } from "./restore-hold";
 import { loginPhotoRestoreProblem } from "./login-photo";
 import { isRestoreMigrationSnapshot } from "./migration-catalog";
+import { NONEMPTY_RESTORE_DISABLED } from "./nonempty-policy";
 
 /**
  * الاستعادة بإعداد Staging/Cutover (P1.15) — لا حالة نصف مستعادة أبدًا.
@@ -43,7 +44,7 @@ export interface StagedRestoreOptions {
   /** Internal, validated snapshot reused by the admin pre-reset path. */
   targetSnapshot?: RestoreClientSnapshot;
   stagingDir: string;
-  /** يرفض الهدف غير الفارغ افتراضًا — لا استعادة فوق بيانات بلا علم صريح. */
+  /** Temporarily unsupported: true is rejected before reading the archive or accessing the target. */
   allowNonEmptyTarget?: boolean;
   /**
    * Installs schema proposals that are not registered migrations yet (inventory,
@@ -145,10 +146,11 @@ async function nonDeferrableCyclicForeignKeys(client: Client): Promise<ForeignKe
  * المعزول يمكن التخلي عنه بأمان في أي لحظة (هذا جوهر العزل).
  */
 export async function stagedRestore(options: StagedRestoreOptions): Promise<StagedRestoreResult> {
+  const refuseNonEmptyOption = options.allowNonEmptyTarget === true;
   const result: StagedRestoreResult = {
     ok: false,
     restoreHold: false,
-    targetIdentity: parseDatabaseHost(options.targetUrl),
+    targetIdentity: refuseNonEmptyOption ? null : parseDatabaseHost(options.targetUrl),
     validationErrors: [],
     documentsRestored: 0,
     documentsVerified: 0,
@@ -160,6 +162,14 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     cutoverSteps: [],
     errors: [],
   };
+
+  // The option is refused regardless of actual target contents: determining
+  // emptiness would itself require accessing the target. This does not fence
+  // independent writers or alter the separate admin and raw CLI restore paths.
+  if (refuseNonEmptyOption) {
+    result.errors.push(NONEMPTY_RESTORE_DISABLED);
+    return result;
+  }
 
   // ── الخطوة ١: قراءة الأرشيف كاملًا وتحقيقه — قبل أي لمس للهدف.
   let archive;
@@ -217,10 +227,10 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
 
     // ── الخطوة ٢: الهدف فارغ؟ (رفض غير الفارغ افتراضًا)
     const tables = canonicalSource ? 0 : await targetTableCount(client);
-    if (tables > 0 && !options.allowNonEmptyTarget) {
+    if (tables > 0) {
       result.errors.push(
         `الهدف ليس فارغًا (${tables} جدولًا). الاستعادة فوق بيانات قائمة مرفوضة `
-        + "افتراضًا — إن كان المقصود فعلًا فمرّر allowNonEmptyTarget بوعي كامل.",
+        + "حاليًا؛ استخدم هدف استعادة جديدًا ومعزولًا.",
       );
       return result;
     }

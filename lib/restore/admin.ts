@@ -1,18 +1,14 @@
 import path from "node:path";
-import { mkdir, rm } from "node:fs/promises";
-import { Client } from "pg";
 import { assertNoAmbientPgOptions, parseRestoreIdentity } from "./target-identity.mjs";
 import { assertNoScopedRestoreCollision } from "./target-scope";
-import { createRestoreClientSnapshot, restoreConfigFromSnapshot, type RestoreClientSnapshot } from "./client-config";
+import { createRestoreClientSnapshot, restoreConfigFromSnapshot } from "./client-config";
 import { classifyDbTarget } from "../db-target";
 import { readBackupHistory } from "../backupHistory";
 import {
-  atomicWriteJson,
   backupStateDir,
   readJsonFile,
   resolveBackupArchivePath,
 } from "../backupVolume";
-import { stagedRestore } from "./staging";
 import { readTarGzSnapshot } from "./archive";
 import { validateBackupArchive } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
@@ -25,7 +21,8 @@ export type RestoreDrillUnavailableReason =
   | "missing-classification"
   | "unsafe-classification"
   | "target-not-dedicated"
-  | "production-collision";
+  | "production-collision"
+  | "restore-temporarily-disabled";
 
 type EnvironmentLike = Record<string, string | undefined>;
 
@@ -89,32 +86,17 @@ export function restoreDrillAvailability(
   return { available: true, targetEnvironment: classification, reason: null };
 }
 
+/** Configuration may be valid, but execution is suspended until isolation is proven. */
+export function restoreDrillExecutionAvailability(env: EnvironmentLike = process.env): RestoreDrillAvailability {
+  const target=restoreDrillAvailability(env);
+  return target.available ? { available:false, targetEnvironment:target.targetEnvironment, reason:"restore-temporarily-disabled" } : target;
+}
+
 export async function readRestoreDrillState(backupDir: string): Promise<RestoreDrillState | null> {
   const read = await readJsonFile<RestoreDrillState>(
     path.join(backupStateDir(backupDir), RESTORE_DRILL_STATE_FILE),
   );
   return read.ok ? read.data : null;
-}
-
-async function writeRestoreDrillState(backupDir: string, state: RestoreDrillState): Promise<void> {
-  await mkdir(backupStateDir(backupDir), { recursive: true });
-  await atomicWriteJson(path.join(backupStateDir(backupDir), RESTORE_DRILL_STATE_FILE), state);
-}
-
-/** الهدف مخصص صراحةً للـdrill؛ يمسح قبل كل تشغيل كي تبقى التجربة قابلة للتكرار. */
-async function resetDedicatedTarget(snapshot: RestoreClientSnapshot): Promise<void> {
-  // Re-check current application aliases in the same synchronous turn as Client
-  // construction. URL aliases can otherwise change while archive I/O is pending.
-  const identity = parseRestoreIdentity(snapshot.targetUrl, { target:true });
-  assertNoScopedRestoreCollision(identity, process.env);
-  const client = new Client(restoreConfigFromSnapshot(snapshot, snapshot.targetUrl));
-  try {
-    await client.connect();
-    await client.query("DROP SCHEMA IF EXISTS public CASCADE");
-    await client.query("CREATE SCHEMA public");
-  } finally {
-    await client.end().catch(() => {});
-  }
 }
 
 export type AdminRestoreDrillResult =
@@ -137,10 +119,7 @@ export type AdminRestoreDrillResult =
         | "restore-failed";
     };
 
-/**
- * استعادة تجريبية حقيقية إلى هدف staging/test مخصص. لا يوجد في هذا المسار
- * أي كتابة إلى DATABASE_URL الإنتاجي، ولا cutover آلي.
- */
+/** Validate the prior drill inputs, then refuse execution while isolation is unproven. */
 export async function runAdminRestoreDrill(input: {
   backupDir: string;
   backupId: string;
@@ -196,86 +175,12 @@ export async function runAdminRestoreDrill(input: {
     return { ok: false, reason: "archive-integrity-mismatch" };
   }
 
-  let targetSnapshot: RestoreClientSnapshot;
+  // Preserve archive and target identity validation, but suspend the drill
+  // before touching the prior stage, opening a restore client, or mutating
+  // the target. A dedicated-target declaration does not establish isolation.
   try {
-    targetSnapshot = createRestoreClientSnapshot(env.RESTORE_DRILL_DATABASE_URL!, env);
+    const targetSnapshot = createRestoreClientSnapshot(env.RESTORE_DRILL_DATABASE_URL!, env);
     restoreConfigFromSnapshot(targetSnapshot, targetSnapshot.targetUrl);
-  }
-  catch { return { ok:false, reason:"unsafe-classification" }; }
-  await rm(stagingDir, { recursive: true, force: true });
-  await mkdir(stagingDir, { recursive: true });
-
-  const startedAt = new Date();
-  const running: RestoreDrillState = {
-    backupId: input.backupId,
-    requestedAt: startedAt.toISOString(),
-    completedAt: null,
-    requestedBy: input.actor.slice(0, 120),
-    status: "running",
-    targetEnvironment: availability.targetEnvironment,
-    archiveSha256: record.archiveSha256,
-    documentsVerified: 0,
-    tablesCount: 0,
-    durationMs: null,
-    readyForCutover: false,
-    errorCode: null,
-  };
-  await writeRestoreDrillState(input.backupDir, running);
-
-  try {
-    await resetDedicatedTarget(targetSnapshot);
-    const result = await stagedRestore({
-      archivePath,
-      archiveSnapshot,
-      migrationFilesSnapshot,
-      targetUrl: targetSnapshot.targetUrl,
-      targetSnapshot,
-      stagingDir,
-      allowNonEmptyTarget: false,
-    });
-    const durationMs = Date.now() - startedAt.getTime();
-
-    if (!result.ok || !result.readyForCutover) {
-      await writeRestoreDrillState(input.backupDir, {
-        ...running,
-        completedAt: new Date().toISOString(),
-        status: "failed",
-        documentsVerified: result.documentsVerified,
-        tablesCount: result.verification.tablesCount,
-        durationMs,
-        errorCode: "restore-failed",
-      });
-      return { ok: false, reason: "restore-failed" };
-    }
-
-    await writeRestoreDrillState(input.backupDir, {
-      ...running,
-      completedAt: new Date().toISOString(),
-      status: "ready",
-      documentsVerified: result.documentsVerified,
-      tablesCount: result.verification.tablesCount,
-      durationMs,
-      readyForCutover: true,
-    });
-    return {
-      ok: true,
-      readyForCutover: true,
-      backupId: input.backupId,
-      archiveSha256: record.archiveSha256,
-      documentsVerified: result.documentsVerified,
-      tablesCount: result.verification.tablesCount,
-      durationMs,
-      targetEnvironment: availability.targetEnvironment,
-    };
-  } catch {
-    const durationMs = Date.now() - startedAt.getTime();
-    await writeRestoreDrillState(input.backupDir, {
-      ...running,
-      completedAt: new Date().toISOString(),
-      status: "failed",
-      durationMs,
-      errorCode: "restore-failed",
-    }).catch(() => {});
-    return { ok: false, reason: "restore-failed" };
-  }
+  } catch { return { ok:false, reason:"unsafe-classification" }; }
+  return { ok:false, reason:"restore-temporarily-disabled" };
 }

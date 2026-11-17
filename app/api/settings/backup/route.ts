@@ -8,7 +8,7 @@ import { destinationProviders } from "@/lib/backupDestinations";
 import { nextScheduledRunIso } from "@/lib/backupSchedule";
 import { readBackupHistory } from "@/lib/backupHistory";
 import { manualBackupDeleteProtection } from "@/lib/backupAdmin";
-import { readRestoreDrillState, restoreDrillAvailability } from "@/lib/restore/admin";
+import { readRestoreDrillState, restoreDrillExecutionAvailability } from "@/lib/restore/admin";
 import { backupStateDir, resolveBackupDirectory } from "@/lib/backupVolume";
 import path from "node:path";
 import { readProductionBackupActivationState } from "@/lib/productionBackup";
@@ -92,7 +92,7 @@ export async function GET() {
   });
 
   const activation = volumeRoot ? await readProductionBackupActivationState(volumeRoot) : null;
-  const restoreAvailability = restoreDrillAvailability(process.env);
+  const restoreAvailability = restoreDrillExecutionAvailability(process.env);
   const lastRestoreDrill = backupDir ? await readRestoreDrillState(backupDir) : null;
 
   return noStore({

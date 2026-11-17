@@ -1,11 +1,13 @@
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import type { Pool } from 'pg';
 import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
+import { closeRestoreEvidence } from '../helpers/restore-evidence-cleanup';
+import { validateHistoryWitnessEnvironment } from './_history-witness-guard';
 import { fullBackupBlocks } from '../../lib/fullBackup';
 import { stagedRestore } from '../../lib/restore/staging';
 import { parseTarBytes } from '../../lib/restore/archive';
@@ -15,6 +17,7 @@ import { tarGzBytes } from '../helpers/backup-tar';
 vi.mock('next/headers', () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
 
 let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
+let retainEvidence = false;
 let directory: string, archive: Buffer;
 
 async function applicationRows(pool: Pool) {
@@ -24,8 +27,19 @@ async function applicationRows(pool: Pool) {
   return result;
 }
 beforeAll(async () => {
-  fixture = await openBackupTimestampFixture({ ...process.env });
-  directory = await mkdtemp(join(tmpdir(), 'hr-composed-legacy-restore-'));
+  retainEvidence = process.env.SYNTHETIC_RESTORE_HISTORY_WITNESS === '1';
+  if (retainEvidence) {
+    validateHistoryWitnessEnvironment(process.env);
+    directory = await mkdtemp(join(process.env.SYNTHETIC_WITNESS_ROOT!, 'hr-composed-legacy-restore-'));
+    fixture = await openBackupTimestampFixture({ ...process.env }, {
+      retainOwned: true,
+      onIntent: async name => { await writeFile(join(directory, `intent-${name}.json`), JSON.stringify({ name }), { flag: 'wx' }); },
+      onOwned: async identity => { await writeFile(join(directory, `identity-${identity.name}.json`), JSON.stringify(identity), { flag: 'wx' }); },
+    });
+  } else {
+    fixture = await openBackupTimestampFixture({ ...process.env });
+    directory = await mkdtemp(join(tmpdir(), 'hr-composed-legacy-restore-'));
+  }
   // Actual PR326 migration chain, with no HR schema or manually installed receipt table.
   await migrate(fixture.source, { apply: true, files: (await loadMigrationFiles()).filter(file => file.version <= '0043') });
   await fixture.source.query("INSERT INTO patients(id,patient_number,full_name) VALUES(75000,'LEGACY-SYNTHETIC','Synthetic legacy patient')");
@@ -38,7 +52,7 @@ beforeAll(async () => {
   await writeFile(join(directory, 'legacy.tar.gz'), archive);
 });
 afterAll(async () => {
-  try { await fixture?.close(); } finally { if (directory) await rm(directory, { recursive: true, force: true }); }
+  await closeRestoreEvidence({ close: fixture?.close, directory, retain: retainEvidence });
 });
 
 it('restores the actual pre-HR archive on the current migration chain without inventing employee history', async () => {
@@ -70,8 +84,10 @@ it('refuses a truncated archive before creating any target table', async () => {
 it('rolls back every restored data row on a late SQL failure, keeping append-only triggers and migration records intact', async () => {
   const parsed = parseTarBytes(gunzipSync(archive));
   const sql = Buffer.from(parsed.entries.get('database.sql')!.data).toString('utf8');
-  expect(sql).toContain('COMMIT;');
-  const faultySql = Buffer.from(sql.replace(/COMMIT;\s*$/, 'SELECT 1 / 0;\nCOMMIT;\n'));
+  expect(/COMMIT;\s*$/.test(sql)).toBe(true);
+  // A writer-form duplicate reaches replay, after the original synthetic
+  // patient, while remaining within the SQL accepted by archive preflight.
+  const faultySql = Buffer.from(sql.replace(/COMMIT;\s*$/, `INSERT INTO patients ("id", "patient_number", "full_name") VALUES (75000, 'LEGACY-SYNTHETIC-DUPLICATE', 'Synthetic duplicate');\nCOMMIT;\n`));
   const manifest = JSON.parse(Buffer.from(parsed.entries.get('manifest.json')!.data).toString('utf8'));
   manifest.databaseSha256 = createHash('sha256').update(faultySql).digest('hex');
   manifest.databaseBytes = faultySql.length;
@@ -80,12 +96,19 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   await writeFile(path, faultyArchive);
   // Snapshot the current schema-owned seed before replay; it must survive exactly,
   // while none of the archived application rows may survive the late failure.
-  await migrate(fixture.archiveTarget, { apply: true });
-  const beforeReplay = await applicationRows(fixture.archiveTarget);
-  const registryBefore = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
-  const result = await stagedRestore({ archivePath: path, targetUrl: fixture.archiveTarget.options.connectionString!, stagingDir: join(directory, 'failed-documents'), allowNonEmptyTarget: true });
+  expect((await fixture.archiveTarget.query("SELECT tablename FROM pg_tables WHERE schemaname='public'")).rows).toEqual([]);
+  let beforeReplay: Awaited<ReturnType<typeof applicationRows>> | undefined;
+  let registryBefore: unknown[] | undefined;
+  const result = await stagedRestore({ archivePath: path, targetUrl: fixture.archiveTarget.options.connectionString!, stagingDir: join(directory, 'failed-documents'),
+    installUnregisteredProposals: async client => {
+      // Test seam runs after registered migrations, before replay, on the
+      // restore's own connection. Preserve the same post-migration baseline.
+      beforeReplay = await applicationRows(client as unknown as Pool);
+      registryBefore = (await client.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
+    } });
+  expect(beforeReplay).toBeDefined(); expect(registryBefore).toBeDefined();
   expect(result.validationErrors).toEqual([]); expect(result.ok).toBe(false); expect(result.readyForCutover).toBe(false);
-  expect(result.errors.join(' ')).toContain('division by zero');
+  expect(result.errors.join(' ')).toContain('duplicate key value violates unique constraint "patients_pkey"');
   expect(await applicationRows(fixture.archiveTarget)).toEqual(beforeReplay);
   const files = await loadMigrationFiles();
   expect(files.find(file => file.version === '0079')?.checksum).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');

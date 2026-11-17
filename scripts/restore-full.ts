@@ -16,14 +16,18 @@
  */
 import path from "node:path";
 import { validatedRestoreFullTarget } from "./security/restore-full-target-guard.mjs";
+import { NONEMPTY_RESTORE_DISABLED } from "../lib/restore/nonempty-policy";
 
 async function main(): Promise<number> {
+  if (process.argv.includes("--allow-non-empty-target")) {
+    console.error(NONEMPTY_RESTORE_DISABLED);
+    return 3;
+  }
   const archivePath = process.argv[2];
   const targetUrl = process.env.DATABASE_URL ?? "";
   const stagingDir = process.env.DOCUMENTS_DIR
     ? path.resolve(process.env.DOCUMENTS_DIR)
     : null;
-  const allowNonEmpty = process.argv.includes("--allow-non-empty-target");
 
   if (!archivePath || !targetUrl.trim() || !stagingDir) {
     console.error(
@@ -61,7 +65,6 @@ async function main(): Promise<number> {
     archivePath,
     targetUrl: checkedTarget.connectionString,
     stagingDir,
-    allowNonEmptyTarget: allowNonEmpty,
   });
 
   console.log("─".repeat(60));

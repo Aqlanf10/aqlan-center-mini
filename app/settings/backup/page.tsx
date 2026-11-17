@@ -65,6 +65,7 @@ function restoreReasonText(reason: string | null): string {
     "unsafe-classification": "هدف الاستعادة الحالي غير آمن.",
     "target-not-dedicated": "هدف الاستعادة لم يُعتمد كقاعدة مخصصة قابلة للمسح.",
     "production-collision": "هدف الاستعادة يطابق Production وتم رفضه.",
+    "restore-temporarily-disabled": "تجربة الاستعادة الإدارية متوقفة مؤقتًا لحماية البيانات.",
   };
   return reason ? (map[reason] ?? reason) : "الاستعادة المعزولة غير متاحة.";
 }
@@ -190,7 +191,7 @@ export default function BackupRecoveryPage() {
           <div>
             <h2 className="text-sm font-black text-navy-950">التحكم بالطوارئ</h2>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              الاستعادة هنا لا تكتب فوق Production. تُجرَّب النسخة أولًا على قاعدة staging/test مخصصة ثم تعطي READY FOR CUTOVER.
+              تجربة الاستعادة الإدارية متوقفة مؤقتًا لحماية البيانات. نتائج التجارب السابقة تاريخية ولا تثبت الجاهزية الحالية.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -230,7 +231,7 @@ export default function BackupRecoveryPage() {
         )}
         {data?.restore.lastDrill ? (
           <div className="mt-3 rounded-xl bg-white/80 p-3 text-xs">
-            <strong>آخر اختبار:</strong> {data.restore.lastDrill.status === "ready" ? "READY FOR CUTOVER" : data.restore.lastDrill.status}
+            <strong>آخر اختبار تاريخي:</strong> {data.restore.lastDrill.status === "ready" ? "READY FOR CUTOVER — نتيجة تاريخية لا تثبت الجاهزية الحالية" : data.restore.lastDrill.status}
             {" · "}{data.restore.lastDrill.documentsVerified} مستند متحقق
             {" · "}{data.restore.lastDrill.tablesCount} جدول
             {typeof data.restore.lastDrill.durationMs === "number" ? ` · ${(data.restore.lastDrill.durationMs / 1000).toFixed(1)} ث` : ""}

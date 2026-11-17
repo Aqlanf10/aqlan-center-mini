@@ -1,11 +1,13 @@
 import { beforeAll, afterAll, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import type { Pool } from "pg";
 import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
+import { closeRestoreEvidenceAfter } from '../helpers/restore-evidence-cleanup';
+import { validateHistoryWitnessEnvironment } from './_history-witness-guard';
 import { migrate } from "../../lib/migrations";
 import { fullBackupBlocks } from "../../lib/fullBackup";
 import { stagedRestore } from "../../lib/restore/staging";
@@ -27,6 +29,7 @@ vi.mock("next/headers", () => ({ headers: async () => new Headers(), cookies: as
 const db = await import("../../lib/db");
 const originalUrl = process.env.DATABASE_URL, originalSeed = process.env.SKIP_SEED;
 let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
+let retainEvidence = false;
 let directory: string, oldArchive: string, invalidArchive: string;
 const proposals = [INVENTORY_PROCUREMENT_SQL, INVENTORY_CUSTODY_SQL, INVENTORY_SUPPLIER_FINANCE_SQL,
   INVENTORY_COMMAND_LIFECYCLE_SQL, STAFF_AUTHORITY_SQL, INVENTORY_SUPPLIER_TRANSPORT_SQL];
@@ -47,12 +50,24 @@ async function authority(pool: Pool) {
 beforeAll(async () => {
   vi.stubEnv("INVENTORY_INTEGRATION_ENABLED", "true");
   vi.stubEnv("SESSION_SECRET", "synthetic-maintenance-identity-secret-2026");
-  fixture = await openBackupTimestampFixture({ ...process.env });
-  directory = await mkdtemp(join(tmpdir(), "inventory-authority-maintenance-"));
-  for (const pool of [fixture.source, fixture.sqlTarget, fixture.archiveTarget]) await migrate(pool, { apply: true });
+  retainEvidence = process.env.SYNTHETIC_RESTORE_HISTORY_WITNESS === '1';
+  if (retainEvidence) {
+    validateHistoryWitnessEnvironment(process.env);
+    directory = await mkdtemp(join(process.env.SYNTHETIC_WITNESS_ROOT!, 'inventory-authority-maintenance-'));
+    fixture = await openBackupTimestampFixture({ ...process.env }, {
+      retainOwned: true,
+      onIntent: async name => { await writeFile(join(directory, `intent-${name}.json`), JSON.stringify({ name }), { flag: 'wx' }); },
+      onOwned: async identity => { await writeFile(join(directory, `identity-${identity.name}.json`), JSON.stringify(identity), { flag: 'wx' }); },
+    });
+  } else {
+    fixture = await openBackupTimestampFixture({ ...process.env });
+    directory = await mkdtemp(join(tmpdir(), 'inventory-authority-maintenance-'));
+  }
+  // sqlTarget remains pristine until stagedRestore has checked its target.
+  for (const pool of [fixture.source, fixture.archiveTarget]) await migrate(pool, { apply: true });
   await fixture.source.query("INSERT INTO users(id,username,display_name,password_hash,role) VALUES(501,'SYN-OLD-ADMIN','Synthetic prior-version admin','synthetic-maintenance-hash','admin')");
   oldArchive = await archive(fixture.source, "synthetic-old-archive.tar.gz");
-  for (const pool of [fixture.source, fixture.sqlTarget, fixture.archiveTarget]) await install(pool);
+  for (const pool of [fixture.source, fixture.archiveTarget]) await install(pool);
   // Deliberately incomplete source evidence: a realm-bound command with no realm
   // identity. This must never be silently repaired as a new installation.
   const subject = (await fixture.source.query("SELECT staff_subject_id FROM users WHERE id=501")).rows[0].staff_subject_id;
@@ -61,14 +76,24 @@ beforeAll(async () => {
   invalidArchive = await archive(fixture.source, "synthetic-invalid-identity.tar.gz");
 }, 120_000);
 afterAll(async () => {
-  await db.resetPoolForTesting(); process.env.DATABASE_URL = originalUrl; process.env.SKIP_SEED = originalSeed;
-  vi.unstubAllEnvs();
-  try { await fixture?.close(); } finally { if (directory) await rm(directory, { recursive: true, force: true }); }
+  await closeRestoreEvidenceAfter(async () => {
+    try { await db.resetPoolForTesting(); }
+    finally {
+      process.env.DATABASE_URL = originalUrl; process.env.SKIP_SEED = originalSeed;
+      vi.unstubAllEnvs();
+    }
+  }, { close: fixture?.close, directory, retain: retainEvidence });
 });
 
 it("pre-identity backup restores with new subjects and explicit managed initialization, without inventing command provenance", async () => {
+  expect((await fixture.sqlTarget.query("SELECT tablename FROM pg_tables WHERE schemaname='public'")).rows).toEqual([]);
+  let installed = false;
   const result = await stagedRestore({ archivePath: oldArchive, targetUrl: fixture.sqlTarget.options.connectionString!,
-    stagingDir: join(directory, "old-documents"), allowNonEmptyTarget: true });
+    stagingDir: join(directory, "old-documents"), installUnregisteredProposals: async client => {
+      await install(client as unknown as Pool);
+      installed = true;
+    } });
+  expect(installed).toBe(true);
   expect(result.errors).toEqual([]); expect(result.ok).toBe(true);
   const state = await authority(fixture.sqlTarget);
   expect(state.identity).toHaveLength(1); expect(state.subjects).toHaveLength(1);
@@ -81,7 +106,7 @@ it("pre-identity backup restores with new subjects and explicit managed initiali
 
 it("identity-dependent history without source identity rolls back the whole restored dataset", async () => {
   const result = await stagedRestore({ archivePath: invalidArchive, targetUrl: fixture.archiveTarget.options.connectionString!,
-    stagingDir: join(directory, "invalid-documents"), allowNonEmptyTarget: true });
+    stagingDir: join(directory, "invalid-documents") });
   expect(result.ok).toBe(false); expect(result.readyForCutover).toBe(false);
   // Restore protocol revision 3 (B1/R1): this source carries authority relations, so its
   // manifest has identity provenance and the restore refuses at the hold, before any
