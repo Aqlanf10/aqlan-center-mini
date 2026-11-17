@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page, type Route } from "playwright";
 import { Client } from "pg";
 import { baseUrl, harness } from "./_server";
+import { diagnoseCount, diagnoseReload, diagnoseRetryStatus } from "./_expense-safe-diagnostics";
 
 /**
  * Owner's review #483 6882465665 on 0128: an expense whose outcome is unknown is never lost and never
@@ -75,7 +76,8 @@ async function evidence(note: string) {
 }
 const uncertain = (page: Page) => page.getByRole("alert").filter({ hasText: "قد يكون سُجّل" }).first().waitFor({ timeout: 15_000 });
 const pending = (page: Page) => page.getByTestId("pending-expense-attempt");
-const count = (locator: ReturnType<Page["locator"]>, n: number) => expect.poll(() => locator.count(), { timeout: 15_000 }).toBe(n);
+const count = (locator: ReturnType<Page["locator"]>, n: number) =>
+  diagnoseCount(() => locator.count(), n, read => expect.poll(read, { timeout: 15_000 }).toBe(n));
 
 describe("petty expense on the cash screen", () => {
   it("a lost response, then the same click again: one voucher, one drawer movement, one audit", async () => {
@@ -125,6 +127,7 @@ describe("petty expense on the cash screen", () => {
       const refused = page.waitForResponse((r) => r.url().endsWith("/api/expenses") && r.request().method() === "POST");
       await pending(page).getByRole("button", { name: "تحقّق" }).click();
       const answer = await refused;
+      diagnoseRetryStatus(answer.status());
       expect(answer.status()).toBe(409);
       expect(answer.request().headers()["idempotency-key"]).toBe(key);
       expect(await answer.json()).toMatchObject({ code: "exceeds_drawer_cash", requestKeyState: "retired" });
@@ -224,7 +227,7 @@ describe("petty expense on the cash screen", () => {
       await save(page);
       await uncertain(page);
       await signIn(context, "reception");
-      await page.reload({ waitUntil: "networkidle" });
+      await diagnoseReload(() => page.reload({ waitUntil: "networkidle" }));
       await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await count(pending(page), 0);
       await signIn(context, "admin");
