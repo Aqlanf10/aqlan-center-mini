@@ -1,7 +1,7 @@
 // OFFLINE ONLY. Reuses the guarded ownership harness; never packaged or called
 // by preflight. Output is a review candidate, never learned from a live target.
 import { Client, Pool } from "pg";
-import { loadMigrationFiles, migrate } from "../lib/migrations";
+import { applyRuntimeMigrationFiles, loadMigrationFiles, migrate } from "../lib/migrations";
 import { projectDetailedSchemaReadOnly, type DetailedSchemaCatalog } from "../lib/schema-manifest";
 import { FINGERPRINT_FIELDS, FINGERPRINT_SECTIONS, fingerprint, fingerprintIdentity, type FingerprintDisclosurePolicy } from "../lib/schema-fingerprint";
 import { assertPostgres18VersionNum, initializeGeneratedRuntimeSchema, validateOwnershipHarnessEnvironment, withGeneratedDatabasePair } from "./verify-schema-ownership";
@@ -44,20 +44,35 @@ export async function generatePreflightDisclosure(): Promise<FingerprintDisclosu
         const fresh = new Client({ connectionString: urlFor(name), ssl: false }); await fresh.connect();
         try { await assertPristineDisclosureDatabase(fresh); } finally { await fresh.end(); }
       }
+      const files = await loadMigrationFiles();
+      const historical = files.find(file => file.version === "0079");
+      if (!historical) throw new Error("Historical 0079 source is required for disclosure generation.");
       const pool = new Pool({ connectionString: urlFor(names.migrations), ssl: false });
-      try { await migrate(pool, { apply: true, files: await loadMigrationFiles() }); } finally { await pool.end(); }
+      try { await migrate(pool, { apply: true, files }); } finally { await pool.end(); }
       await initializeGeneratedRuntimeSchema(target, names.runtime, process.env);
       const catalogs: DetailedSchemaCatalog[] = [];
-      for (const name of Object.values(names)) {
-        const client = new Client({ connectionString: urlFor(name), ssl: false }); await client.connect();
-        try {
-          await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-          await client.query("SET LOCAL search_path = pg_catalog");
-          await client.query("SET LOCAL row_security = off");
-          catalogs.push(await projectDetailedSchemaReadOnly(client, "public", { includeMutableSequenceState: false }));
-          await client.query("COMMIT");
-        } finally { await client.end(); }
+      async function capture() {
+        for (const name of Object.values(names)) {
+          const client = new Client({ connectionString: urlFor(name), ssl: false }); await client.connect();
+          try {
+            await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+            await client.query("SET LOCAL search_path = pg_catalog");
+            await client.query("SET LOCAL row_security = off");
+            catalogs.push(await projectDetailedSchemaReadOnly(client, "public", { includeMutableSequenceState: false }));
+            await client.query("COMMIT");
+          } finally { await client.end(); }
+        }
       }
+      // The candidate must recognize both allowed physical source histories.
+      // These four snapshots come solely from the two owned template0 databases.
+      await capture();
+      const historicalMigration = new Pool({ connectionString: urlFor(names.migrations), ssl: false });
+      try { await migrate(historicalMigration, { apply: true, files, historical0079: true }); }
+      finally { await historicalMigration.end(); }
+      const historicalRuntime = new Pool({ connectionString: urlFor(names.runtime), ssl: false });
+      try { await applyRuntimeMigrationFiles(historicalRuntime, [historical]); }
+      finally { await historicalRuntime.end(); }
+      await capture();
       return disclosureFromSourceCatalogs(catalogs);
     }, { template0: true });
 }

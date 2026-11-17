@@ -159,6 +159,11 @@ afterAll(async () => {
 
 it("reproduces the reviewed policy solely from fresh numbered/runtime source schemas", async () => {
   const generated = await generatePreflightDisclosure();
+  // The approved policy continues to recognize the exact historical coverage
+  // column even though the fresh source schemas intentionally lack 0079.
+  const historicalColumn = fingerprintIdentity("columns", {key:"visits.ortho_followup_coverage_proof",table:"visits",name:"ortho_followup_coverage_proof",value:""});
+  expect(generated.sections.columns.identities).toContain(historicalColumn);
+  expect(policy.sections.columns.identities).toContain(historicalColumn);
   try {
     expect(generated).toEqual(policy);
   } catch (comparisonFailure) {
