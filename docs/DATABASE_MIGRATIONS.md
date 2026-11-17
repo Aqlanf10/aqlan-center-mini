@@ -686,6 +686,37 @@ lock. Rollback of application code must not delete the table or migration
 registry history. Exact-head CI and Staging verification remain required before
 Production rollout.
 
+### 0128_expense_commands.sql
+
+Adds a unique optional request key and its fingerprint to expense vouchers, plus
+an explicit split between drawer cash and an owner-private source. The owner's
+funding account is captured on the voucher so later setting changes do not rewrite
+its accounting history. Existing vouchers retain NULL in the added columns; their
+whole amount remains attributable to the drawer. No historical vouchers are
+backfilled. SQL checks and an append-only guard protect the recorded source and
+request identity. The application serializes drawer outflows and refuses an amount
+exceeding available cash. See `docs/finance/EXPENSE_COMMANDS_0128.md`.
+
+### 0129_shift_opening_reviews.sql
+
+Adds `shift_opening_reviews` and `shift_opening_corrections` to retain and review
+opening-count differences, with constrained and audited correction history. The
+blind opening records the new count before an unauthorized opener can see the
+previous close or difference. The review and correction do not themselves post a
+cash movement or rewrite the prior close. Existing shifts are not backfilled.
+See `docs/finance/SHIFT_OPENING_REVIEWS_0129.md`.
+
+### 0133_expense_request_retirements.sql
+
+Adds the append-only `expense_request_retirements` ledger and a transaction-locked
+request-key fence shared with expense creation. A saved voucher prevents retirement;
+a committed retirement prevents a late send of the same actor and fingerprint
+from creating a voucher. No old expense or request is rewritten, and the ledger is
+preserved through clinic reset. See `docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md`.
+
+The numbered files and their runtime SQL remain checksum-checked; their history and
+existing records must be retained when application code is changed or restored.
+
 ### 0136_grouped_lab_orders.sql
 
 Additive support for one lab order covering any number of selected crown or veneer
@@ -703,7 +734,7 @@ No row is rewritten and no data is removed. The published 0074 trigger functions
 not redefined; the price snapshots reuse its append-only guard and are protected by
 the clinic reset like the rest of lab history. Numbered and checksum-checked runtime
 SQL use identical bytes. The number was reserved for this work (6907274207) and
-verified free; numbers between 0126 and 0136 belong to other lines and are not filled
-here. Rollback of application code must not delete the columns, the table or migration
+verified free; the separately allocated financial migrations 0128, 0129 and 0133
+are documented above. Rollback of application code must not delete the columns, the table or migration
 registry history. Exact-head CI and Staging verification remain required before
 Production rollout.

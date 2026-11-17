@@ -16,7 +16,8 @@ const {
 
 beforeAll(async () => {
   await ensureSchema();
-  await openShift({ openedBy: "guard-test", opening: { YER: 0, SAR: 0, USD: 0 } });
+  // The 0128 drawer limit requires actual synthetic cash before recording expenses.
+  expect(await openShift({ openedBy: "guard-test", opening: { YER: 10000, SAR: 0, USD: 0 } })).not.toBeNull();
 }, 60000);
 
 afterAll(async () => {
@@ -25,11 +26,12 @@ afterAll(async () => {
 
 describe("إبطال سند الصرف بقيد معاكس (P1-FIX-3)", () => {
   it("voidExpense يسجّل قيدًا معاكسًا والسجل الأصلي باقٍ بلا تعديل، والمجموع يصافي", async () => {
-    const { expense } = await recordExpense({
+    const { expense, reason } = await recordExpense({
       category: "supplies" as never, partyId: null, payeeText: "مورد",
       amountMinor: 5000, currency: "YER", baseCurrency: "YER", exchangeRate: 1,
       payableId: null, note: "شراء خطأ", createdBy: "test",
     });
+    expect(reason).toBeNull();
     expect(expense).not.toBeNull();
 
     const voided = await voidExpense(expense!.id, {
@@ -64,22 +66,24 @@ describe("إبطال سند الصرف بقيد معاكس (P1-FIX-3)", () => {
   });
 
   it("بلا سبب ⇒ missing_reason: التصحيح المالي بلا سبب مُوثَّق غير مقبول", async () => {
-    const { expense } = await recordExpense({
+    const { expense, reason } = await recordExpense({
       category: "misc" as never, partyId: null, payeeText: null,
       amountMinor: 300, currency: "YER", baseCurrency: "YER", exchangeRate: 1,
       payableId: null, note: null, createdBy: "test",
     });
+    expect(reason).toBeNull();
     const result = await voidExpense(expense!.id, { actor: "admin", reason: "   " });
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("missing_reason");
   });
 
   it("إبطال السند مرتين ⇒ already_voided", async () => {
-    const { expense } = await recordExpense({
+    const { expense, reason } = await recordExpense({
       category: "misc" as never, partyId: null, payeeText: null,
       amountMinor: 800, currency: "YER", baseCurrency: "YER", exchangeRate: 1,
       payableId: null, note: null, createdBy: "test",
     });
+    expect(reason).toBeNull();
     const first = await voidExpense(expense!.id, { actor: "admin", reason: "خطأ إدخال" });
     expect(first.ok).toBe(true);
     const second = await voidExpense(expense!.id, { actor: "admin", reason: "مرة أخرى" });
