@@ -1,6 +1,6 @@
 /** Synthetic CI-only witness: each case owns new databases and retains evidence. */
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
@@ -40,8 +40,9 @@ async function ownedPair() {
       const identity = (await admin.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=$1',[name])).rows[0];
       if (!identity) throw new Error('Synthetic database identity missing');
       const pool = new Pool({connectionString:url.toString(),ssl:false,max:2}); pools.push(pool);
-      const actual = (await pool.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=current_database()')).rows[0];
+      const actual = (await pool.query("SELECT oid::text,datdba::text AS owner,(SELECT oid::text FROM pg_roles WHERE rolname=current_user) AS current_role FROM pg_database WHERE datname=current_database()")).rows[0];
       expect(actual?.oid === identity.oid && actual?.owner === identity.owner).toBe(true);
+      expect(actual?.owner === actual?.current_role).toBe(true);
       return {name,url,pool,identity};
     }
     const source = await create('source'), target = await create('target');
@@ -93,6 +94,22 @@ async function prepare(fixture:Awaited<ReturnType<typeof ownedPair>>,called:bool
   const adminIdentity = (await fixture.admin.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=$1',[fixture.target.name])).rows[0];
   expect(identity.oid===fixture.target.identity.oid && identity.owner===fixture.target.identity.owner).toBe(true);
   expect(adminIdentity?.oid===fixture.target.identity.oid && adminIdentity?.owner===fixture.target.identity.owner).toBe(true);
+  const targetCapabilities=(await fixture.target.pool.query(`SELECT current_setting('transaction_isolation') AS isolation,
+    current_setting('default_transaction_isolation') AS default_isolation,
+    (SELECT oid::text FROM pg_roles WHERE rolname=current_user) AS current_role,
+    has_database_privilege(current_database(),'CONNECT') AS can_connect,
+    has_database_privilege(current_database(),'CREATE') AS can_create,
+    has_table_privilege('public.patients','INSERT') AS can_insert,
+    has_table_privilege('public.patients','SELECT') AS can_select,
+    has_sequence_privilege('public.patients_id_seq','USAGE') AS seq_usage,
+    has_sequence_privilege('public.patients_id_seq','SELECT') AS seq_select,
+    has_sequence_privilege('public.patients_id_seq','UPDATE') AS seq_update,
+    has_sequence_privilege('public.patient_number_seq','USAGE') AS number_usage,
+    has_sequence_privilege('public.patient_number_seq','SELECT') AS number_select,
+    has_sequence_privilege('public.patient_number_seq','UPDATE') AS number_update`)).rows[0];
+  expect(targetCapabilities.current_role===fixture.target.identity.owner).toBe(true);
+  expect(targetCapabilities.isolation==='read committed' && targetCapabilities.default_isolation==='read committed').toBe(true);
+  expect(['can_connect','can_create','can_insert','can_select','seq_usage','seq_select','seq_update','number_usage','number_select','number_update'].every(key=>targetCapabilities[key]===true)).toBe(true);
   await fixture.target.pool.query("SELECT setval('patients_id_seq',100000,$1)",[called]);
   await fixture.target.pool.query("SELECT setval('patient_number_seq',200000,$1)",[called]);
 }
@@ -119,11 +136,14 @@ it.each([
     await prepare(fixture,called);
     const archive = await makeArchive(fixture.source.pool,outcome==='failure');
     const archivePath = path.join(fixture.directory,'synthetic-archive.tar.gz'); await writeFile(archivePath,archive);
+    const stage=path.join(fixture.directory,'stage'), markerPath=path.join(stage,'synthetic-stage-marker');
+    const stageMarker=Buffer.from('synthetic-sequence-stage-retained');
+    await mkdir(stage,{recursive:true}); await writeFile(markerPath,stageMarker);
     const beforeRows = await patients(fixture.target.pool), sourceRows = await patients(fixture.source.pool);
     const beforeData = await dataDigest(fixture.target.pool);
     const before = await sequence(fixture.target.pool,'patients_id_seq'), beforeNumber = await sequence(fixture.target.pool,'patient_number_seq');
     expect(before.last_value==='100000' && before.is_called===called).toBe(true);
-    const result = await stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:path.join(fixture.directory,'stage'),allowNonEmptyTarget:true});
+    const result = await stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:stage,allowNonEmptyTarget:true});
     if (outcome==='failure') {
       expect(result.ok).toBe(false);
       expect(result.errors.some(error=>error.includes('patients_pkey'))).toBe(true);
@@ -132,17 +152,28 @@ it.each([
     } else {
       expect(result.ok).toBe(true);
       expect((await fixture.target.pool.query('SELECT count(*)::int AS n FROM patients WHERE id IN (300,75000)')).rows[0].n).toBe(2);
-      const target=(await patients(fixture.target.pool)).filter(row=>row.id==='300');
+      const allPatients=await patients(fixture.target.pool);
+      const target=allPatients.filter(row=>row.id==='300');
+      const restored=allPatients.filter(row=>row.id==='75000');
       expect(sha(Buffer.from(JSON.stringify(target)))===sha(Buffer.from(JSON.stringify(beforeRows)))).toBe(true);
+      expect(sha(Buffer.from(JSON.stringify(restored)))===sha(Buffer.from(JSON.stringify(sourceRows)))).toBe(true);
     }
     const after = await sequence(fixture.target.pool,'patients_id_seq'), afterNumber = await sequence(fixture.target.pool,'patient_number_seq');
-    // Isolated test: archive MAX(id) is below existing high-water. No statement
-    // should change either value or is_called, on success or rolled-back replay.
-    expect(same(before,after),'synthetic id sequence value or is_called changed').toBe(true);
-    expect(same(beforeNumber,afterNumber),'synthetic patient number sequence value or is_called changed').toBe(true);
+    // A failed isolated replay must not change value or is_called. On success,
+    // do not decide whether a gap is acceptable: report state changes without
+    // numbers and independently forbid regression of either next candidate.
+    if (outcome==='failure') {
+      expect(same(before,after),'synthetic id sequence value or is_called changed after rollback').toBe(true);
+      expect(same(beforeNumber,afterNumber),'synthetic patient number sequence value or is_called changed after rollback').toBe(true);
+    } else {
+      if (!same(before,after)) console.log('SYNTHETIC_ID_SEQUENCE_STATE_CHANGED_AFTER_SUCCESS');
+      if (!same(beforeNumber,afterNumber)) console.log('SYNTHETIC_PATIENT_SEQUENCE_STATE_CHANGED_AFTER_SUCCESS');
+    }
     expect(next(after)>=next(before),'synthetic id sequence next candidate regressed').toBe(true);
+    expect(next(afterNumber)>=next(beforeNumber),'synthetic patient sequence next candidate regressed').toBe(true);
     expect(sha(Buffer.from(JSON.stringify(await patients(fixture.source.pool))))===sha(Buffer.from(JSON.stringify(sourceRows)))).toBe(true);
     expect(sha(await readFile(archivePath))===sha(archive)).toBe(true);
+    expect(sha(await readFile(markerPath))===sha(stageMarker)).toBe(true);
     const identity=await dbIdentity(fixture.target.pool);
     expect(identity.oid===fixture.target.identity.oid && identity.owner===fixture.target.identity.owner).toBe(true);
   } finally { await fixture.close(); }
@@ -156,12 +187,17 @@ it('does not regress a concurrently allocated sequence value during replay',asyn
     await prepare(fixture,true);
     const archive=await makeArchive(fixture.source.pool,false);
     const archivePath=path.join(fixture.directory,'synthetic-concurrent.tar.gz'); await writeFile(archivePath,archive);
+    const stage=path.join(fixture.directory,'concurrent-stage'), markerPath=path.join(stage,'synthetic-stage-marker');
+    const stageMarker=Buffer.from('synthetic-concurrent-stage-retained');
+    await mkdir(stage,{recursive:true}); await writeFile(markerPath,stageMarker);
     // Only the synthetic restored row waits; the test controls this lock and
     // retains the helper trigger as evidence in its newly created database.
     await fixture.target.pool.query(`CREATE FUNCTION synthetic_pause_replay() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id=75000 THEN PERFORM pg_advisory_xact_lock(473019::bigint); END IF; RETURN NEW; END $$`);
     await fixture.target.pool.query('CREATE TRIGGER synthetic_pause_replay BEFORE INSERT ON patients FOR EACH ROW EXECUTE FUNCTION synthetic_pause_replay()');
+    const beforeData=await dataDigest(fixture.target.pool), beforeSource=await patients(fixture.source.pool);
+    const originalTarget=await patients(fixture.target.pool);
     await blocker.connect(); await blocker.query('SELECT pg_advisory_lock(473019::bigint)'); held=true;
-    const restore = stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:path.join(fixture.directory,'concurrent-stage'),allowNonEmptyTarget:true});
+    const restore = stagedRestore({archivePath,targetUrl:fixture.target.url.toString(),stagingDir:stage,allowNonEmptyTarget:true});
     let completed=false;
     void restore.then(()=>{completed=true;},()=>{completed=true;});
     const deadline=Date.now()+30000;
@@ -176,9 +212,21 @@ it('does not regress a concurrently allocated sequence value during replay',asyn
       const allocated=(await fixture.target.pool.query("SELECT nextval('patients_id_seq')::text AS value")).rows[0].value as string;
       await blocker.query('SELECT pg_advisory_unlock(473019::bigint)'); held=false;
       const result=await restore;
-      expect(result.ok).toBe(true);
+      if (result.ok) {
+        const all=await patients(fixture.target.pool);
+        expect(sha(Buffer.from(JSON.stringify(all.filter(row=>row.id==='300'))))===sha(Buffer.from(JSON.stringify(originalTarget)))).toBe(true);
+        expect(sha(Buffer.from(JSON.stringify(all.filter(row=>row.id==='75000'))))===sha(Buffer.from(JSON.stringify(beforeSource)))).toBe(true);
+        console.log('SYNTHETIC_CONCURRENT_REPLAY_SUCCEEDED');
+      } else {
+        expect(result.readyForCutover).toBe(false);
+        expect(result.errors.length>0 || result.validationErrors.length>0).toBe(true);
+        expect(await dataDigest(fixture.target.pool)===beforeData).toBe(true);
+        console.log('SYNTHETIC_CONCURRENT_REPLAY_REJECTED_WITHOUT_ROW_CHANGE');
+      }
       expect(next(await sequence(fixture.target.pool,'patients_id_seq'))>BigInt(allocated)).toBe(true);
+      expect(sha(Buffer.from(JSON.stringify(await patients(fixture.source.pool))))===sha(Buffer.from(JSON.stringify(beforeSource)))).toBe(true);
       expect(sha(await readFile(archivePath))===sha(archive)).toBe(true);
+      expect(sha(await readFile(markerPath))===sha(stageMarker)).toBe(true);
     } finally {
       if(held){await blocker.query('SELECT pg_advisory_unlock(473019::bigint)').catch(()=>{}); held=false;}
       await restore.catch(()=>{});

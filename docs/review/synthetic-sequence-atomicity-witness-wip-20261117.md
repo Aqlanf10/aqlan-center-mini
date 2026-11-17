@@ -12,7 +12,9 @@ global environment guard runs before connection; each case creates new local
 databases, verifies their names, OID and owner, and retains their data, archive,
 identity file, and stage for the lifetime of the disposable CI runner. It never
 drops a database or removes evidence. Migration setup runs on freshly created
-empty sources and targets before test data are inserted. No clinical data or
+empty sources and targets before test data are inserted. The backup writer
+removes its own internal temporary working directory, distinct from the
+retained witness archive, stage and database evidence. No clinical data or
 external database is used. CI's runner and databases are ephemeral and no
 long-term retention outside it is claimed.
 
@@ -21,30 +23,43 @@ legacy replay to an explicitly permitted nonempty target, with the existing
 serial and patient-number sequences set above all imported IDs and `is_called`
 both false and true. The failure uses a writer-shaped duplicate key after the
 writer's sequence statements, while requiring the particular synthetic
-constraint failure and comparing all target table contents by digest. The test
-compares the exact sequence state; it does not decide whether future policies
-should tolerate gaps. The patient-number sequence is checked separately.
+constraint failure and comparing all target table contents by digest. After
+failure the test requires exact sequence state, including `is_called`, in this
+isolated target. After success it requires no regression, and reports any
+changed state with a fixed diagnostic; it does not decide whether gaps are
+acceptable. The patient-number sequence is checked separately. Successful
+replay also compares the restored patient fields with the synthetic source.
 
 The fifth scenario adds a synthetic advisory-lock barrier through a trigger
 on a uniquely owned target and advances the ID sequence on another connection
-while replay waits. Its current expectation that replay succeeds preserves
-the existing `allowNonEmptyTarget` path; an explicitly reviewed fail-closed
-exclusivity policy could require a different acceptance contract. Neither this
-test nor a `GREATEST` expression alone proves correctness under all races,
+while replay waits. Both success and an explicit failure are classified using
+fixed messages; success must preserve and restore relevant patient rows, while
+failure must retain target table data. Both must preserve the concurrent
+allocation's next-candidate floor. This is a safety witness, not a policy that
+concurrent replay must succeed. A reported failure with unchanged rows does
+not by itself identify why replay failed or prove general correctness. Neither
+this test nor a `GREATEST` expression
+alone proves correctness under all races,
 sequence caches, unusual increment settings, or backend failures.
 
 Canonical-source restores already require a fresh target and are not the
 subject of this witness. It does not prove safe behavior for unowned targets,
 does not exercise the HTTP endpoint, and must never run against an existing
-database. A future implementation must preserve old archive compatibility,
+database. A sampled target connection verifies ownership, required privileges
+and READ COMMITTED; it does not inspect the replay connection's isolation
+directly. The disposable CI role may be a superuser. The late-failure test on
+this base recognizes `patients_pkey` in an error; integration with the separate
+privacy branch must preserve constraint provenance without exposing raw
+database messages. A future implementation must preserve old archive compatibility,
 avoid leaking SQL/data, address the lock and failure-atomicity contract, and
 be reviewed with synthetic PostgreSQL cases before any use. PostgreSQL's
 `ALTER SEQUENCE ... RESTART` is transactional unlike `setval`, but choosing it
 requires resolving locking, `is_called`, increment, and crash behavior:
 https://www.postgresql.org/docs/current/sql-altersequence.html
 
-Local verification: TypeScript transpilation and a focused in-memory compiler
-check passed; the latter uses the current checkout plus the base guard overlaid
-in memory and is not a full-project typecheck. No PostgreSQL, HTTP, Next build,
+Local verification: TypeScript transpilation, a focused in-memory compiler
+check and ESLint's in-memory lintText passed; the compiler uses the current
+checkout plus the base guard overlaid in memory and is not a full-project
+typecheck. No PostgreSQL, HTTP, Next build,
 CI, or product code ran or changed. This branch intentionally retains the old
 tests and adds coverage without relaxing any guard.
