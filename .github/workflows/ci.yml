@@ -371,6 +371,10 @@ jobs:
         if: always()
         run: node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-security-raw.json" "${{ runner.temp }}/http-security-locations.json"
 
+      - name: Annotate sanitized security HTTP failures
+        if: always()
+        run: node scripts/annotate-http-test-report.mjs "${{ runner.temp }}/http-security-locations.json"
+
       - name: Upload security HTTP test locations only
         if: always()
         uses: actions/upload-artifact@v4
@@ -389,6 +393,10 @@ jobs:
       - name: Sanitize inventory HTTP test locations
         if: always()
         run: node scripts/sanitize-http-test-report.mjs "${{ runner.temp }}/http-inventory-raw.json" "${{ runner.temp }}/http-inventory-locations.json"
+
+      - name: Annotate sanitized inventory HTTP failures
+        if: always()
+        run: node scripts/annotate-http-test-report.mjs "${{ runner.temp }}/http-inventory-locations.json"
 
       - name: Upload inventory HTTP test locations only
         if: always()
