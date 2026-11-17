@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
+import { isDeepStrictEqual } from 'node:util';
 import type { Pool } from 'pg';
 import { assertBackupTimestampFixtureIdentity, openBackupTimestampFixture } from './_backup-timestamp-fixture';
 import { fullBackupBlocks } from '../../lib/fullBackup';
@@ -14,6 +15,7 @@ import { tarGzBytes } from '../helpers/backup-tar';
 import { SYNTHETIC_DUPLICATE_PATIENT_ID, SYNTHETIC_DUPLICATE_PATIENT_SQL } from '../helpers/restore-late-constraint';
 import { nextSequenceCandidate } from '../helpers/restore-sequence-observation';
 import { closeRestoreEvidence } from '../helpers/restore-evidence-cleanup';
+import { initialRetainedRollbackReport, serializeRetainedRollbackReport, syntheticSequenceState } from '../helpers/retained-rollback-report';
 import { validateFocusedRollbackWitnessEnvironment } from './_focused-rollback-witness-guard';
 
 vi.mock('next/headers', () => ({ headers: async () => new Headers(), cookies: async () => ({ get: () => undefined }) }));
@@ -21,6 +23,7 @@ vi.mock('next/headers', () => ({ headers: async () => new Headers(), cookies: as
 let fixture: Awaited<ReturnType<typeof openBackupTimestampFixture>>;
 let directory: string, archive: Buffer;
 let retainEvidence = false;
+const report = initialRetainedRollbackReport();
 
 async function applicationRows(pool: Pool) {
   const tables = (await pool.query("SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename<>'schema_migrations' ORDER BY tablename")).rows;
@@ -40,11 +43,12 @@ beforeAll(async () => {
   retainEvidence = process.env.SYNTHETIC_LATE_ROLLBACK_WITNESS === '1';
   if (retainEvidence) {
     validateFocusedRollbackWitnessEnvironment(process.env);
-    directory = await mkdtemp(join(process.env.SYNTHETIC_WITNESS_ROOT!, 'hr-composed-legacy-restore-'));
+    directory = await mkdtemp(join(process.env.SYNTHETIC_WITNESS_ROOT!, `hr-composed-legacy-restore-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}-`));
     fixture = await openBackupTimestampFixture({ ...process.env }, {
       retainOwned: true,
       onOwned: async identity => {
         await writeFile(join(directory, `identity-${identity.name}.json`), JSON.stringify(identity), { flag: 'wx' });
+        report.databases++;
       },
     });
   } else {
@@ -59,11 +63,14 @@ beforeAll(async () => {
     const blocks: Uint8Array[] = [];
     for await (const block of fullBackupBlocks({ source: client, readDocument: async () => { throw new Error('No synthetic documents expected'); } })) blocks.push(block);
     archive = gzipSync(Buffer.concat(blocks));
+    report.legacySha256 = createHash('sha256').update(archive).digest('hex');
   } finally { client.release(); }
   await writeFile(join(directory, 'legacy.tar.gz'), archive);
 });
 afterAll(async () => {
-  await closeRestoreEvidence({ close: fixture?.close, directory, retain: retainEvidence });
+  try {
+    if (retainEvidence && directory) await writeFile(join(directory, 'synthetic-rollback-report.json'), serializeRetainedRollbackReport(report), { flag: 'wx', mode: 0o600 });
+  } finally { await closeRestoreEvidence({ close: fixture?.close, directory, retain: retainEvidence }); }
 });
 
 it('restores the actual pre-HR archive on the current migration chain without inventing employee history', async () => {
@@ -101,6 +108,7 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   manifest.databaseSha256 = createHash('sha256').update(faultySql).digest('hex');
   manifest.databaseBytes = faultySql.length;
   const faultyArchive = tarGzBytes(parsed.order.map(name => ({ name, data: name === 'database.sql' ? faultySql : name === 'manifest.json' ? Buffer.from(JSON.stringify(manifest)) : parsed.entries.get(name)!.data })));
+  report.faultySha256 = createHash('sha256').update(faultyArchive).digest('hex');
   const path = join(directory, 'late-failure.tar.gz');
   await writeFile(path, faultyArchive);
   // Snapshot the current schema-owned seed before replay; it must survive exactly,
@@ -113,6 +121,7 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   const expectedName = decodeURIComponent(new URL(fixture.archiveTarget.options.connectionString!).pathname.slice(1));
   expect(/^aqlan_backup_precision_[a-f0-9]{32}$/.test(identityBefore.name) && identityBefore.name === expectedName).toBe(true);
   assertBackupTimestampFixtureIdentity(fixture.archiveIdentity, identityBefore);
+  report.identityBefore = true;
   const originalSequences = await sequenceCandidates(fixture.archiveTarget);
   // Never lower even the owned synthetic target while preparing this witness.
   expect(originalSequences.patientId <= 100001n).toBe(true);
@@ -125,21 +134,28 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   const sequencesBefore = await sequenceCandidates(fixture.archiveTarget);
   const registryBefore = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
   const result = await stagedRestore({ archivePath: path, targetUrl: fixture.archiveTarget.options.connectionString!, stagingDir: join(directory, 'failed-documents'), allowNonEmptyTarget: true });
+  report.outcome = result.errors.join(' ').includes('duplicate key value violates unique constraint "patients_pkey"') ? 'duplicate_constraint' : 'other';
   expect(result.validationErrors).toEqual([]); expect(result.ok).toBe(false); expect(result.readyForCutover).toBe(false);
   expect(result.errors.join(' ')).toContain('duplicate key value violates unique constraint "patients_pkey"');
-  expect(await applicationRows(fixture.archiveTarget)).toEqual(beforeReplay);
+  const afterReplay = await applicationRows(fixture.archiveTarget);
+  report.rows = isDeepStrictEqual(afterReplay, beforeReplay) ? 'unchanged' : 'changed';
+  expect(afterReplay).toEqual(beforeReplay);
   const sequencesAfter = await sequenceCandidates(fixture.archiveTarget);
   const identityAfter = (await fixture.archiveTarget.query<{ name: string; oid: string; owner: string }>(identitySql)).rows[0];
   assertBackupTimestampFixtureIdentity(fixture.archiveIdentity, identityAfter);
+  report.identityAfter = true;
   expect(identityAfter.name === identityBefore.name && identityAfter.oid === identityBefore.oid && identityAfter.owner === identityBefore.owner).toBe(true);
   const files = await loadMigrationFiles();
   expect(files.find(file => file.version === '0079')?.checksum).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');
   const registryAfter = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
+  report.registry = isDeepStrictEqual(registryAfter, registryBefore) ? 'unchanged' : 'changed';
   expect(registryAfter).toEqual(registryBefore);
   expect(registryAfter.map(row => row.version)).toEqual(files.filter(file => file.version !== '0079').map(file => file.version));
   expect((await fixture.archiveTarget.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows).toEqual([{name:null}]);
   expect((await fixture.archiveTarget.query("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgenabled <> 'O'")).rows).toEqual([]);
   expect((await fixture.archiveTarget.query('SHOW session_replication_role')).rows[0].session_replication_role).toBe('origin');
+  report.patientIdSequence = syntheticSequenceState(sequencesBefore.patientId, sequencesAfter.patientId);
+  report.patientNumberSequence = syntheticSequenceState(sequencesBefore.patientNumber, sequencesAfter.patientNumber);
   // Run these last, so a sequence regression cannot hide the row/registry checks.
   for (const key of ['patientId', 'patientNumber'] as const) {
     // setval is not transactional. Notice any advancement without printing values;

@@ -30,7 +30,11 @@ replay. Original default cleanup remains for ordinary tests. The application's
 `fullBackupBlocks` removes its own internal temporary staging directory while
 forming the archive, before the final witness archive is written. Unless a
 safe artifact capture succeeds, the retained databases and files still vanish
-when the hosted runner and its PostgreSQL service are destroyed.
+when the hosted runner and its PostgreSQL service are destroyed. Only a strict
+fixed-field report with hashes, counts and statuses is eligible for artifact
+upload after the dedicated environment and three recorded identities pass
+validation; raw archives, SQL, databases, URLs, environment and logs are never
+uploaded. The report cannot reconstruct any database.
 
 The separate focused CI job provisions its own PostgreSQL 18 service. Its
 Vitest setup checks the dedicated loopback URL, CI markers, original aliases

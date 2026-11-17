@@ -41,7 +41,7 @@ vi.mock('pg', () => {
 import { openBackupTimestampFixture } from './postgres/_backup-timestamp-fixture';
 
 const safe: NodeJS.ProcessEnv = {
-  NODE_ENV: 'test', GITHUB_ACTIONS: 'true', CI: 'true', GITHUB_RUN_ID: '12345',
+  NODE_ENV: 'test', GITHUB_ACTIONS: 'true', CI: 'true', GITHUB_RUN_ID: '12345', GITHUB_RUN_ATTEMPT: '1',
   GITHUB_WORKSPACE: '/tmp/synthetic-workspace', RUNNER_TEMP: '/tmp/synthetic-runner',
   SYNTHETIC_WITNESS_ROOT: '/tmp/synthetic-runner', SYNTHETIC_LATE_ROLLBACK_WITNESS: '1',
   DATABASE_URL: 'postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable',

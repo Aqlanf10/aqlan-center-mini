@@ -1190,6 +1190,7 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
       - name: Run focused synthetic restore witness
+        id: focused_rollback
         env:
           DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
           TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
@@ -1198,6 +1199,23 @@ jobs:
           SESSION_SECRET: ci-placeholder-secret-0123456789abcdef
           CLINIC_TIME_ZONE: Asia/Aden
         run: npx vitest run --config vitest.config.focused-rollback-witness.mts
+      - name: Validate fixed synthetic report
+        id: focused_report
+        if: always() && steps.focused_rollback.outcome != 'skipped'
+        env:
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
+          TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55473/aqlan_p1_test?sslmode=disable
+          SYNTHETIC_LATE_ROLLBACK_WITNESS: '1'
+          SYNTHETIC_WITNESS_ROOT: ${{ runner.temp }}
+        run: node --import tsx __tests__/helpers/capture-focused-rollback-report-cli.mts
+      - name: Preserve fixed synthetic report
+        if: always() && steps.focused_report.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-rollback-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/focused-rollback-report-${{ github.run_id }}-${{ github.run_attempt }}.json
+          if-no-files-found: error
+          retention-days: 7
 
   # Actual shared contract components, synthetic fixtures only. No app session,
   # database, customer PDF or external network is used by the renderer.
