@@ -34,6 +34,7 @@ export const STAFF_CAPABILITIES = Object.freeze([
   // the reception operational summary. Catalogue presence grants nothing.
   "appointments.schedule.manage", "visits.manage", "visits.delete", "clinical.ortho.view", "clinical.ortho.edit",
   "clinical.ceph.analyze", "clinical.prescriptions.write", "clinical.referrals.manage", "clinical.lab.view",
+  "clinical.medication-catalog.manage",
   "clinical.lab.order", "clinical.lab.cancel", "clinical.laboratories.manage", "finance.lab-prices.edit",
   "patients.merge", "patients.number.manage", "patients.documents.delete", "patients.history.record",
   "patients.history.correct", "finance.patient-ledger.manage", "finance.legacy.record", "finance.legacy.void",
@@ -121,6 +122,7 @@ export const STAFF_CAPABILITY_PREREQUISITES: Readonly<Partial<Record<StaffCapabi
   "staff.permissions.edit": Object.freeze(["staff.view"] as const),
   "settings.operational.edit": Object.freeze(["settings.view"] as const),
   "settings.finance.edit": Object.freeze(["settings.view"] as const),
+  "clinical.medication-catalog.manage": Object.freeze(["settings.view"] as const),
   "audit.export": Object.freeze(["audit.view"] as const),
   "visits.delete": Object.freeze(["visits.manage"] as const),
   "clinical.ortho.edit": Object.freeze(["clinical.ortho.view"] as const),

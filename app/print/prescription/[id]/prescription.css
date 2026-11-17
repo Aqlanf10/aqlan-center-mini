@@ -1,0 +1,19 @@
+/* Restore the approved Production A5 prescription, scoped to this route only. */
+.prescription-approved-a5 { overflow-wrap: anywhere; }
+.prescription-approved-a5 .prescription-pages { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.prescription-approved-a5 .prescription-pages > :is(thead, tbody) > tr > td { padding: 0; vertical-align: top; }
+.prescription-approved-a5 .prescription-medication > td { padding-bottom: 3mm; }
+@media print {
+ .prescription-approved-a5 { width: auto; min-height: 0; padding: 0; }
+ .prescription-approved-a5 .prescription-pages > thead { display: table-header-group; }
+ .prescription-approved-a5 .prescription-medication, .prescription-approved-a5 .prescription-ending { break-inside: avoid; page-break-inside: avoid; }
+ .prescription-approved-a5 .prescription-single-medication { break-inside: auto; page-break-inside: auto; orphans: 3; widows: 3; }
+ /* A sole long medication must start on page one, rather than being moved
+    wholesale with the signature. Any ending continuation keeps the repeated
+    patient, saved clinician and Rx identity above the unchanged signature. */
+ .prescription-approved-a5 .prescription-medication:not(.prescription-single-medication):has(+ .prescription-ending) { break-after: avoid; page-break-after: avoid; }
+}
+
+.prescription-approved-a5 .prescription-record-identity { font-size: 8pt; color: #475569; margin-top: 1mm; }
+
+.prescription-approved-a5 .prescription-void-identity { color: #991b1b; }

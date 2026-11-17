@@ -1,12 +1,22 @@
 "use client";
+import { blankPrescriptionRow, appendPrescriptionSelection, canAcceptPrescriptionSelection, retireDraftDoseReferenceAt } from "@/lib/prescription-draft-rows";
+import {openSavedPrescriptionPrint} from "@/lib/prescription-print-opening";
+import { PrescriptionStaleReferenceNotice } from "./PrescriptionStaleReferenceNotice";
+import { PrescriptionDoseProfiles } from "./PrescriptionDoseProfiles";
+import { prescriberUnavailableMessage } from "@/lib/prescription-prescriber-feedback";
+import { canonicalPrescriptionCommand } from "@/lib/prescription-command";
+import { getOrCreatePrescriptionCommand, readPrescriptionCommand, prescriptionCommandStorageKey, createPrescriptionOperationFence, type PrescriptionOperation, type PendingPrescriptionCommand } from "@/lib/prescription-command-client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useClinicName } from "./SettingsProvider";
+import { changedMedicationSelection, createManualMedicationSelection, manualMedicationSelectionError } from "@/lib/prescription-medication-selection";
+
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useSession } from "./SessionProvider";
 import { Icon } from "./Icon";
-import { toWhatsAppNumber } from "@/lib/reminders";
 import { evaluatePrescriptionSafety, type DrugSafetyAlert } from "@/lib/medication-safety";
+import { PrescriptionClinicCatalog } from "./PrescriptionClinicCatalog";
+import { PrescriptionMedicationLibrary } from "./PrescriptionMedicationLibrary";
 import { PROCEDURE_TEMPLATES } from "@/lib/prescription-procedure-templates";
-import { sanitizeRxItems } from "@/lib/prescription";
+import { MAX_ITEMS, sanitizeRxItems, checkPrescriptionDraft } from "@/lib/prescription";
 import { interpretPrescriptionSaveResponse } from "@/lib/prescription-save-workflow";
 
 /**
@@ -19,22 +29,7 @@ import { interpretPrescriptionSaveResponse } from "@/lib/prescription-save-workf
  * إنجليزية، أو الاثنتين معًا لبيئةٍ ثنائية اللغة.
  */
 
-export interface RxItem {
-  /** اسم الدواء — لاتيني دائمًا. */
-  name: string;
-  /** العيار: 1g / 500mg. */
-  dose: string;
-  /** الشكل الدوائي بالإنجليزية: Tablets / Syrup / Mouthwash. */
-  form: string;
-  /** التكرار بالإنجليزية: 1 tablet every 12 hours. */
-  frequency: string;
-  /** المدة بالإنجليزية: 5-7 days. */
-  duration: string;
-  /** تعليمات المريض بالعربية. */
-  instructions: string;
-  /** تعليمات المريض بالإنجليزية. */
-  instructionsEn: string;
-}
+export type RxItem = import("@/lib/prescription").RxItem;
 
 /** لغة التعليمات على الروشتة المطبوعة: عربي، إنجليزي، أو كلاهما. */
 export type InstructionsLang = "both" | "ar" | "en";
@@ -58,6 +53,7 @@ interface PrescriptionModalProps {
   /** اختياري (من عمل الوكيل المساعد): وصفة من مساحة الزيارة قد لا تملك ملفًّا
    * مرتبطًا بعد — فتُكتب بيانات المريض نصًّا حتى يُربط. */
   patientId?: number | null;
+  visitId?: number | null;
   patientName: string;
   patientPhone?: string | null;
   medicalAlert?: string | null;
@@ -65,38 +61,79 @@ interface PrescriptionModalProps {
   patientContextStatus?: "loading" | "unavailable" | "ready";
   defaultDiagnosis?: string;
   defaultDoctorName?: string;
+  defaultDoctorPartyId?: number | null;
 }
 
 export function PrescriptionModal({
   isOpen,
   onClose,
   patientId,
+  visitId,
   patientName,
   patientPhone,
   medicalAlert,
   patientContextStatus,
   defaultDiagnosis = "",
   defaultDoctorName = "",
+  defaultDoctorPartyId = null,
 }: PrescriptionModalProps) {
-  const clinicName = useClinicName();
   // A closed modal stays mounted while the visit diagnosis is loaded/edited.
   // null inherits that current value; manual edits (including clearing) and
   // explicit template/print choices own the Rx draft across cancellation/reopening.
   const [diagnosisOverride, setDiagnosisOverride] = useState<string | null>(null);
   const diagnosis = diagnosisOverride ?? defaultDiagnosis;
-  const [doctorName, setDoctorName] = useState(defaultDoctorName);
+  const session = useSession();
+  const prescriberKey = JSON.stringify([isOpen, patientId, visitId, session?.userId, session?.username, session?.role, session?.permissions]);
+  type PrescriberOptions = { issuerId: number; canChooseAnyDoctor: boolean; doctors: { id: number; name: string }[] };
+  const [prescriberRead, setPrescriberRead] = useState<{ key: string; status: "loading" | "error" | "ready"; options: PrescriberOptions | null; unavailableMessage?: string } | null>(null);
+  const [prescriberRetry, setPrescriberRetry] = useState(0);
+  const prescriberStatus = prescriberRead?.key === prescriberKey ? prescriberRead.status : "loading";
+  const prescriberOptions = prescriberStatus === "ready" ? prescriberRead?.options ?? null : null;
+  const [override, setOverride] = useState<{ key: string; id: number | null } | null>(null);
+  const setPrescriberOverride = (id: number | null) => setOverride({ key: prescriberKey, id });
+  const preferredDoctorId = (override?.key === prescriberKey ? override.id : null) ?? defaultDoctorPartyId;
+  const selectedDoctorId = preferredDoctorId ?? prescriberOptions?.issuerId ?? null;
+  const doctorName = !prescriberOptions ? "" : prescriberOptions.doctors.find(d => d.id === selectedDoctorId)?.name
+    ?? (selectedDoctorId === defaultDoctorPartyId ? defaultDoctorName : "");
+  const prescriberMismatch = Boolean(prescriberOptions && !prescriberOptions.canChooseAnyDoctor
+    && selectedDoctorId !== null && selectedDoctorId !== prescriberOptions.issuerId);
+
   const [notes, setNotes] = useState("");
   const [lang, setLang] = useState<InstructionsLang>("both");
   /* تبدأ فارغة: القالب اختيارٌ صريح لا حالة افتراضية (P0.10) — فتحُ المودال
      محمّلًا بمضادٍ حيوي جعل ضغطة طباعةٍ واحدة وصفةً لم تُراجَع. */
-  const [items, setItems] = useState<RxItem[]>([]);
+  const [items, setItems] = useState<RxItem[]>(() => [blankPrescriptionRow()]);
   /* قائمة التحقق السريري للقالب المطبّق (مراجعة الجولة الثانية): تُعرض للطبيب
    * قبل الوصف — القالب عبّأ الحالة فقط، والدواء قراره هو. */
   const [appliedChecklist, setAppliedChecklist] = useState<string[] | null>(null);
   /* الوصفة وثيقة تُحفى كُما طُبِعت (من مستودع الوكيل الآخر): الحفظ قبل الطباعة
-     يبقي في السجل ما صُرِف فعلاً من دواء، والاقتراحات مما سبق وصفه للمريض
+     يبقي في السجل ما صدر من وصفة، دون ادعاء صرف الصيدلية، والاقتراحات مما سبق وصفه للمريض
      نفسه تقلّل النقر — ولا تُفرض. */
-  const [preserving, setPreserving] = useState(false);
+  const commandScope = session?.username && patientId ? prescriptionCommandStorageKey(session.username, patientId, visitId ?? null) : null;
+  const operationScope = isOpen ? JSON.stringify([commandScope, prescriberKey, selectedDoctorId]) : null;
+  const operationFence = useRef(createPrescriptionOperationFence());
+  const [blockedSavedPrintId, setBlockedSavedPrintId] = useState<number | null>(null);
+  const [preservingScope, setPreservingScope] = useState<string | null>(null);
+  const preserving = operationScope !== null && preservingScope === operationScope;
+  const setPreserving = (value: boolean) => setPreservingScope(value ? operationScope : null);
+  const [commandRead, setCommandRead] = useState<{ scope: string; owner: string | null; entry: PendingPrescriptionCommand | null; message: string; recoveredId?: number; status?: string } | null>(null);
+  useLayoutEffect(() => {
+    const fence = operationFence.current;
+    fence.setScope(operationScope);
+    setPreservingScope(null);
+    setBlockedSavedPrintId(null);
+    return () => { fence.retire(); setCommandRead(null); };
+  }, [operationScope]);
+
+  const commandState = commandRead?.scope === commandScope && commandRead?.owner === operationScope ? commandRead : null;
+  useEffect(() => {
+    if (!isOpen || !commandScope) return;
+    try {
+      const entry = readPrescriptionCommand(window.sessionStorage, commandScope);
+      if (entry) setCommandRead({ scope: commandScope, owner: operationScope, entry, message: "يوجد مفتاح إصدار سابق محفوظ في هذه الصفحة. تحقق من النتيجة قبل بدء وصفة جديدة." });
+    } catch { setCommandRead({ scope: commandScope, owner: operationScope, entry: null, message: "تعذرت قراءة مفتاح الإصدار السابق؛ راجع السجل قبل بدء وصفة جديدة." }); }
+  }, [isOpen, commandScope, operationScope]);
+
   const [preserveError, setPreserveError] = useState<string | null>(null);
   /* مراجعة الجولة الثانية (Blocker B) — الخادم هو المرجع: */
   /* عرض تحذيرات الخادم غير الحرجة قبل الحفظ، مع رمز الإقرار المرتبط بالوصفة. */
@@ -118,21 +155,44 @@ export function PrescriptionModal({
     timesPrescribed: number; lastPrescribedAt: string;
   }[]>([]);
 
-  /* الاقتراحات تُجلب مرة عند الفتح — من وصفاته الفاعلة لا المبطلة، للطبيب
-     والمدير وحدهما؛ وغيرهم لا يقترح ولا يصير الفشل صامتًا. */
+  // Options belong to the exact patient/visit/session and each open request.
+  // Loading or a failed lookup cannot reuse a previously verified clinician.
   useEffect(() => {
-    if (!isOpen || !patientId) return;
+    setPrescriberRead({ key: prescriberKey, status: "loading", options: null });
+    setSuggestions([]);
+    if (!isOpen) return;
+    if (!patientId) { setPrescriberRead({ key: prescriberKey, status: "error", options: null }); return; }
     let cancelled = false;
+    const controller = new AbortController();
     void (async () => {
       try {
-        const response = await fetch(`/api/patients/${patientId}/prescriptions`, { cache: "no-store" });
-        if (!response.ok) return;
+        const response = await fetch(`/api/patients/${patientId}/prescriptions`, { cache: "no-store", signal: controller.signal });
+        if (!response.ok) throw new Error("Prescriber lookup refused");
         const payload = await response.json();
-        if (!cancelled) setSuggestions(payload?.suggestions ?? []);
-      } catch { /* الاقتراحات تحسينٌ لا شرط: فشلها لا يعطّل الوصفة */ }
+        const options = payload?.prescriberOptions;
+        if (options?.issuerId === null && options.canChooseAnyDoctor === false
+          && Array.isArray(options.doctors) && options.doctors.length === 0) {
+          const unavailableMessage = prescriberUnavailableMessage(options.unavailableReason);
+          if (unavailableMessage) {
+            if (!cancelled) setPrescriberRead({ key: prescriberKey, status: "error", options: null, unavailableMessage });
+            return;
+          }
+        }
+        if (!options || !Number.isSafeInteger(options.issuerId) || options.issuerId <= 0
+          || typeof options.canChooseAnyDoctor !== "boolean" || !Array.isArray(options.doctors)
+          || !options.doctors.some((doctor: { id: number }) => doctor.id === options.issuerId)
+          || !options.doctors.every((doctor: { id: number; name: string }) => Number.isSafeInteger(doctor.id) && doctor.id > 0 && typeof doctor.name === "string" && doctor.name.trim()))
+          throw new Error("Missing verified clinician");
+        if (!cancelled) {
+          setSuggestions(Array.isArray(payload.suggestions) ? payload.suggestions : []);
+          setPrescriberRead({ key: prescriberKey, status: "ready", options });
+        }
+      } catch {
+        if (!cancelled) setPrescriberRead({ key: prescriberKey, status: "error", options: null });
+      }
     })();
-    return () => { cancelled = true; };
-  }, [isOpen, patientId]);
+    return () => { cancelled = true; controller.abort(); };
+  }, [isOpen, patientId, prescriberKey, prescriberRetry]);
 
   const safetyAlerts = useMemo(() => {
     return evaluatePrescriptionSafety(items, medicalAlert);
@@ -155,24 +215,13 @@ export function PrescriptionModal({
   };
 
   const addItem = () => {
-    setItems((prev) => [
-      ...prev,
-      {
-        name: "",
-        dose: "",
-        form: "Tablets",
-        frequency: "",
-        duration: "",
-        instructions: "",
-        instructionsEn: "",
-      },
-    ]);
+    setItems(previous => previous.length < MAX_ITEMS ? [...previous, blankPrescriptionRow()] : previous);
   };
 
-  const updateItem = (index: number, field: keyof RxItem, value: string) => {
+  const updateItem = (index: number, field: Exclude<keyof RxItem, "selection">, value: string) => {
     setItems((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], [field]: value };
+      next[index] = { ...next[index], [field]: value, ...(next[index].selection ? { selection: changedMedicationSelection(next[index].selection!) } : {}) };
       return next;
     });
   };
@@ -182,35 +231,42 @@ export function PrescriptionModal({
   };
 
   const validatePrintableItems = () => {
+    if (items.length > MAX_ITEMS) { setPreserveError("الحد الأقصى 20 دواءً؛ احذف السطور الزائدة."); return false; }
+    if (prescriberMismatch) {
+      setPreserveError("طبيب الزيارة يختلف عن هويتك السريرية؛ اختر الإصدار باسمك صراحة قبل المتابعة.");
+      return false;
+    }
     if (sanitizeRxItems(items).length === 0) {
       setPreserveError("أضف دواءً واحدًا على الأقل باسم مكتوب بالإنجليزية قبل طباعة الوصفة أو معاينة المسودة.");
+      return false;
+    }
+    const selectionError = manualMedicationSelectionError(items);
+    if (selectionError) { setPreserveError(selectionError); return false; }
+    if (prescriberStatus !== "ready" || !prescriberOptions) {
+      setPreserveError("لم يكتمل التحقق من هوية الطبيب؛ انتظر أو أعد المحاولة.");
       return false;
     }
     return true;
   };
 
-  const buildPrintUrl = () => {
-    if (!validatePrintableItems()) return null;
-    /* معاينة مسودة معلنة (P0.9): تُطبع بعلامة «مسودة غير معتمدة» وباسم الطبيب
-     * من الجلسة — لا من الرابط. الوثيقة الرسمية وحدها (rx) تُطبع كوصفة صرف. */
-    const params = new URLSearchParams();
-    params.set("draft", "1");
-    if (diagnosis) params.set("diagnosis", diagnosis);
-    if (notes) params.set("notes", notes);
-    params.set("lang", lang);
-    if (items.length > 0) {
-      params.set("items", JSON.stringify(items));
-    }
-    return `/print/prescription/${patientId}?${params.toString()}`;
-  };
-
   /** إرسال الوصفة إلى الخادم — برمز إقرارٍ إن كان الطبيب أقرّ التحذيرات. */
-  const submitToServer = async (acknowledgedSafetyToken?: string) => {
+  const submitToServer = async (operation: PrescriptionOperation, acknowledgedSafetyToken?: string) => {
+    if (!commandScope || !patientId || !selectedDoctorId) throw new Error("لم يكتمل سياق الإصدار.");
+    const checked = checkPrescriptionDraft({ patientId, visitId: visitId ?? null, prescribingDoctorPartyId: selectedDoctorId, diagnosis, notes, instructionsLang: lang, items });
+    if (!checked.ok) throw new Error(checked.message);
+    const bytes = await window.crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalPrescriptionCommand(checked.value)));
+    if (!operationFence.current.current(operation)) return null;
+    const digest = Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, "0")).join("");
+    const entry = getOrCreatePrescriptionCommand(window.sessionStorage, commandScope, digest, selectedDoctorId, () => window.crypto.randomUUID());
+    setCommandRead({ scope: commandScope, owner: operationScope, entry, message: "مفتاح الإصدار محفوظ. عند تعذر الاتصال أعد المحاولة بالمفتاح نفسه." });
     const response = await fetch("/api/prescriptions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        commandKey: entry.key,
         patientId,
+        ...(visitId ? { visitId } : {}),
+        ...(selectedDoctorId ? { prescribingDoctorPartyId: selectedDoctorId } : {}),
         diagnosis,
         notes,
         instructionsLang: lang,
@@ -219,19 +275,55 @@ export function PrescriptionModal({
       }),
     });
     const payload = await response.json().catch(() => null);
-    return interpretPrescriptionSaveResponse(response.status, payload);
+    if (!operationFence.current.current(operation)) return null;
+    const outcome = interpretPrescriptionSaveResponse(response.status, payload);
+    if (outcome.kind === "officialPrint" || outcome.kind === "recoveredIssuance") setCommandRead({ scope: commandScope, owner: operationScope, entry, recoveredId: outcome.prescriptionId, status: "active", message: "الإصدار محفوظ؛ تكرار الطلب يعيد الوصفة نفسها ولا ينشئ وصفة أخرى." });
+    return outcome;
+  };
+
+  const recoverIssuance = async () => {
+    if (!commandScope || !patientId) return;
+    const operation = operationFence.current.start();
+    if (!operation) return;
+    setPreserving(true);
+    try {
+      const entry = readPrescriptionCommand(window.sessionStorage, commandScope);
+      if (!entry) throw new Error("لا يوجد مفتاح إصدار محفوظ في هذه الصفحة.");
+      const query = new URLSearchParams({ patientId: String(patientId), prescribingDoctorPartyId: String(entry.prescribingDoctorPartyId) });
+      if (visitId) query.set("visitId", String(visitId));
+      const response = await fetch(`/api/prescriptions/commands/${entry.key}?${query}`, { cache: "no-store" });
+      const body = await response.json();
+      if (!operationFence.current.current(operation)) return;
+      if (!response.ok || body.state !== "completed" || !Number.isSafeInteger(body.id) || body.id <= 0 || !["active", "void"].includes(body.status)) {
+        setCommandRead({ scope: commandScope, owner: operationScope, entry, message: body.message || "لم تتأكد النتيجة؛ احتفظ بالمفتاح ولا تبدأ إصدارًا جديدًا." });
+        return;
+      }
+      setCommandRead({ scope: commandScope, owner: operationScope, entry, recoveredId: body.id, status: body.status,
+        message: body.status === "void" ? "الإصدار السابق محفوظ لكنه مبطل؛ لا تعاد طباعته." : "تم العثور على الإصدار المحفوظ. لم تُنشأ وصفة جديدة ولم تبدأ الطباعة تلقائيًا." });
+    } catch (error) { if (operationFence.current.current(operation)) setPreserveError(error instanceof Error ? error.message : "تعذر التحقق من نتيجة الإصدار؛ احتفظ بالمفتاح."); }
+    finally { if (operationFence.current.current(operation)) setPreserving(false); operationFence.current.finish(operation); }
+  };
+  const startNewIssuance = () => {
+    if (!commandScope || preserving || operationFence.current.isBusy()) return;
+    if (!window.confirm("قد تكون الوصفة السابقة صدرت حتى لو انقطع الرد. راجع سجل المريض أولًا. هل تريد صراحةً بدء إصدار جديد بمفتاح مستقل؟ لا يحذف هذا الإجراء أي وصفة محفوظة.")) return;
+    try { window.sessionStorage.removeItem(commandScope); setCommandRead(null); setPreserveError(null); setSafetyPreview(null); }
+    catch { setPreserveError("تعذر تحديث مفتاح الإصدار؛ لم تبدأ وصفة جديدة."); }
   };
 
   const openOfficialPrint = (prescriptionId: number) => {
-    /* الوثيقة الرسمية تُطبع من المحفوظ: اسم الطبيب من السجل (createdBy)
+    /* الوثيقة الرسمية تُطبع من المحفوظ: اسم الطبيب من snapshot السجل
      * لا من الرابط — فلا وثيقة رسمية تحمل اسمًا مزوّرًا (P0.9). */
-    const params = new URLSearchParams();
-    params.set("rx", String(prescriptionId));
-    window.open(`/print/prescription/${patientId}?${params.toString()}`, "_blank");
+    if (!patientId) return;
+    const opening = openSavedPrescriptionPrint(patientId, prescriptionId, (url, target) => window.open(url, target));
+    if (opening && !opening.opened) {
+      setBlockedSavedPrintId(prescriptionId);
+    }
   };
 
   const handlePrint = async () => {
     if (!validatePrintableItems()) return;
+    const operation = operationFence.current.start();
+    if (!operation) return;
     // Printing claims this diagnosis for the prescription being submitted.
     // Later visit-note updates cannot silently change its display or the
     // canonical content while save/safety acknowledgement is in progress.
@@ -239,9 +331,9 @@ export function PrescriptionModal({
     /* الوصفة وثيقة: تُحفَظ أوّلًا ثم تُطبَع من المحفوظ. والخادم هو المرجع
      * النهائي للسلامة (مراجعة الجولة الثانية — Blocker B):
      * - تعارضٌ حرج (409) ⇒ توقّف تام: لا طباعة رسمية ولا سقوط تلقائي إلى
-     *   مسودة؛ يُعرض سبب المنع، والمسودة زرّ منفصل صريح فقط.
+     *   مسودة؛ يُعرض سبب المنع، والمسودة تُراجع داخل النافذة فقط.
      * - تحذيرات غير حرجة ⇒ عرضٌ وإقرارٌ صريح قبل الحفظ والطباعة الرسمية.
-     * - فشلٌ غير حرج (شبكة/500) لا يحرم المريض وصفته: مسودة معلنة مع سببٍ ظاهر. */
+     * - فشل الشبكة/500 قد يخفي إصدارًا ناجحًا: لا طباعة تلقائية ولا مفتاح جديد. */
     setCriticalBlock(null);
     setSafetyPreview(null);
     setAckInvalidMessage(null);
@@ -249,7 +341,9 @@ export function PrescriptionModal({
       setPreserving(true);
       setPreserveError(null);
       try {
-        const outcome = await submitToServer();
+        const outcome = await submitToServer(operation);
+        if (!outcome || !operationFence.current.current(operation)) return;
+        if (outcome.kind === "recoveredIssuance") return;
         if (outcome.kind === "officialPrint") {
           openOfficialPrint(outcome.prescriptionId);
           return;
@@ -272,15 +366,20 @@ export function PrescriptionModal({
           setAckInvalidMessage(outcome.message);
           return;
         }
+        if (outcome.kind === "issuanceBlocked") { setPreserveError(outcome.message); return; }
         setPreserveError(outcome.reason);
-      } catch {
-        setPreserveError("تعذّر حفظ الوصفة كوثيقة — ستُطبع بالطريقة السريعة.");
+        return;
+      } catch (error) {
+        if (!operationFence.current.current(operation)) return;
+        setPreserveError(error instanceof Error ? error.message : "لم تتأكد نتيجة الإصدار؛ أعد المحاولة بالمفتاح نفسه أو تحقق من السجل.");
+        return;
       } finally {
-        setPreserving(false);
+        if (operationFence.current.current(operation)) setPreserving(false);
+        operationFence.current.finish(operation);
       }
     }
-    const url = buildPrintUrl();
-    if (url) window.open(url, "_blank");
+    if (operationFence.current.current(operation)) setPreserveError("الطباعة متاحة من النسخة المحفوظة فقط؛ أكمل سياق المريض والطبيب واحفظ الوصفة أولًا.");
+    operationFence.current.finish(operation);
   };
 
   /** إقرار الطبيب قراءة التحذيرات غير الحرجة ثم الحفظ والطباعة الرسمية —
@@ -289,10 +388,14 @@ export function PrescriptionModal({
   const handleAcknowledgeAndPrint = async () => {
     if (!safetyPreview?.token || !patientId) return;
     if (!validatePrintableItems()) return;
+    const operation = operationFence.current.start();
+    if (!operation) return;
     setPreserving(true);
     setAckInvalidMessage(null);
     try {
-      const outcome = await submitToServer(safetyPreview.token);
+      const outcome = await submitToServer(operation, safetyPreview.token);
+      if (!outcome || !operationFence.current.current(operation)) return;
+      if (outcome.kind === "recoveredIssuance") { setSafetyPreview(null); return; }
       if (outcome.kind === "officialPrint") {
         setSafetyPreview(null);
         openOfficialPrint(outcome.prescriptionId);
@@ -319,51 +422,21 @@ export function PrescriptionModal({
         return;
       }
       setSafetyPreview(null);
+      if (outcome.kind === "issuanceBlocked") { setPreserveError(outcome.message); return; }
       setPreserveError(outcome.reason);
-      const url = buildPrintUrl();
-      if (url) window.open(url, "_blank");
-    } catch {
-      setAckInvalidMessage("تعذّر الاتصال بالخادم — حاول الإقرار من جديد.");
+    } catch (error) {
+      if (!operationFence.current.current(operation)) return;
+      setAckInvalidMessage(error instanceof Error ? error.message : "لم تتأكد نتيجة الإصدار؛ أعد المحاولة بالمفتاح نفسه أو تحقق من السجل.");
     } finally {
-      setPreserving(false);
+      if (operationFence.current.current(operation)) setPreserving(false);
+      operationFence.current.finish(operation);
     }
   };
 
-  /** تعليمات دواء واحد بلغة الروشتة المختارة. */
-  const instructionsLines = (item: RxItem): string[] => {
-    const ar = item.instructions.trim();
-    const en = item.instructionsEn.trim();
-    if (lang === "ar") return ar ? [ar] : [];
-    if (lang === "en") return en ? [en] : [];
-    return [ar, en].filter(Boolean);
-  };
-
-  const handleWhatsApp = () => {
-    if (!patientPhone) return;
-    const phone = toWhatsAppNumber(patientPhone);
-    if (!phone) return;
-
-    const label = (ar: string, en: string) => lang === "ar" ? ar : lang === "en" ? en : `${ar} / ${en}`;
-    let text = `*${label("وصفة طبية", "Prescription")} — ${clinicName}*\n\n`;
-    text += `${label("المريض", "Patient")}: ${patientName}\n`;
-    if (diagnosis) text += `${label("التشخيص", "Diagnosis")}: ${diagnosis}\n`;
-    if (medicalAlert) text += `${label("تنبيه طبي", "Medical alert")}: ${medicalAlert}\n`;
-    text += `\n*${label("الأدوية", "Medications")}:*\n`;
-
-    items.forEach((item, idx) => {
-      text += `${idx + 1}. *${item.name}* ${item.dose ? `(${item.dose})` : ""}\n`;
-      text += `   - ${[item.form, item.frequency, item.duration].filter(Boolean).join(" · ")}\n`;
-      for (const line of instructionsLines(item)) {
-        text += `   - ${line}\n`;
-      }
-    });
-
-    if (notes) text += `\n*${label("تعليمات إضافية", "Additional instructions")}:* ${notes}\n`;
-    text += `\n${label("مع تمنياتنا لكم بالشفاء العاجل", "Wishing you a speedy recovery")} 🦷`;
-
-    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
-    window.open(waUrl, "_blank");
-  };
+  // Sharing unsaved editable rows could bypass server safety and put clinical
+  // data in an external URL. Keep this explicitly unavailable until a separate
+  // active-saved-record, recipient and content review workflow is implemented.
+  const handleWhatsApp = () => setPreserveError("مشاركة واتساب غير متاحة حاليًا؛ يلزم مسار مستقل يراجع الوصفة المحفوظة النشطة والمستلم والمحتوى قبل المشاركة. لم تُفتح خدمة خارجية.");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
@@ -373,7 +446,7 @@ export function PrescriptionModal({
       />
       <div className="relative z-10 flex flex-col max-h-[90vh] w-full max-w-3xl rounded-3xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
         {/* رأس النافذة */}
-        <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-6 py-4">
+        <div className="shrink-0 flex items-center justify-between border-b border-slate-100 bg-slate-50/80 px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-brand-navy text-white text-lg font-serif font-black shadow-xs">
               ℞
@@ -398,7 +471,7 @@ export function PrescriptionModal({
         </div>
 
         {/* محتوى النموذج */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
           {patientContextStatus && patientContextStatus !== "ready" && (
             <p role="status" className="rounded-2xl border border-amber-300 bg-amber-50 p-3.5 text-xs font-semibold text-amber-950">
               {patientContextStatus === "loading"
@@ -464,31 +537,6 @@ export function PrescriptionModal({
             </div>
           )}
 
-          {/* قوالب الإجراءات والتشخيصات — لا أدوية (مراجعة الجولة الثانية):
-           * تُعبّئ نوع الحالة والتشخيص والملاحظات الإجرائية فقط؛ اختيار الدواء
-           * والجرعة يبقى بيد الطبيب، وتظهر معها قائمة تحقق سريري. */}
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-2">
-              ⚡ قوالب إجراءات وتشخيصات (تُعبّئ الحالة — لا تحتوي أدوية):
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {PROCEDURE_TEMPLATES.map((tmpl, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  title={`${tmpl.diagnosis} — يُعبّئ التشخيص والعناية الإجرائية؛ الأدوية والجرعات يحددها الطبيب`}
-                  onClick={() => applyTemplate(idx)}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand-navy hover:bg-navy-50 hover:text-navy-900 transition-all"
-                >
-                  {tmpl.title}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 text-[11px] font-semibold text-slate-400">
-              القالب لا يختار دواءً ولا جرعة — التقييم الدوائي والأدوية قرارٌ سريري يُكتب يدويًا أو يُختار مما وُصف له سابقًا.
-            </p>
-          </div>
-
           {/* قائمة التحقق السريري للقالب المطبّق: «لا تنبيه مسجل ≠ مريض سليم». */}
           {appliedChecklist && (
             <div className="rounded-2xl border border-amber-300 bg-amber-50/80 p-4 text-xs text-amber-950">
@@ -507,44 +555,14 @@ export function PrescriptionModal({
             </div>
           )}
 
-          {/*
-            * مما سبق وصفه لهذا المريض (من مستودع الوكيل الآخر): رقائقٌ تُقلّل
-            * النقر ولا تُفرض — التكرار الإداري المريح ليس قرارًا سريريًّا.
-            */}
-          {suggestions.length > 0 ? (
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-2">
-                ↩️ وُصف له سابقًا (اضغط لإضافته إلى القائمة):
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {suggestions.map((suggestion) => (
-                  <button
-                    key={suggestion.name}
-                    type="button"
-                    title={`وُصف ${suggestion.timesPrescribed} مرة — آخرها ${new Date(suggestion.lastPrescribedAt).toLocaleDateString("ar")}`}
-                    onClick={() => setItems((prev) => [
-                      ...prev,
-                      {
-                        name: suggestion.name,
-                        dose: suggestion.dose,
-                        form: "",
-                        frequency: suggestion.frequency,
-                        duration: suggestion.duration,
-                        instructions: "",
-                        instructionsEn: "",
-                      },
-                    ])}
-                    className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 hover:border-sky-400 hover:bg-sky-100 transition-all"
-                    dir="ltr"
-                  >
-                    {suggestion.name}
-                    {suggestion.timesPrescribed > 1 ? ` ×${suggestion.timesPrescribed}` : ""}
-                  </button>
-                ))}
-              </div>
+          {commandState && <div className="rounded-lg border border-slate-300 bg-slate-50 p-3 text-sm" role="status">
+            <p>{commandState.message}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {commandState.entry && <button type="button" disabled={preserving} onClick={() => void recoverIssuance()} className="rounded border bg-white px-3 py-2">التحقق من نتيجة الإصدار السابق</button>}
+              {commandState.recoveredId && commandState.status === "active" && <a href={`/print/prescription/${patientId}?rx=${commandState.recoveredId}`} target="_blank" rel="noopener noreferrer" className="rounded border border-slate-900 bg-slate-900 px-3 py-2 font-bold text-white">فتح النسخة المحفوظة #{commandState.recoveredId}</a>}
+              <button type="button" disabled={preserving} onClick={startNewIssuance} className="rounded border bg-white px-3 py-2">بدء إصدار جديد بعد مراجعة السجل</button>
             </div>
-          ) : null}
-
+          </div>}
           {preserveError ? (
             <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800">
               {preserveError}
@@ -552,7 +570,7 @@ export function PrescriptionModal({
           ) : null}
 
           {/* منعٌ حرج من الخادم (409): توقّف تام — لا طباعة رسمية ولا مسودة
-              تلقائية؛ سبب المنع ظاهر، والمسودة زرّ منفصل صريح (مراجعة الجولة الثانية). */}
+              تلقائية؛ سبب المنع ظاهر، والمسودة تُراجع داخل النافذة دون رابط طباعة. */}
           {criticalBlock && (
             <div className="space-y-2.5 rounded-2xl border-2 border-red-500 bg-red-50 p-4 shadow-xs">
               <div className="flex items-center gap-2 text-xs font-black text-red-900">
@@ -576,13 +594,10 @@ export function PrescriptionModal({
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  const url = buildPrintUrl();
-                  if (url) window.open(url, "_blank");
-                }}
+                onClick={() => setPreserveError("المسودة للمراجعة داخل هذه النافذة فقط؛ الطباعة متاحة بعد حفظ وصفة معتمدة. صحّح سبب المنع قبل الحفظ، وستبقى جميع الحقول كما كتبتها.")}
                 className="rounded-xl border border-red-300 bg-white px-4 py-2 text-xs font-bold text-red-700 hover:bg-red-100 transition-colors"
               >
-                عرض مسودة غير معتمدة (لا تُصرف كوصفة)
+                مراجعة المسودة داخل النافذة
               </button>
             </div>
           )}
@@ -618,7 +633,7 @@ export function PrescriptionModal({
                 <button
                   type="button"
                   onClick={() => void handleAcknowledgeAndPrint()}
-                  disabled={preserving}
+                  disabled={preserving || prescriberStatus !== "ready"}
                   className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-black text-white shadow-xs hover:bg-amber-700 transition-all disabled:opacity-50"
                 >
                   {preserving ? "جارٍ الحفظ بعد الإقرار…" : "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا"}
@@ -642,6 +657,190 @@ export function PrescriptionModal({
               {ackInvalidMessage}
             </p>
           ) : null}
+
+          {/* تفاصيل الطبيب والتشخيص */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                التشخيص الطبي
+              </label>
+              <input
+                type="text"
+                value={diagnosis}
+                onChange={(e) => setDiagnosisOverride(e.target.value)}
+                placeholder="مثال: Acute Pulpitis / Post-Extraction"
+                className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs focus:border-brand-navy focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                الطبيب الواصف
+              </label>
+              {prescriberOptions?.canChooseAnyDoctor ? (
+                <select aria-label="الطبيب الواصف" value={selectedDoctorId ?? ""}
+                  onChange={event => setPrescriberOverride(Number(event.target.value))}
+                  className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs">
+                  {prescriberOptions.doctors.map(doctor => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+                </select>
+              ) : (
+                <input aria-label="الطبيب الواصف" type="text" value={doctorName} readOnly
+                  placeholder="الاسم من الهوية السريرية للحساب"
+                  className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs" />
+              )}
+            </div>
+          </div>
+
+          {prescriberStatus === "loading" && <p role="status" className="text-sm">جارٍ التحقق من هوية الطبيب الواصف…</p>}
+          {prescriberStatus === "error" && <div role="alert" className="rounded border border-red-200 p-3 text-sm">
+            <p>{prescriberRead?.key === prescriberKey && prescriberRead.unavailableMessage
+              ? prescriberRead.unavailableMessage : "تعذر التحقق من هوية الطبيب الواصف."} الإصدار والمعاينة متوقفان حتى ينجح التحقق.</p>
+            <button type="button" onClick={() => setPrescriberRetry(value => value + 1)} className="mt-2 rounded border px-3 py-2">إعادة التحقق من الطبيب</button>
+          </div>}
+          {session?.role === "admin" && !prescriberOptions?.canChooseAnyDoctor && <p role="status" className="rounded border border-amber-200 p-3 text-xs">
+            اختيار طبيب آخر للمالك غير متاح حاليًا؛ لم يكتمل ربط صلاحية المالك. الإصدار الحالي باسم طبيب الحساب فقط بعد التحقق منه.
+          </p>}
+          {prescriberMismatch && <div role="alert" className="rounded border border-amber-300 bg-amber-50 p-3 text-xs">
+            <p>الطبيب المحدد في الزيارة يختلف عن الطبيب المرتبط بحسابك. لم نغيّر الاختيار تلقائيًا.</p>
+            <button type="button" onClick={() => setPrescriberOverride(prescriberOptions?.issuerId ?? null)} className="mt-2 rounded border px-3 py-2">
+              إصدار باسمي: {prescriberOptions?.doctors.find(d => d.id === prescriberOptions.issuerId)?.name}
+            </button>
+          </div>}
+
+          {/* قائمة الأدوية */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-bold text-slate-700">
+                💊 قائمة الأدوية والجرعات ({items.length}) — <span dir="ltr" className="font-extrabold">English</span>:
+              </label>
+              <button
+                type="button"
+                onClick={addItem}
+                disabled={items.length >= MAX_ITEMS}
+                className="flex items-center gap-1 text-xs font-bold text-brand-navy hover:text-navy-700"
+              >
+                <Icon name="plus" className="h-3.5 w-3.5" />
+                <span>إضافة دواء جديد</span>
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              {items.map((item, idx) => {
+                const itemAlert = safetyAlerts.find(
+                  (a) => a.medicationName.trim().toLowerCase() === item.name.trim().toLowerCase()
+                );
+                return (
+                  <div
+                    key={idx}
+                    className={`rounded-2xl border p-3.5 space-y-2.5 transition-all ${
+                      itemAlert?.severity === "critical"
+                        ? "border-red-400 bg-red-50/40 ring-1 ring-red-400/50"
+                        : itemAlert?.severity === "warning"
+                        ? "border-amber-400 bg-amber-50/40 ring-1 ring-amber-400/50"
+                        : "border-slate-200 bg-slate-50/60"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-bold text-slate-700">
+                        {idx + 1}
+                      </span>
+                      <input
+                        type="text"
+                        value={item.name}
+                        onChange={(e) => updateItem(idx, "name", e.target.value)}
+                        placeholder="Drug name"
+                        aria-label={`اسم الدواء للسطر ${idx + 1}`}
+                        dir="ltr"
+                        className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-navy-900 focus:border-brand-navy focus:outline-none"
+                      />
+                      <label className="order-last w-full text-[11px] text-slate-700 sm:order-none sm:w-36">القوة / التركيز والوحدة
+                      <input
+                        type="text"
+                        value={item.dose}
+                        onChange={(e) => updateItem(idx, "dose", e.target.value)}
+                        placeholder="Strength / concentration + unit"
+                        aria-label={`التركيز أو القوة والوحدة للسطر ${idx + 1}`}
+                        dir="ltr"
+                        className="block w-full rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-brand-navy focus:outline-none"
+                      />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => removeItem(idx)}
+                        className="text-slate-400 hover:text-red-600 p-1"
+                        title="حذف الدواء"
+                      >
+                        <Icon name="trash" className="h-4 w-4" />
+                      </button>
+                    </div>
+
+                    {itemAlert && (
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-red-700 bg-red-100/70 px-2.5 py-1 rounded-lg">
+                        <span>{itemAlert.severity === "critical" ? "⛔" : "⚠️"}</span>
+                        <span>{itemAlert.title}: {itemAlert.message}</span>
+                      </div>
+                    )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs" dir="ltr">
+                    <input
+                      type="text"
+                      value={item.form}
+                      onChange={(e) => updateItem(idx, "form", e.target.value)}
+                      placeholder="Form / route (tablet, oral rinse…)"
+                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={item.frequency}
+                      onChange={(e) => updateItem(idx, "frequency", e.target.value)}
+                      placeholder="Frequency (every 8 hours)"
+                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={item.duration}
+                      onChange={(e) => updateItem(idx, "duration", e.target.value)}
+                      placeholder="Duration (5 days)"
+                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
+                    />
+                  </div>
+
+                  <PrescriptionStaleReferenceNotice item={item} onRetire={() => setItems(previous => retireDraftDoseReferenceAt(previous, idx, item))}/>
+
+                  {item.selection && <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs">
+                    <p>{item.selection.doseReview?.mode === "calculated" ? "نُقلت النتيجة من حساب مرجعي متحقق رياضيًا؛ راجعها سريريًا قبل الإصدار. أي تعديل يدوي يزيل وصف الحساب." : item.selection.doseReview ? "تعديل يدوي مرتبط بمصدر مرجعي فقط — ليس نتيجة حساب معتمدة؛ أعد مراجعة السطر." : "أكمل الشكل والتركيز ومقدار الجرعة والتكرار والمدة بنفسك؛ لا اعتماد تلقائي."}</p>
+                    <label className="my-2 block">مقدار الجرعة ووحدتها لكل مرة
+                      <input aria-label={`مقدار الجرعة للسطر ${idx + 1}`} dir="ltr" value={item.selection.amount} placeholder="Clinician-entered amount per dose"
+                        onChange={event => setItems(previous => previous.map((row, i) => i === idx && row.selection ? { ...row, selection: { ...changedMedicationSelection(row.selection), amount: event.target.value } } : row))}
+                        className="mx-2 rounded border bg-white p-2" />
+                    </label>
+                    <label className="flex gap-2"><input type="checkbox" checked={item.selection.confirmed}
+                      onChange={event => setItems(previous => previous.map((row, i) => i === idx && row.selection ? { ...row, selection: { ...row.selection, confirmed: event.target.checked } } : row))} />
+                      راجعت الاستطباب والحساسية والشكل والتركيز والجرعة والتكرار والمدة لهذا السطر. هذا لا يلغي تنبيهات السلامة.
+                    </label>
+                  </div>}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <input
+                      type="text"
+                      value={item.instructions}
+                      onChange={(e) => updateItem(idx, "instructions", e.target.value)}
+                      placeholder="التعليمات بالعربية (بعد الأكل…)"
+                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={item.instructionsEn}
+                      onChange={(e) => updateItem(idx, "instructionsEn", e.target.value)}
+                      placeholder="Instructions in English (after meals…)"
+                      dir="ltr"
+                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          </div>
 
           {/* لغة التعليمات */}
           <div>
@@ -667,149 +866,87 @@ export function PrescriptionModal({
             </p>
           </div>
 
-          {/* تفاصيل الطبيب والتشخيص */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <details data-prescription-optional="history" className="rounded-xl border border-slate-200 p-3">
+            <summary className="cursor-pointer text-sm font-bold">أدوية وُصفت سابقًا (اختياري)</summary>
+          {/*
+            * مما سبق وصفه لهذا المريض (من مستودع الوكيل الآخر): رقائقٌ تُقلّل
+            * النقر ولا تُفرض — التكرار الإداري المريح ليس قرارًا سريريًّا.
+            */}
+          {prescriberStatus === "ready" && suggestions.length > 0 ? (
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                التشخيص الطبي
+              <label className="block text-xs font-bold text-slate-700 mb-2">
+                ↩️ وُصف له سابقًا (اضغط لإضافته إلى القائمة):
               </label>
-              <input
-                type="text"
-                value={diagnosis}
-                onChange={(e) => setDiagnosisOverride(e.target.value)}
-                placeholder="مثال: Acute Pulpitis / Post-Extraction"
-                className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs focus:border-brand-navy focus:outline-none"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                اسم الطبيب المعالج
-              </label>
-              <input
-                type="text"
-                value={doctorName}
-                onChange={(e) => setDoctorName(e.target.value)}
-                placeholder="د. طبيب الأسنان"
-                className="w-full rounded-xl border border-slate-300 px-3.5 py-2 text-xs focus:border-brand-navy focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* قائمة الأدوية */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-bold text-slate-700">
-                💊 قائمة الأدوية والجرعات ({items.length}) — <span dir="ltr" className="font-extrabold">English</span>:
-              </label>
-              <button
-                type="button"
-                onClick={addItem}
-                className="flex items-center gap-1 text-xs font-bold text-brand-navy hover:text-navy-700"
-              >
-                <Icon name="plus" className="h-3.5 w-3.5" />
-                <span>إضافة دواء جديد</span>
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {items.map((item, idx) => {
-                const itemAlert = safetyAlerts.find(
-                  (a) => a.medicationName.trim().toLowerCase() === item.name.trim().toLowerCase()
-                );
-                return (
-                  <div
-                    key={idx}
-                    className={`rounded-2xl border p-3.5 space-y-2.5 transition-all ${
-                      itemAlert?.severity === "critical"
-                        ? "border-red-400 bg-red-50/40 ring-1 ring-red-400/50"
-                        : itemAlert?.severity === "warning"
-                        ? "border-amber-400 bg-amber-50/40 ring-1 ring-amber-400/50"
-                        : "border-slate-200 bg-slate-50/60"
-                    }`}
+              <div className="flex flex-wrap gap-2">
+                {suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.name}
+                    type="button"
+                    disabled={!canAcceptPrescriptionSelection(items)}
+                    title={`وُصف ${suggestion.timesPrescribed} مرة — آخرها ${new Date(suggestion.lastPrescribedAt).toLocaleDateString("ar")}`}
+                    onClick={() => setItems((prev) => appendPrescriptionSelection(prev, {
+                        selection: { id: "manual", amount: "", confirmed: false },
+                        name: suggestion.name,
+                        dose: suggestion.dose,
+                        form: "",
+                        frequency: suggestion.frequency,
+                        duration: suggestion.duration,
+                        instructions: "",
+                        instructionsEn: "",
+                      }))}
+                    className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 hover:border-sky-400 hover:bg-sky-100 transition-all"
+                    dir="ltr"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-bold text-slate-700">
-                        {idx + 1}
-                      </span>
-                      <input
-                        type="text"
-                        value={item.name}
-                        onChange={(e) => updateItem(idx, "name", e.target.value)}
-                        placeholder="Drug name (e.g. Augmentin / Brufen)"
-                        dir="ltr"
-                        className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-navy-900 focus:border-brand-navy focus:outline-none"
-                      />
-                      <input
-                        type="text"
-                        value={item.dose}
-                        onChange={(e) => updateItem(idx, "dose", e.target.value)}
-                        placeholder="Dose (1g / 500mg)"
-                        dir="ltr"
-                        className="w-28 rounded-xl border border-slate-300 bg-white px-3 py-1.5 text-xs focus:border-brand-navy focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => removeItem(idx)}
-                        className="text-slate-400 hover:text-red-600 p-1"
-                        title="حذف الدواء"
-                      >
-                        <Icon name="trash" className="h-4 w-4" />
-                      </button>
-                    </div>
+                    {suggestion.name}
+                    {suggestion.timesPrescribed > 1 ? ` ×${suggestion.timesPrescribed}` : ""}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
-                    {itemAlert && (
-                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-red-700 bg-red-100/70 px-2.5 py-1 rounded-lg">
-                        <span>{itemAlert.severity === "critical" ? "⛔" : "⚠️"}</span>
-                        <span>{itemAlert.title}: {itemAlert.message}</span>
-                      </div>
-                    )}
+          </details>
+          <details data-prescription-optional="references" className="rounded-xl border border-slate-200 p-3">
+            <summary className="cursor-pointer text-sm font-bold">اختيار من القوالب والمراجع (اختياري)</summary>
+            <p className="my-2 text-xs"><a href="/settings/medications" target="_blank" rel="noopener noreferrer" className="underline text-blue-800">إدارة قوالب الأدوية في الإعدادات</a> · يفتح في تبويب جديد دون فقد المسودة.</p>
+            <div className="space-y-3">
+          <PrescriptionDoseProfiles key={`dose:${patientId}:${visitId ?? "none"}:${selectedDoctorId ?? "none"}:${prescriberStatus}`} disabled={!canAcceptPrescriptionSelection(items) || prescriberStatus !== "ready"} onSelect={item => setItems(previous => appendPrescriptionSelection(previous, item))} />
+          <PrescriptionClinicCatalog key={`${patientId}:${visitId ?? "none"}:${selectedDoctorId ?? "none"}:${prescriberStatus}`} disabled={!canAcceptPrescriptionSelection(items) || prescriberStatus !== "ready"} onSelect={item => setItems(previous => appendPrescriptionSelection(previous, item))} />
+          <PrescriptionMedicationLibrary disabled={!canAcceptPrescriptionSelection(items) || prescriberStatus !== "ready"} onSelectName={id => {
+            const item = createManualMedicationSelection(id);
+            if (item) setItems(previous => appendPrescriptionSelection(previous, item));
+          }} />
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs" dir="ltr">
-                    <input
-                      type="text"
-                      value={item.form}
-                      onChange={(e) => updateItem(idx, "form", e.target.value)}
-                      placeholder="Form (Tablets / Syrup)"
-                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
-                    />
-                    <input
-                      type="text"
-                      value={item.frequency}
-                      onChange={(e) => updateItem(idx, "frequency", e.target.value)}
-                      placeholder="Frequency (every 8 hours)"
-                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
-                    />
-                    <input
-                      type="text"
-                      value={item.duration}
-                      onChange={(e) => updateItem(idx, "duration", e.target.value)}
-                      placeholder="Duration (5 days)"
-                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                    <input
-                      type="text"
-                      value={item.instructions}
-                      onChange={(e) => updateItem(idx, "instructions", e.target.value)}
-                      placeholder="التعليمات بالعربية (بعد الأكل…)"
-                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
-                    />
-                    <input
-                      type="text"
-                      value={item.instructionsEn}
-                      onChange={(e) => updateItem(idx, "instructionsEn", e.target.value)}
-                      placeholder="Instructions in English (after meals…)"
-                      dir="ltr"
-                      className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus:border-brand-navy focus:outline-none"
-                    />
-                  </div>
-                </div>
-              );
-            })}
+            </div>
+          </details>
+          <details data-prescription-optional="procedures" className="rounded-xl border border-slate-200 p-3">
+            <summary className="cursor-pointer text-sm font-bold">قوالب التشخيص والعناية (اختياري)</summary>
+          {/* قوالب الإجراءات والتشخيصات — لا أدوية (مراجعة الجولة الثانية):
+           * تُعبّئ نوع الحالة والتشخيص والملاحظات الإجرائية فقط؛ اختيار الدواء
+           * والجرعة يبقى بيد الطبيب، وتظهر معها قائمة تحقق سريري. */}
+          <div>
+            <label className="block text-xs font-bold text-slate-700 mb-2">
+              ⚡ قوالب إجراءات وتشخيصات (تُعبّئ الحالة — لا تحتوي أدوية):
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {PROCEDURE_TEMPLATES.map((tmpl, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  title={`${tmpl.diagnosis} — يُعبّئ التشخيص والعناية الإجرائية؛ الأدوية والجرعات يحددها الطبيب`}
+                  onClick={() => applyTemplate(idx)}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-brand-navy hover:bg-navy-50 hover:text-navy-900 transition-all"
+                >
+                  {tmpl.title}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1.5 text-[11px] font-semibold text-slate-400">
+              القالب لا يختار دواءً ولا جرعة — التقييم الدوائي والأدوية قرارٌ سريري يُكتب يدويًا أو يُختار مما وُصف له سابقًا.
+            </p>
           </div>
-          </div>
+
+          </details>
 
           {/* ملاحظات وإرشادات إضافية */}
           <div>
@@ -827,7 +964,12 @@ export function PrescriptionModal({
         </div>
 
         {/* تذييل النافذة والإجراءات */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4">
+        <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-slate-50 px-4 py-3">
+          <p className="w-full text-xs text-slate-600">الطباعة من النسخة المحفوظة فقط. المسودة غير المحفوظة تبقى للمراجعة هنا.</p>
+          {blockedSavedPrintId && commandState?.recoveredId === blockedSavedPrintId && commandState.status === "active" && <div role="status" className="flex w-full flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 p-2 text-xs">
+            <span>الوصفة محفوظة ولم تُفتح نافذة الطباعة. افتح النسخة المحفوظة مباشرة؛ لا تبدأ إصدارًا جديدًا.</span>
+            <a href={`/print/prescription/${patientId}?rx=${blockedSavedPrintId}`} target="_blank" rel="noopener noreferrer" className="rounded bg-slate-900 px-3 py-2 font-bold text-white">فتح الوصفة المحفوظة للطباعة #{blockedSavedPrintId}</a>
+          </div>}
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -849,21 +991,23 @@ export function PrescriptionModal({
               <button
                 type="button"
                 onClick={handleWhatsApp}
+                disabled
+                title="المشاركة متوقفة حتى يتوفر مسار آمن للوصفة المحفوظة والمستلم والمحتوى"
                 className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors"
               >
                 <span>💬</span>
-                <span>إرسال واتساب</span>
+                <span>واتساب غير متاح حاليًا</span>
               </button>
             )}
 
             <button
               type="button"
               onClick={() => void handlePrint()}
-              disabled={preserving}
-              className="flex items-center gap-1.5 rounded-xl bg-brand-navy px-5 py-2 text-xs font-bold text-white shadow-xs hover:bg-navy-900 transition-all disabled:opacity-50"
+              disabled={preserving || prescriberStatus !== "ready"}
+              className="flex min-h-11 items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white shadow hover:bg-slate-800 transition-all disabled:opacity-50"
             >
               <Icon name="print" className="h-4 w-4" />
-              <span>{preserving ? "جارٍ حفظ الوصفة…" : "طباعة الروشتة (A5)"}</span>
+              <span>{preserving ? "جارٍ حفظ الوصفة…" : "حفظ وطباعة الوصفة"}</span>
             </button>
           </div>
         </div>

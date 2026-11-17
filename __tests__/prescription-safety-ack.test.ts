@@ -40,7 +40,7 @@ const DRAFT_BODY = {
   diagnosis: "خراج لبي",
   notes: "",
   instructionsLang: "both",
-  items: [{ name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" }],
+  items: [{ selection: { id: "manual" as const, amount: "Synthetic amount", confirmed: true }, name: "Ibuprofen 400mg", dose: "400mg", form: "Tablets", frequency: "1 every 8h", duration: "3 days", instructions: "", instructionsEn: "" }],
 };
 
 function draftOf(body: Record<string, unknown> = DRAFT_BODY): PrescriptionDraft {
@@ -373,4 +373,17 @@ describe("صيغة الرمز: حمولة موقّعة تحمل المستخدم
     });
     expect(tokenForBleeding).not.toBe(tokenForBleedingAsthma);
   });
+});
+
+it("binds explicit manual amount and confirmation to the existing safety acknowledgement", () => {
+  const draft = draftOf();
+  draft.items[0].selection = { id: "ibuprofen", amount: "synthetic original amount", confirmed: true };
+  const warnings = warningsOf(ALERT_BLEEDING);
+  const token = buildSafetyAcknowledgementToken({ username: USERNAME, draft, warnings, now: T0 });
+  const unchanged = verifySafetyAcknowledgementToken(token, { username: USERNAME, draft, warnings, now: T0 + 1 });
+  expect(unchanged.ok).toBe(true);
+  for (const selection of [{ ...draft.items[0].selection, amount: "synthetic changed amount" }, { ...draft.items[0].selection, confirmed: false }]) {
+    const changed = { ...draft, items: [{ ...draft.items[0], selection }] };
+    expect(verifySafetyAcknowledgementToken(token, { username: USERNAME, draft: changed, warnings, now: T0 + 1 }).ok).toBe(false);
+  }
 });

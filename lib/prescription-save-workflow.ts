@@ -26,11 +26,13 @@
 import type { DrugSafetyAlert } from "./medication-safety";
 
 export type PrescriptionSaveOutcome =
+  | { kind: "recoveredIssuance"; prescriptionId: number }
   | { kind: "officialPrint"; prescriptionId: number; safetyWarnings: DrugSafetyAlert[] }
   | { kind: "criticalBlock"; message: string; safetyAlerts: DrugSafetyAlert[] }
   | { kind: "awaitAcknowledgement"; safetyWarnings: DrugSafetyAlert[]; acknowledgementToken: string; message?: string }
   | { kind: "acknowledgementRejected"; message: string; ackReason?: string }
-  | { kind: "draftFallback"; reason: string };
+  | { kind: "draftFallback"; reason: string }
+  | { kind: "issuanceBlocked"; message: string };
 
 function asAlerts(value: unknown): DrugSafetyAlert[] {
   return Array.isArray(value) ? (value as DrugSafetyAlert[]) : [];
@@ -50,8 +52,18 @@ export function interpretPrescriptionSaveResponse(
 ): PrescriptionSaveOutcome {
   const body = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
 
+  if (body.status === "void") return { kind: "issuanceBlocked", message: "الإصدار السابق مبطل؛ راجع سجل الوصفات ولا تعاود طباعته." };
+  if (body.code === "issuance_outcome_unknown" || body.code === "issuance_command_conflict" || body.code === "issuance_protocol_required" || body.code === "issuance_refused")
+    return { kind: "issuanceBlocked", message: asMessage(body.message, "لم تتأكد نتيجة الإصدار؛ أعد المحاولة بالمفتاح نفسه.") };
+
+  if (status === 201 && body.replayed === true) {
+    if (body.status === "active" && Number.isSafeInteger(body.id) && (body.id as number) > 0)
+      return { kind: "recoveredIssuance", prescriptionId: body.id as number };
+    return { kind: "issuanceBlocked", message: "تعذر التحقق من حالة الإصدار السابق؛ تحقق من السجل قبل فتحه." };
+  }
+
   /* ١) نجاح: الوثيقة محفوظة — الطباعة الرسمية من id المحفوظ. */
-  if (status === 201 && Number.isInteger(body.id) && (body.id as number) > 0) {
+  if (status === 201 && Number.isSafeInteger(body.id) && (body.id as number) > 0) {
     return {
       kind: "officialPrint",
       prescriptionId: body.id as number,

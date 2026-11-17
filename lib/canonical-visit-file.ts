@@ -129,6 +129,7 @@ export async function commandCanonicalVisitDelete(session: VerifiedDurableSessio
     const identity = await staffOperationIdentity(client, handle, "visits.delete");
     const result = await deleteVisitOn(client, visitId, { actor: identity.username, actorRole: identity.role, reason });
     if (!result.ok) {
+      if (result.reason === "has_prescription_history") throw refuse("visit_prescription_history", 409, "الزيارة مرتبطة بوصفات محفوظة؛ لا يمكن حذف سجلها.");
       if (result.reason === "lab_linked") throw refuse("visit_lab_linked", 409, "هذه الزيارة مرتبطة بهوية مختبر دائمة؛ لا تُحذف دون معالجة سريرية صريحة للروابط.");
       if (result.reason === "signed") throw refuse("visit_signed", 409, "الزيارة موقّعة سريريًا — وثّقت عمل الطبيب ولا تُمحى.");
       if (result.reason === "invoiced") throw refuse("visit_invoiced", 409, "الزيارة مفوترة — دخلت الدفاتر ولا تُمحى. ألغِ الفاتورة أولًا إن كان ذلك الصحيح.");

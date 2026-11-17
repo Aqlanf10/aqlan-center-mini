@@ -79,6 +79,7 @@ export async function commandCanonicalPatientMerge(session: VerifiedDurableSessi
       if (!result.ok) {
         if (result.reason === "same_patient") throw refuse("merge_same_patient", 400, "لا يُدمج الملف في نفسه.");
         if (result.reason === "not_found") throw missing("لا يوجد ملف بهذا الرقم.");
+        if (result.reason === "source_has_prescription_history") throw refuse("merge_source_has_prescription_history", 409, "الملف المكرر مرتبط بوصفات محفوظة؛ لا يمكن نقل سجل إصدارها بالدمج.");
         if (result.reason === "source_has_financial_history") {
           throw refuse("merge_source_has_financial_history", 409,
             "الملف المكرر له أثر مالي (دفعات أو حركات مخزون أو رصيد افتتاحي أو سجل مالي سابق، ولو كان مسدّدًا بالكامل). لا يمكن نقل هذه السجلات بالدمج. راجع الملفين واختيار الملف الأساسي قبل المحاولة.",
