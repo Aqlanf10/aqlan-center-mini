@@ -1,6 +1,8 @@
 # Standalone restore witness — WIP
 
-This local branch is based on `e5f3c4fbff08c098e319572d5d9d13fce2c14787`.
+This local branch combines restore candidate
+`88ce015cf224f0eec748f83e147717c5913e44eb` and the witness originally based
+on `e5f3c4fbff08c098e319572d5d9d13fce2c14787`.
 It adds a separately configured HTTP witness after the existing build and
 preflight seal checks in CI. It has not been pushed, run in CI, or approved
 for deployment. No production or patient data is used.
@@ -29,9 +31,10 @@ build was performed, and the Node 22 CI execution and full typecheck are not
 verified. Test discovery is not an execution result. A previous successful
 synthetic HTTP witness on an older build does not certify this revision.
 
-The candidate e5 implementation may reset a drill target before rejecting the
-inconsistent historical archive; the new sentinel assertion intentionally
-requires preservation and may fail until that separate product fix is present.
+The original e5 implementation resets a drill target before rejecting the
+inconsistent historical archive in an independent mocked-client probe. Candidate
+88ce adds a precheck and passes the validated snapshot to restoration; the new
+sentinel assertion has not yet been run against that candidate.
 A source-only synthetic SQL probe showed the historical SQL validator rejects
 an orphaned 0079 effect; it did not test the endpoint or a database. Existing
 stage handling can clear the live staging directory before archive rejection;
