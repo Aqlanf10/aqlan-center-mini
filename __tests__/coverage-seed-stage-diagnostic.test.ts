@@ -5,6 +5,7 @@ vi.mock("../lib/ortho-followup-coverage-db", () => ({ readFollowupCoverageSnapsh
 const stages = ["case", "clinical", "plan", "service", "invoice", "plan_item", "invoice_item", "source", "revision"] as const;
 const notice = (stage: string) => `::notice title=Synthetic coverage seed stage::stage=${stage}\n`;
 const detail = (category: string) => `::notice title=Synthetic coverage source detail::detail=${category}\n`;
+const availability = (category: string) => `::notice title=Synthetic coverage availability::availability=${category}\n`;
 const syntheticMarker = "SYNTHETIC_PRIVATE_0123456789\n::error::never-print";
 const fakeSource = { fingerprint: "synthetic-fingerprint" };
 
@@ -89,7 +90,7 @@ describe("synthetic coverage seed stage observation", () => {
     let category = false;
     try { category = await seedCanonicalCoverage(db as never, { patientId: 1, actorId: 1, doctorId: 1, save: false }).then(() => false, error => error instanceof Error && error.message === "Synthetic coverage lineage was not valid"); }
     finally { stdout.mockRestore(); info.mockRestore(); }
-    expect(category).toBe(true); expect(output).toEqual([detail("source_and_snapshot_missing"), notice("source")]);
+    expect(category).toBe(true); expect(output).toEqual([availability("unknown"), detail("source_and_snapshot_missing"), notice("source")]);
     expect(output.join("").includes("Synthetic coverage lineage was not valid")).toBe(false);
     expect(db.operations).toEqual(stages.slice(0, 7));
   });
@@ -109,7 +110,7 @@ describe("synthetic coverage seed stage observation", () => {
     let original = false;
     try { original = await seedCanonicalCoverage(db as never, { patientId: 1, actorId: 1, doctorId: 1, save: false }).then(() => false, error => error instanceof Error && error.message === "Synthetic coverage lineage was not valid"); }
     finally { stdout.mockRestore(); info.mockRestore(); }
-    expect(original).toBe(true); expect(output).toEqual([detail(kind), notice("source")]);
+    expect(original).toBe(true); expect(output).toEqual(includeSource ? [detail(kind), notice("source")] : [availability("unknown"), detail(kind), notice("source")]);
     expect(output.join("").includes(syntheticMarker)).toBe(false);
   });
 
@@ -134,6 +135,31 @@ describe("synthetic coverage seed stage observation", () => {
     for (const value of categories) { observeCoverageSourceDetail(value, line => output.push(line)); observeCoverageSourceDetail(value, line => output.push(line)); }
     for (const invalid of [syntheticMarker, "source_missing\n::error::SYNTHETIC_PRIVATE", null, 1, hostile]) observeCoverageSourceDetail(invalid, line => output.push(line));
     expect(output).toEqual(categories.map(detail)); expect(trap).not.toHaveBeenCalled();
+    expect(output.join("").includes("SYNTHETIC_PRIVATE")).toBe(false);
+  });
+
+  it.each([[false, "disabled"], [true, "enabled_no_source"]] as const)("reports only the fixed availability for empty source", async (enabled, category) => {
+    const { seedCanonicalCoverage } = await import("./fixtures/canonical-ortho-coverage");
+    const db = database(null, null), output: string[] = [];
+    probe.read.mockResolvedValue({ enabled, sources: [] });
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(chunk => { output.push(String(chunk)); return true; });
+    let original = false;
+    try { original = await seedCanonicalCoverage(db as never, { patientId: 1, actorId: 1, doctorId: 1, save: false }).then(() => false, error => error instanceof Error && error.message === "Synthetic coverage lineage was not valid"); }
+    finally { stdout.mockRestore(); info.mockRestore(); }
+    expect(original).toBe(true);
+    expect(output).toEqual([availability(category), detail("source_and_snapshot_missing"), notice("source")]);
+    expect(db.operations).toEqual(stages.slice(0, 7));
+  });
+
+  it("does not invoke getters or proxies, or project unrecognized availability", async () => {
+    const { observeCoverageSourceAvailability } = await import("./fixtures/coverage-seed-stage-diagnostic");
+    const output: string[] = [], trap = vi.fn(() => { throw new Error(syntheticMarker); });
+    const hostile = new Proxy({}, { get: trap, getOwnPropertyDescriptor: trap });
+    observeCoverageSourceAvailability(hostile, line => output.push(line));
+    observeCoverageSourceAvailability({ get enabled() { return trap(); } }, line => output.push(line));
+    observeCoverageSourceAvailability({ enabled: syntheticMarker }, line => output.push(line));
+    expect(output).toEqual([availability("unknown")]); expect(trap).not.toHaveBeenCalled();
     expect(output.join("").includes("SYNTHETIC_PRIVATE")).toBe(false);
   });
 

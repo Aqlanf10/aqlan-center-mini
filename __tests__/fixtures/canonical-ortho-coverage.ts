@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Pool, QueryResult } from "pg";
 import { readFollowupCoverageSnapshotWith } from "../../lib/ortho-followup-coverage-db";
 import { withCoverageFixtureDiagnostics } from "./coverage-fixture-diagnostic";
-import { observeCoverageSeedFailure, observeCoverageSourceDetail } from "./coverage-seed-stage-diagnostic";
+import { observeCoverageSeedFailure, observeCoverageSourceAvailability, observeCoverageSourceDetail } from "./coverage-seed-stage-diagnostic";
 let sequence = 0;
 export async function seedCanonicalCoverage(q: Pick<Pool, "query">, input: { patientId: number; actorId: number; doctorId: number; caseId?: number; save?: boolean; createdAt?: string }) {
   return withCoverageFixtureDiagnostics(() => seedCanonicalCoverageInner(q, input));
@@ -45,9 +45,11 @@ async function seedCanonicalCoverageInner(q: Pick<Pool, "query">, input: { patie
   } } as Pick<Pool, "query">;
   let source: Awaited<ReturnType<typeof readFollowupCoverageSnapshotWith>>["sources"][number];
   try {
-    const found = (await readFollowupCoverageSnapshotWith(observed, patient, ortho)).sources[0];
+    const result = await readFollowupCoverageSnapshotWith(observed, patient, ortho);
+    const found = result.sources[0];
     if (!found || !snapshot) {
       sourceAbsenceDetected = true;
+      if (!found) observeCoverageSourceAvailability(result);
       observeCoverageSourceDetail(!found && !snapshot ? "source_and_snapshot_missing" : !found ? "source_missing" : "snapshot_missing");
       throw new Error("Synthetic coverage lineage was not valid");
     }
