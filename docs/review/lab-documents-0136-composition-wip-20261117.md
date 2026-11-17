@@ -1,0 +1,11 @@
+# WIP: lab 0136 regression checks with document transport
+
+This local-only review branch combines the document Pages transport and security inventory at `5265b06601c55dc8b57bf1d70bf809f3247ed48c` with the two 0136 test-only commits from `1ce79a4426f2bf1cc4f669f359073a1139128f51`. Both test patches applied without conflicts and have the same patch IDs as their originals. No 0079 production or SMS work was merged. The existing orthodontic-scope unit test changes only its document-handler import and does not alter an orthodontic workflow.
+
+The 0136 tests assert the full expected runtime registry including the 0136 name, checksum and adoption state, and that updating or deleting a grouped price row is rejected and leaves the row intact. These are test changes only; PostgreSQL was not run on this head. The inherited PostgreSQL fixtures can reset an explicitly supplied test database or remove their own temporary databases, so they must never target shared or preserved data.
+
+The local focused unit suites for Pages discovery, body-reader scanning, permissions, sessions and streaming passed 83/83. The body-reader scanner passed across 266 routes. The three modified PostgreSQL test sources transpiled without syntax diagnostics, and the embedded 0136 SQL exactly matched the migration file in a read-only source check. These do not replace TypeScript typechecking, PostgreSQL integration, the built HTTP tests, or full CI.
+
+The failed upstream `document-associations-http` assertion points to Content-Length at line 109; its reported location does not establish the actual header value. The previous Next 16.4.5 behavior and another branch's document transport tests are context, not proof of the result on this head. No built HTTP test or CI was run for this composition. An earlier CI typecheck step on the parent 5265 branch ran before Next build; it does not prove the later build typecheck after `next-env.d.ts` is generated. A small synthetic Next App/Pages compatibility probe produced TS18047 on nullable `useSearchParams`; HR and messaging pages remain unchanged under the requested scope. The full typecheck/build and actual runtime effect remain unresolved.
+
+WIP for review only. Do not push before review, merge, or deploy; no patient or production data was used.
