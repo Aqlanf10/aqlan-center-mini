@@ -27,14 +27,39 @@ it("real browser preserves old command and sends only exact status read on fresh
  const calls:{method:string;body:string|null}[]=[];
  try{
   const page=await context.newPage();
+  const diagnostic={pageErrors:[] as string[],failedRequests:[] as string[],badResponses:[] as {category:string;status:number}[],caseListResponses:[] as number[]};
+  const routeCategory=(url:string)=>{const p=new URL(url).pathname;return p==="/api/ortho"?"case-list":p.startsWith("/_next/")?"next-asset":p.startsWith("/api/")?"api":p.startsWith("/patients/")?"patient-page":"other";};
+  page.on("pageerror",e=>{
+   const hints=["Module not found","Can't resolve","Cannot find module","Module build failed","Module parse failed","Unexpected token","Unexpected character","server-only","node:fs","node:crypto","node:child_process","UnhandledSchemeError","@electric-sql/pglite","node_modules/pg","out of memory","ENOENT","SyntaxError","Export ","is not exported","is not a function","not valid JavaScript","Error evaluating Node.js code"].filter(hint=>e.message.toLowerCase().includes(hint.toLowerCase()));
+   diagnostic.pageErrors.push(JSON.stringify({name:e.name,hints}));
+  });
+  page.on("requestfailed",r=>diagnostic.failedRequests.push(routeCategory(r.url())+":"+(/ERR_ABORTED/.test(r.failure()?.errorText??"")?"aborted":"other")));
+  page.on("response",r=>{const category=routeCategory(r.url());if(category==="case-list")diagnostic.caseListResponses.push(r.status());if(r.status()>=400)diagnostic.badResponses.push({category,status:r.status()});});
   page.on("request",r=>{if(r.url().includes(`/api/ortho/${caseId}/followup-coverage`) && ["PUT","POST"].includes(r.method()))calls.push({method:r.method(),body:r.postData()});});
+  const warmLogin=await journey.login("own");expect(warmLogin.status).toBe(200);
+  const warmList=await journey.api(`/api/ortho?patientId=${patientId}`,warmLogin.cookie);
+  const warmDetail=await journey.api(`/api/ortho/${caseId}`,warmLogin.cookie);
+  console.log("SYNTHETIC_ROUTE_WARMUP",JSON.stringify({caseListStatus:warmList.status,caseDetailStatus:warmDetail.status}));
+  expect(warmList.status).toBe(200);expect(warmDetail.status).toBe(200);
+  const warmListShape=await warmList.json();expect(warmListShape.cases.some((item:{id:number})=>item.id===caseId)).toBe(true);
   await journey.browserLogin(page,"own");
   await page.evaluate(async ({scope,pending})=>{const db=await new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open("aqlan-financial-command-recovery",1);request.onupgradeneeded=()=>request.result.createObjectStore("patient-commands",{keyPath:"scope"});request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});await new Promise<void>((resolve,reject)=>{const tx=db.transaction("patient-commands","readwrite");tx.objectStore("patient-commands").put({scope,revision:0,command:pending});tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error);});db.close();},{scope,pending});
   const read=()=>page.evaluate(async scope=>{const db=await new Promise<IDBDatabase>((resolve,reject)=>{const r=indexedDB.open("aqlan-financial-command-recovery",1);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});const result=await new Promise<unknown>((resolve,reject)=>{const tx=db.transaction("patient-commands","readonly");const r=tx.objectStore("patient-commands").get(scope);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});db.close();return result;},scope);
   const initial=await read();expect(initial).toEqual({scope,revision:0,command:pending});
-  await page.goto(`${journey.baseUrl}/patients/${patientId}`);
-  try { await page.getByRole("button",{name:"عرض حالات التقويم",exact:true}).click({timeout:20000}); } catch (error) { console.log("SYNTHETIC_BROWSER_DIAGNOSTIC", page.url(), (await page.locator("body").innerText()).slice(0,2500)); throw error; }
-  await page.getByRole("button",{name:"عرض تفاصيل الحالة",exact:true}).click();
+  const navigation=await page.goto(`${journey.baseUrl}/patients/${patientId}`);
+  try { await page.getByRole("button",{name:"عرض حالات التقويم",exact:true}).click({timeout:30000}); } catch (error) {
+   const dom=await page.evaluate(()=>({readyState:document.readyState,bodyChildren:document.body.children.length,bodyTextLength:document.body.innerText.length,scriptCount:document.scripts.length,htmlLength:document.documentElement.outerHTML.length,hasNextError:!!document.querySelector("nextjs-portal"),visibility:document.visibilityState}));
+   console.log("SYNTHETIC_BROWSER_DIAGNOSTIC",JSON.stringify({navigationStatus:navigation?.status(),diagnostic,dom}));throw error;
+  }
+  const details=page.getByRole("button",{name:"عرض تفاصيل الحالة",exact:true});
+  try { await details.waitFor({timeout:12000}); } catch {
+   console.log("SYNTHETIC_CASE_LIST_FIRST_WAIT_FAILED",JSON.stringify(diagnostic));
+   await page.getByRole("button",{name:"تحديث الحالات",exact:true}).click();
+  }
+  try { await details.click({timeout:30000}); } catch (error) {
+   const dom=await page.evaluate(()=>({bodyTextLength:document.body.innerText.length,alerts:document.querySelectorAll('[role="alert"]').length,caseLists:document.querySelectorAll('[data-testid="canonical-ortho-cases"]').length,listItems:document.querySelectorAll('[data-testid="canonical-ortho-cases"] li').length}));
+   console.log("SYNTHETIC_CASE_LIST_DIAGNOSTIC",JSON.stringify({diagnostic,dom}));throw error;
+  }
   const region=page.getByRole("region",{name:"نطاق المتابعات الروتينية للتقويم",exact:true});
   const verify=region.getByRole("button",{name:"تحقق من نتيجة الطلب نفسه",exact:true});await verify.waitFor();
   const before=await snapshot();
