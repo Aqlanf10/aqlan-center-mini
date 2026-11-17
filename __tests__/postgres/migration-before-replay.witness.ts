@@ -94,7 +94,10 @@ it('records whether target migrations remain committed after a late legacy repla
     const afterHistory=(await fixture.target.pool.query('SELECT version,name,checksum,applied_at::text,adopted FROM schema_migrations ORDER BY version')).rows;
     const oldVersions=new Set(beforeHistory.map(row=>row.version));
     expect(sha(Buffer.from(JSON.stringify(afterHistory.filter(row=>oldVersions.has(row.version)))))===sha(Buffer.from(JSON.stringify(beforeHistory)))).toBe(true);
-    const has0080=afterHistory.some(row=>row.version==='0080');
+    const expected0080=files.find(file=>file.version==='0080');
+    if(!expected0080) throw new Error('SYNTHETIC_0080_SOURCE_MISSING');
+    const row0080=afterHistory.find(row=>row.version==='0080');
+    const has0080=Boolean(row0080 && row0080.name===expected0080.name && row0080.checksum===expected0080.checksum && row0080.adopted===false);
     const policyExists=(await fixture.target.pool.query("SELECT to_regclass('public.patient_numbering_policy') IS NOT NULL AS present")).rows[0].present;
     const migrated=afterHistory.length>beforeHistory.length && has0080 && policyExists;
     const unchanged=sha(Buffer.from(JSON.stringify(afterHistory)))===sha(Buffer.from(JSON.stringify(beforeHistory))) && !policyExists;
@@ -104,8 +107,8 @@ it('records whether target migrations remain committed after a late legacy repla
     expect(sha(await readFile(markerPath))===sha(marker)).toBe(true);
     const afterIdentity=(await fixture.target.pool.query('SELECT oid::text,datdba::text AS owner FROM pg_database WHERE datname=current_database()')).rows[0];
     expect(afterIdentity.oid===targetIdentity.oid && afterIdentity.owner===targetIdentity.owner).toBe(true);
-    if(migrated) console.log('SYNTHETIC_TARGET_MIGRATIONS_COMMITTED_BEFORE_REPLAY_FAILURE');
-    else if(unchanged) console.log('SYNTHETIC_TARGET_MIGRATIONS_UNCHANGED_AFTER_REPLAY_FAILURE');
+    if(migrated) console.log('SYNTHETIC_REGISTRY_0080_MATCHED_AND_POLICY_TABLE_PRESENT');
+    else if(unchanged) console.log('SYNTHETIC_REGISTRY_UNCHANGED_AND_POLICY_TABLE_ABSENT');
     else throw new Error('SYNTHETIC_TARGET_MIGRATION_STATE_UNCLASSIFIED');
   } finally {await fixture.close();}
 },180_000);
