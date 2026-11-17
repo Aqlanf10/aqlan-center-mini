@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { availabilityMessageAr, explainAll } from "@/lib/ceph-availability";
 import {
   CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, suggestLandmarks, summarize,
@@ -135,6 +136,16 @@ interface DxState {
   softTissue: string;
   note: string;
   finalDx: string;
+}
+
+/** C2: سبب غياب قيمة القياس، أو تنبيه أنها غير مقيسة بالكامل — نصٌّ فقط، بلا رقم بديل. */
+function CephReason({ code, text }: { code: string; text: string | null }) {
+  if (!text) return null;
+  return (
+    <span className="mt-0.5 block font-sans text-[10px] font-normal leading-snug text-amber-700" data-testid={`ceph-reason-${code}`} dir="rtl">
+      {text}
+    </span>
+  );
 }
 
 export function CephTracer({
@@ -550,6 +561,16 @@ export function CephTracer({
   }, [completed, stamped, results]);
 
   const enriched = useMemo(() => enrichWithRefs(table, refValues), [table, refValues]);
+
+  // C2: سبب غياب القيمة (أو أنها غير مقيسة بالكامل) من المعالم نفسها — شرحٌ فقط، لا يغيّر أي رقم.
+  const availability = useMemo(() => explainAll(points, scale ?? NaN), [points, scale]);
+  const reasonFor = (code: string, activeVal: number | null): string | null => {
+    const a = availability.get(code);
+    const why = a ? availabilityMessageAr(a) : null;
+    if (completed && stamped && activeVal == null) return why ? `لا قيمة في اللقطة المعتمدة — ${why}` : "لا قيمة في اللقطة المعتمدة.";
+    if (activeVal != null && a?.status === "not-computable") return null;
+    return why;
+  };
 
   const summary = useMemo(() => (table ? summarize(table) : null), [table]);
 
@@ -1607,7 +1628,7 @@ export function CephTracer({
                           <div className="flex items-center justify-between mb-1">
                             <span className="font-bold text-slate-800">{r.code} — {r.ar.split("—")[0]}</span>
                             <div className="flex items-center gap-1 font-mono">
-                              <span className="font-black text-navy-900">{activeVal != null ? activeVal : "—"} {r.unit}</span>
+                              <span className="font-black text-navy-900" title={reasonFor(r.code, activeVal) ?? undefined}>{activeVal != null ? activeVal : "—"} {r.unit}</span>
                               <span className="text-[10px] text-slate-400">({mean}±{sd})</span>
                               {r.severityStars && (
                                 <span className={`text-[10px] font-bold px-1 rounded ${
@@ -1693,6 +1714,7 @@ export function CephTracer({
                                 <td className={`px-1 py-1 text-left font-mono font-medium ${colorClass}`}>
                                   {activeVal != null ? activeVal : "—"}
                                   <span className="ms-0.5 text-[10px] font-normal text-slate-400">{activeVal != null ? r.unit : ""}</span>
+                                  <CephReason code={r.code} text={reasonFor(r.code, activeVal)} />
                                 </td>
                                 <td className="px-1 py-1 text-center font-bold font-mono">
                                   {r.severityStars === "***" ? (
@@ -1761,6 +1783,7 @@ export function CephTracer({
                           <td className={`px-1 py-1 text-left font-mono font-medium ${colorClass}`}>
                             {activeVal != null ? activeVal : "—"}
                             <span className="ms-0.5 text-[10px] font-normal text-slate-400">{activeVal != null ? r.unit : ""}</span>
+                            <CephReason code={r.code} text={reasonFor(r.code, activeVal)} />
                           </td>
                           <td className="px-1 py-1 text-center font-bold font-mono">
                             {r.severityStars === "***" ? (
