@@ -37,8 +37,8 @@ rolls back the actor **before** waiting for a blocked replay. A fixed known
 numbering-busy error or the existing exact nonempty guard may be classified as
 refusal; any other error, unexpected early success, timeout or thrown error is
 an unclassified failure. For an accepted success the test requires an observed
-actor-blocked wait and a JavaScript snapshot showing replay had not completed
-before the rollback request; it then awaits both the rollback response and the
+actor-blocked wait and a JavaScript snapshot that had not yet observed replay
+completion before the rollback request; it then awaits both the rollback response and the
 replay result and verifies selected source/target patients. This does not prove
 the order in which the server completed replay and sent its rollback response.
 The test does not assume that a generic SQLSTATE or every lock timeout means
@@ -68,9 +68,10 @@ errors. The witness does not authorize restoring raw error messages.
 
 Focused TypeScript and ESLint checks used the current checkout with this test's
 files and the base guard overlaid in memory; they passed but are not a complete
-project typecheck. Nine pure synthetic refusal-classifier checks and 26 alias
-checks passed in memory. No PostgreSQL, HTTP endpoint, Next build or CI ran on
-this new witness yet.
+project typecheck. Two standalone Vitest unit files passed (2/2), with nine
+synthetic refusal checks and 26 alias checks; the copied harness files were
+compared byte-for-byte and no database environment variables were passed.
+No PostgreSQL, HTTP endpoint, Next build or CI ran on this new witness yet.
 Its actor rollback and subsequent allocation are intentional mutations only to
 the freshly created synthetic target. They do not prove recovery, policy or
 concurrency safety for other paths, all caches, external sessions, 0090, or
