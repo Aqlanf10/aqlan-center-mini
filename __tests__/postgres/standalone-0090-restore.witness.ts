@@ -16,6 +16,7 @@ import { backupStateDir } from "../../lib/backupVolume";
 import { upsertBackupHistoryRecord } from "../../lib/backupHistory";
 import { createSessionToken, sessionCredentialVersion, type SessionPayload } from "../../lib/auth";
 import { SESSION_COOKIE } from "../../lib/sessionCookie";
+import { normalizedRegistryCountDigest } from "../helpers/standalone-0090-comparison";
 
 // A historical published migration, copied byte-for-byte for synthetic test
 // setup only. This file is never included in the application's migration set.
@@ -57,7 +58,7 @@ beforeAll(async () => {
     return gzipSync(Buffer.concat(blocks));
   }
   const control = await archive();
-  const before = (await source.query("SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version")).rows;
+  const before = (await source.query("SELECT version,name,checksum,applied_at::text,adopted FROM schema_migrations ORDER BY version")).rows;
   const historicalSql = await readFile(new URL("./fixtures/0090_booking_request_preferences.sql", import.meta.url));
   expect(sha(historicalSql)).toBe(HASH_0090);
   await source.query("BEGIN");
@@ -66,9 +67,10 @@ beforeAll(async () => {
     await source.query("INSERT INTO schema_migrations(version,name,checksum,applied_at,adopted) VALUES('0090','booking_request_preferences',$1,'2025-03-04T05:06:07.123456Z',FALSE)", [HASH_0090]);
     await source.query("COMMIT");
   } catch (error) { await source.query("ROLLBACK"); throw error; }
-  const after = (await source.query("SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version")).rows;
+  const after = (await source.query("SELECT version,name,checksum,applied_at::text,adopted FROM schema_migrations ORDER BY version")).rows;
   expect(after.filter(row => row.version !== "0090")).toEqual(before);
-  expect(after.filter(row => row.version === "0090")).toEqual([{version:"0090",name:"booking_request_preferences",checksum:HASH_0090,adopted:false}]);
+  expect(after).toHaveLength(before.length + 1);
+  expect(after.filter(row => row.version === "0090")).toMatchObject([{version:"0090",name:"booking_request_preferences",checksum:HASH_0090,adopted:false}]);
   expect((await source.query("SELECT COUNT(*)::int AS n FROM booking_requests")).rows[0].n).toBe(0);
   const empty = await archive();
   // With no booking rows, the source application's SQL must be equivalent to
@@ -76,11 +78,15 @@ beforeAll(async () => {
   // The parser separately removes the remaining, unchanged registry lines.
   const sqlOf = (bytes: Buffer) => Buffer.from(parseTarBytes(gunzipSync(bytes)).entries.get("database.sql")!.data).toString("utf8");
   const emptySql = sqlOf(empty), registry090 = emptySql.split("\n").filter(line => /^INSERT INTO schema_migrations /.test(line) && line.includes("'0090'"));
-  expect(registry090).toHaveLength(1);
+  expect(registry090.length).toBe(1);
+  expect(registry090[0].includes(`'0090', 'booking_request_preferences', '${HASH_0090}'`)).toBe(true);
+  expect(/, FALSE\);$/.test(registry090[0])).toBe(true);
   const stripped = emptySql.replace(`${registry090[0]}\n`, "");
-  expect(stripped).not.toBe(emptySql);
-  expect(prepareBackupSql(stripped, {inspectHistorical0079:true}).dataSql)
-    .toEqual(prepareBackupSql(sqlOf(control), {inspectHistorical0079:true}).dataSql);
+  expect(stripped === emptySql).toBe(false);
+  const emptyData = prepareBackupSql(stripped, {inspectHistorical0079:true}).dataSql;
+  const controlData = prepareBackupSql(sqlOf(control), {inspectHistorical0079:true}).dataSql;
+  expect(normalizedRegistryCountDigest(emptyData, after.length))
+    .toBe(normalizedRegistryCountDigest(controlData, before.length));
   await source.query("INSERT INTO booking_requests(full_name,phone,request_key,request_hash,preferences) VALUES('Synthetic booking','000000000','synthetic-0090-key','synthetic-0090-hash','{}'::jsonb)");
   expect((await source.query("SELECT COUNT(*)::int AS n FROM booking_requests")).rows[0].n).toBe(1);
   const populated = await archive();
@@ -128,14 +134,14 @@ it.each(["control", "empty", "populated"] as const)("checks source history 0090 
   if (!validation.ok) throw new Error("Synthetic archive is structurally invalid");
   const sql = Buffer.from(validation.sql).toString("utf8");
   const registryLines = sql.split("\n").filter(line => /^INSERT INTO schema_migrations /.test(line) && line.includes("'0090'"));
-  expect(registryLines).toHaveLength(kind === "control" ? 0 : 1);
+  expect(registryLines.length).toBe(kind === "control" ? 0 : 1);
   if (kind !== "control") {
-    expect(registryLines[0]).toContain("'booking_request_preferences'"); expect(registryLines[0]).toContain(HASH_0090);
-    expect(registryLines[0]).toMatch(/, FALSE\);$/);
+    expect(registryLines[0].includes("'booking_request_preferences'")).toBe(true); expect(registryLines[0].includes(HASH_0090)).toBe(true);
+    expect(/, FALSE\);$/.test(registryLines[0])).toBe(true);
   }
   const bookings = sql.split("\n").filter(line => /^INSERT INTO booking_requests /.test(line));
-  expect(bookings).toHaveLength(kind === "populated" ? 1 : 0);
-  if (kind === "populated") expect(bookings[0]).toMatch(/"request_key".*"request_hash".*"preferences"/);
+  expect(bookings.length).toBe(kind === "populated" ? 1 : 0);
+  if (kind === "populated") expect(/"request_key".*"request_hash".*"preferences"/.test(bookings[0])).toBe(true);
   const archiveId = `production-backup-20261117-010203-${kind === "control" ? "100" : kind === "empty" ? "101" : "102"}-abcde123-abcdef12.tar.gz`;
   await writeFile(path.join(backups, archiveId), bytes);
   await upsertBackupHistoryRecord(backups, { backupId:archiveId, createdAt:new Date().toISOString(), triggerType:"manual", archiveSha256:sha(bytes), archiveBytes:bytes.length,

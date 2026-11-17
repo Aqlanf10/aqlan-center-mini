@@ -22,7 +22,10 @@ synthetic booking. The control must restore successfully to its own target;
 this helps distinguish a general setup failure from rejection of 0090. Before
 either request, the witness verifies that the empty-booking archive's SQL,
 after removing its exact 0090 registry row and the unchanged registry rows,
-matches the control's corresponding application SQL. The public endpoint's
+matches the control's corresponding application SQL by SHA-256. Only the
+single generated schema-migration count comment is normalized, after its count
+is checked against the source registry; all other content remains compared.
+The public endpoint's
 error reason remains generic, so the test does not expose a private diagnostic
 or independently identify every possible earlier rejection cause.
 
@@ -41,3 +44,10 @@ daily adjustment flow, and is not approval to merge or deploy. The witness has
 not been run against PostgreSQL, the built endpoint, or hosted CI on this
 revision. Local checks at this checkpoint are limited to test discovery,
 targeted lint, the existing environment guard and fixture SHA comparison.
+
+Hosted run `44079238701` on `a4bae51a` failed in the witness setup before any
+HTTP case: the SQL generator's migration-row count comment changed after the
+0090 registry row was added. This follow-up checks both actual source counts,
+normalizes that single comment and compares SHA-256 digests of all remaining
+SQL; its focused unit tests include a changed-row negative control. The updated
+witness itself has not yet been run against PostgreSQL or CI.
