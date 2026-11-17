@@ -38,6 +38,7 @@ import type { LabDeliveryRisk } from "@/lib/lab-reconciliation";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { financeAccessFor } from "@/lib/finance-permissions";
 import { useLabBalanceOverview } from "@/components/finance/useLabBalanceOverview";
+import { EXPENSE_UNCERTAIN, expenseAttemptKey, isDefinitiveExpenseAnswer, sessionStorageOrNull, settleExpenseAttempt } from "@/lib/expense-attempt";
 
 interface Feed {
   /** Resolved server zone; optional for compatibility with an older shift feed. */
@@ -463,11 +464,26 @@ export default function FinancePage() {
       if (busy || !financeRequest.current.shiftReady) return;
       setBusy(true);
       try {
-        const res = await fetch("/api/expenses", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        });
+        // 0128: the same entry reuses its request key until the server answers definitively.
+        const requestBody = JSON.stringify(form);
+        const storage = sessionStorageOrNull();
+        const requestKey = expenseAttemptKey(storage, requestBody);
+        let res: Response;
+        try {
+          res = await fetch("/api/expenses", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Idempotency-Key": requestKey },
+            body: requestBody,
+          });
+        } catch {
+          setError(EXPENSE_UNCERTAIN);
+          return;
+        }
+        if (!isDefinitiveExpenseAnswer(res.status) || res.redirected) {
+          setError(EXPENSE_UNCERTAIN);
+          return;
+        }
+        settleExpenseAttempt(storage, requestKey);
         const payload = await res.json().catch(() => null);
         if (!res.ok) {
           setError(payload?.message ?? "تعذّر تسجيل سند الصرف.");

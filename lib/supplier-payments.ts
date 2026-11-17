@@ -107,7 +107,9 @@ export type SupplierPaymentRefusal =
   | "exceeds_party_balance"
   | "hr_payroll_settlement_required"
   | "hr_payroll_reconciliation_required"
-  | "stale_quote";
+  | "stale_quote"
+  /** 0128: the same request key with a different request (docs/finance/EXPENSE_COMMANDS_0128.md §2.1). */
+  | "expense_request_conflict";
 
 export interface SettlementQuote {
   paymentCurrency: Currency;
@@ -159,6 +161,8 @@ export function refusalMessage(reason: SupplierPaymentRefusal, quote?: Settlemen
       return "سعر الصرف غير مضبوط لإحدى العملتين. اضبطه في الإعدادات قبل الصرف.";
     case "stale_quote":
       return "تغيّر سعر الصرف أو المتبقي على الفاتورة منذ المعاينة — أعد المعاينة قبل التأكيد.";
+    case "expense_request_conflict":
+      return "هذا الطلب يحمل مفتاح سند صرف سابق بمحتوى مختلف؛ لم يُسجَّل شيء. أعد فتح نموذج الصرف وسجّل السند الجديد من جديد.";
     case "zero_settlement":
       return "المبلغ أصغر من أن يسدّد شيئًا من الفاتورة بعملتها.";
     case "exceeds_payable": {
