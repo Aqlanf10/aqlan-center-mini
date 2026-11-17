@@ -8,6 +8,9 @@ import {
 import { LEGACY_DEFINITION_VERSIONS } from "../lib/ceph-evidence/definition-versions";
 import { MEASUREMENT_EVIDENCE } from "../lib/ceph-evidence/measurement-register";
 import { WITS_RESEARCH_DEFINITION } from "../lib/ceph-core/wits-research";
+import {
+  KIM_APDI_RESEARCH_DEFINITION, KIM_CF_RESEARCH_DEFINITION, KIM_EI_RESEARCH_DEFINITION, KIM_ODI_RESEARCH_DEFINITION, KIM_PP_FH_RESEARCH_DEFINITION,
+} from "../lib/ceph-core/kim-research";
 
 const deg = (radians: number) => radians * 180 / Math.PI;
 const grid = { basis: "synthetic-grid" as const, xMmPerUnit: 1, yMmPerUnit: 1 };
@@ -79,7 +82,8 @@ describe("C1 SN to mandibular plane, two versioned research definitions", () => 
 describe("C1 legacy definition versions", () => {
   it("never relabels stored values and links each defect to an exported research definition", () => {
     const registered = new Set(MEASUREMENT_EVIDENCE.map(entry => entry.code));
-    const known = new Set<string>([SN_GOME_RESEARCH_DEFINITION, SN_GOGN_RESEARCH_DEFINITION, WITS_RESEARCH_DEFINITION]);
+    const known = new Set<string>([SN_GOME_RESEARCH_DEFINITION, SN_GOGN_RESEARCH_DEFINITION, WITS_RESEARCH_DEFINITION,
+      KIM_PP_FH_RESEARCH_DEFINITION, KIM_ODI_RESEARCH_DEFINITION, KIM_APDI_RESEARCH_DEFINITION, KIM_CF_RESEARCH_DEFINITION, KIM_EI_RESEARCH_DEFINITION]);
     for (const version of LEGACY_DEFINITION_VERSIONS) {
       expect(registered.has(version.legacyCode)).toBe(true);
       expect(version.relabelStoredValues).toBe(false);

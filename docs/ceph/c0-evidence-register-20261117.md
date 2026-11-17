@@ -12,9 +12,9 @@
 | المستوى | المعنى |
 |---|---|
 | `full-text` | قُرئ النص. الأرقام منه مع رقم الجدول. **McNamara 1984 وحده** |
-| `abstract` | الملخص فقط: Björk 1969، Damstra 2010، Grogger 2018 |
+| `abstract` | الملخص فقط: Björk 1969، Damstra 2010، Grogger 2018، وKim & Vietas 1978 وKim 1979 (أُضيفا لاحقًا، انظر `kim-indices-sources-20261117.md`) |
 | `citation-only` | تأكّدت البيانات الببليوغرافية دون قراءة المحتوى: Steiner 1953/1959/1960، Jacobson 1975/1976، Downs 1948، Tweed 1946/1954، Ricketts 1957/1960، Kim 1974 |
-| `unlocated` | لم يُعثر على المصدر الأولي: Kim 1978 (APDI)، وJarabak/Fizzell 1972 |
+| `unlocated` | لم يُعثر على المصدر الأولي: Jarabak/Fizzell 1972 (Kim 1978 وُجد لاحقًا) |
 
 ## النتيجة الإجمالية
 

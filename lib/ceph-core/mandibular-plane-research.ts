@@ -13,6 +13,9 @@ import { angleBetweenRays, finitePoint, GeometryError, intersectLines, positiveS
 export const SN_GOME_RESEARCH_DEFINITION = "sn-gome-angle/0.1.0-research" as const;
 export const SN_GOGN_RESEARCH_DEFINITION = "sn-gogn-angle/0.1.0-research" as const;
 
+/** Synthetic grid calibration ONLY; unequal x/y scales are applied before any angle. */
+export interface SyntheticGridCalibration { readonly basis: "synthetic-grid"; readonly xMmPerUnit: number; readonly yMmPerUnit: number }
+
 export type GnathionInput =
   | { readonly kind: "anatomic"; readonly point: Point2D }
   /** Constructed from the facial plane N–Pog and the mandibular plane Go–Me. */
@@ -27,7 +30,7 @@ export interface MandibularPlaneResearchInput {
   readonly gnathion?: GnathionInput;
   /** Synthetic grid calibration ONLY (same basis as the Wits research proposal). Angles are measured in mm space,
    * so unequal x/y scales are applied before the angle — never computed on raw pixels. */
-  readonly calibration: { readonly basis: "synthetic-grid"; readonly xMmPerUnit: number; readonly yMmPerUnit: number };
+  readonly calibration: SyntheticGridCalibration;
 }
 
 export type MandibularPlaneIssue =
@@ -54,7 +57,7 @@ function lineAngle(a: Point2D, b: Point2D, c: Point2D, d: Point2D): number {
   return Math.min(theta, 180 - theta);
 }
 
-function scaler(calibration: MandibularPlaneResearchInput["calibration"]) {
+export function syntheticGridScaler(calibration: SyntheticGridCalibration) {
   const sx = positiveScale(calibration.xMmPerUnit), sy = positiveScale(calibration.yMmPerUnit);
   return (p: Point2D): Point2D => {
     finitePoint(p);
@@ -76,7 +79,7 @@ export function evaluateSnGoMeResearch(input: MandibularPlaneResearchInput): Man
   const missing = missingOf(input, ["s", "n", "go", "me"]);
   if (missing.length) return { ...meta, status: "not-computable", value: null, issue: "missing-landmark", missing };
   try {
-    const at = scaler(input.calibration);
+    const at = syntheticGridScaler(input.calibration);
     return { ...meta, status: "ok", value: lineAngle(at(input.s!), at(input.n!), at(input.go!), at(input.me!)), issue: null };
   } catch (error) {
     if (!(error instanceof GeometryError)) throw error;
@@ -96,7 +99,7 @@ export function evaluateSnGoGnResearch(input: MandibularPlaneResearchInput): Man
   if (kind === "constructed" && !input.gnathion.pogonion) missing.push("Pog");
   if (missing.length) return { ...meta, status: "not-computable", value: null, issue: "missing-landmark", gnathionKind: kind, missing };
   try {
-    const at = scaler(input.calibration);
+    const at = syntheticGridScaler(input.calibration);
     const s = at(input.s!), n = at(input.n!), go = at(input.go!);
     const gn = input.gnathion.kind === "anatomic" ? at(input.gnathion.point)
       : intersectLines(n, at(input.gnathion.pogonion), go, at(input.me!));

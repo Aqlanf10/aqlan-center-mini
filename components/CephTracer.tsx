@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { availabilityMessageAr, explainAll } from "@/lib/ceph-availability";
+import { legacyDefinitionWarningAr } from "@/lib/ceph-evidence/definition-versions";
 import {
   CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, suggestLandmarks, summarize,
@@ -568,8 +569,10 @@ export function CephTracer({
     const a = availability.get(code);
     const why = a ? availabilityMessageAr(a) : null;
     if (completed && stamped && activeVal == null) return why ? `لا قيمة في اللقطة المعتمدة — ${why}` : "لا قيمة في اللقطة المعتمدة.";
-    if (activeVal != null && a?.status === "not-computable") return null;
-    return why;
+    // A shown number whose legacy definition differs from the sources carries that warning (value unchanged).
+    const definition = activeVal != null ? legacyDefinitionWarningAr(code) : null;
+    const lines = [activeVal != null && a?.status === "not-computable" ? null : why, definition].filter(Boolean);
+    return lines.length ? lines.join(" ") : null;
   };
 
   const summary = useMemo(() => (table ? summarize(table) : null), [table]);

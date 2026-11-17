@@ -129,3 +129,17 @@ describe("C2 in the tracer", () => {
     }
   });
 });
+
+describe("legacy definition warnings beside the shown value", () => {
+  it("every legacy code with a recorded definition difference has a warning; others have none", async () => {
+    const { legacyDefinitionWarningAr, LEGACY_DEFINITION_VERSIONS } = await import("../lib/ceph-evidence/definition-versions");
+    for (const v of LEGACY_DEFINITION_VERSIONS) expect(legacyDefinitionWarningAr(v.legacyCode), v.legacyCode).toMatch(/يخالف المصدر/);
+    expect(LEGACY_DEFINITION_VERSIONS.map((v) => v.legacyCode).sort()).toEqual(["APDI", "CF", "EXT_INDEX", "FH_AB", "ODI", "PP_FH", "SNGOGN", "WITS"]);
+    expect(legacyDefinitionWarningAr("SNA")).toBeNull();
+    expect(legacyDefinitionWarningAr("APDI")).toMatch(/معكوسة/);
+  });
+  it("the tracer adds the warning only next to a shown number", () => {
+    const tracer = readFileSync(new URL("../components/CephTracer.tsx", import.meta.url), "utf8");
+    expect(tracer).toContain("const definition = activeVal != null ? legacyDefinitionWarningAr(code) : null;");
+  });
+});
