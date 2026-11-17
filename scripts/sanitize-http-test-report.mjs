@@ -86,7 +86,15 @@ export function sanitizeReport(raw, { root, sourceSha, trackedPaths }) {
     remaining -= assertions.length;
     suites.push({ path: relative, status: statuses.has(suite.status) ? suite.status : 'unknown', assertionCount: integer(suite.assertionResults.length), assertions });
   }
-  return { version: 1, availability: 'available', sourceSha: sha, truncated, suiteCount: integer(raw.testResults.length), suites };
+  // Vitest's JSON reporter does not expose unhandled error text in a structured
+  // field. Keep only bounded counters and the boolean success bit: a failed run
+  // with zero failed tests is distinguishable without claiming a cause.
+  const counts = {
+    success: typeof raw.success === 'boolean' ? raw.success : null,
+    totalSuites: integer(raw.numTotalTestSuites), failedSuites: integer(raw.numFailedTestSuites),
+    totalTests: integer(raw.numTotalTests), failedTests: integer(raw.numFailedTests),
+  };
+  return { version: 1, availability: 'available', sourceSha: sha, truncated, suiteCount: integer(raw.testResults.length), counts, suites };
 }
 
 export function readDiagnostic(rawPath, options) {

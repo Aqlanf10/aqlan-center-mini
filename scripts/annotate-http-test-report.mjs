@@ -10,6 +10,25 @@ const sourcePath = value => typeof value === 'string' && value.length <= 240
   && /^__tests__\/security-http\/[a-zA-Z0-9_./-]+\.test\.ts$/.test(value)
   && !value.split('/').some(part => part === '.' || part === '..');
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const count = value => Number.isSafeInteger(value) && value >= 0 && value <= 1000000 ? String(value) : 'unknown';
+
+// Fixed words and bounded numbers only. Never echo report fields as text: even
+// malformed documents and malicious reasons produce one safe diagnostic.
+export function summaryFromSanitized(report, sourceSha, outcome) {
+  const step = ['success', 'failure', 'cancelled', 'skipped'].includes(outcome) ? outcome : 'unknown';
+  const prefix = `::notice::HTTP diagnostics: step=${step}; `;
+  if (!record(report) || report.version !== 1) return `${prefix}unavailable (invalid report)`;
+  if (report.availability === 'unavailable') {
+    const reason = ['missing', 'oversized', 'malformed', 'source_unavailable'].includes(report.reason) ? report.reason : 'unknown';
+    return `${prefix}unavailable (${reason})`;
+  }
+  if (report.availability !== 'available' || !/^[a-f0-9]{40}$/.test(sourceSha ?? '') || report.sourceSha !== sourceSha || !Array.isArray(report.suites) || report.suites.length > MAX_SUITES)
+    return `${prefix}unavailable (untrusted report)`;
+  const values = record(report.counts) ? report.counts : {};
+  const success = values.success === true ? 'true' : values.success === false ? 'false' : 'unknown';
+  const projectedFailed = report.suites.filter(suite => record(suite) && suite.status === 'failed').length;
+  return `${prefix}report_success=${success}; suites=${count(values.totalSuites)}; failed_suites=${count(values.failedSuites)}; tests=${count(values.totalTests)}; failed_tests=${count(values.failedTests)}; projected_failed_suites=${count(projectedFailed)}; truncated=${report.truncated === true ? 'true' : report.truncated === false ? 'false' : 'unknown'}`;
+}
 
 export function annotationsFromSanitized(report, { sourceSha, trackedPaths, sourceLineCount }) {
   if (!record(report) || report.version !== 1 || report.availability !== 'available'
@@ -64,6 +83,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_SOURCE_BYTES || !realpathSync(absolute).startsWith(`${root}${path.sep}`)) throw new Error('invalid source');
       return readFileSync(absolute, 'utf8').split('\n').length;
     };
+    console.log(summaryFromSanitized(report, sourceSha, process.env.HTTP_TEST_OUTCOME));
     for (const line of annotationsFromSanitized(report, { sourceSha, trackedPaths, sourceLineCount })) console.log(line);
-  } catch { /* Diagnostic is best effort; never print raw inputs/errors or change the test result. */ }
+  } catch { console.log('::notice::HTTP diagnostics: unavailable (unreadable report)'); }
 }

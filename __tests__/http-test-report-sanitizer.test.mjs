@@ -15,7 +15,7 @@ const temp = () => { const p = mkdtempSync(path.join(tmpdir(), 'http-sanitizer-'
 describe('HTTP diagnostic allowlist', () => {
   it('emits only source provenance, indices, statuses, bounded locations/counts and fixed kinds', () => {
     const output = sanitizeReport(report(), options);
-    expect(output).toEqual({ version: 1, availability: 'available', sourceSha: options.sourceSha, truncated: false, suiteCount: 1, suites: [{ path: source, status: 'failed', assertionCount: 1, assertions: [{ index: 0, status: 'failed', line: 12, column: 3, failureCount: 1, errorKinds: ['AssertionError'], failureFrames: [] }] }] });
+    expect(output).toEqual({ version: 1, availability: 'available', sourceSha: options.sourceSha, truncated: false, suiteCount: 1, counts: { success: null, totalSuites: null, failedSuites: null, totalTests: null, failedTests: null }, suites: [{ path: source, status: 'failed', assertionCount: 1, assertions: [{ index: 0, status: 'failed', line: 12, column: 3, failureCount: 1, errorKinds: ['AssertionError'], failureFrames: [] }] }] });
     expect(JSON.stringify(output)).not.toContain(secret);
   });
   it('projects tracked failure stack frames without exposing secret-bearing stack context', () => {
