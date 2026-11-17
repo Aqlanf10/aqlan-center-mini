@@ -1,6 +1,7 @@
 /** Slice 48: synthetic canonical coverage read, never admission to its writers. */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { seedCanonicalCoverage } from "../fixtures/canonical-ortho-coverage";
+import { prepareHistoricalCoverage } from "./_historical-coverage-fixture";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -20,12 +21,26 @@ let statusCommand: unknown;
 const ids = { patient: 0, ortho: 0, outside: 0 };
 beforeAll(async () => {
   journey = await openCanonicalJourney({ portOffset: 63, secret: "canonical-coverage-secret-0123456789abcdef", accounts: ACCOUNTS, ownerKey: "owner", async seed(db, _users, parties) {
+    await prepareHistoricalCoverage(db);
     ids.patient = (await db.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES('SYN-COVJ-own','مريض تجريبي',$1) RETURNING id", [parties.own!])).rows[0].id;
     ids.outside = (await db.query("INSERT INTO patients(patient_number,full_name) VALUES('SYN-COVJ-outside','مريض خارج النطاق') RETURNING id")).rows[0].id;
     ids.ortho = (await db.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'SYN') RETURNING id", [ids.patient])).rows[0].id;
-    const seeded = await seedCanonicalCoverage(db, { patientId: ids.patient, caseId: ids.ortho, actorId: _users.owner, doctorId: parties.own!, createdAt: "2026-10-31T22:30:00.000Z" });
+    let sourceSnapshot: unknown;
+    const observed = { query: async (sql: string, values?: unknown[]) => {
+      const result = await db.query(sql, values);
+      if (sql.startsWith("WITH candidates AS MATERIALIZED")) sourceSnapshot = result.rows[0]?.sources?.[0]?.snapshot;
+      return result;
+    }};
+    const seeded = await seedCanonicalCoverage(observed as Parameters<typeof seedCanonicalCoverage>[0], { patientId: ids.patient, caseId: ids.ortho, actorId: _users.owner, doctorId: parties.own!, save: false });
     const { fingerprint, invoiceNumber: _invoice, serviceName: _service, ...source } = seeded.source;
-    statusCommand = { schemaVersion: 1, commandId: randomUUID(), expectedRevisionId: null, source, expectedSourceFingerprint: fingerprint, scope: "routine_adjustments", decision: "included", reason: "SYN current status request" };
+    const historicalCommand = { schemaVersion: 1, commandId: randomUUID(), expectedRevisionId: null, source, expectedSourceFingerprint: fingerprint, scope: "routine_adjustments", decision: "included", reason: "SYN سبب الاتفاق المحفوظ" };
+    if (!sourceSnapshot) throw new Error("Synthetic historical source snapshot missing");
+    expect(createHash("sha256").update(JSON.stringify(sourceSnapshot)).digest("hex")).toBe(fingerprint);
+    const requestFingerprint = createHash("sha256").update(JSON.stringify({ patientId: ids.patient, orthoCaseId: ids.ortho, actorUserId: _users.owner, command: historicalCommand })).digest("hex");
+    await db.query(`INSERT INTO ortho_followup_coverage_revisions(patient_id,ortho_case_id,clinical_case_id,plan_id,plan_item_id,invoice_id,version,scope,decision,source_fingerprint,source_snapshot,reason,actor_user_id,created_by,command_id,request_fingerprint,created_at)
+      VALUES($1,$2,$3,$4,$5,$6,1,'routine_adjustments','included',$7,$8::jsonb,$9,$10,$11,$12,$13,'2026-10-31T22:30:00.000Z')`,
+      [ids.patient, ids.ortho, seeded.clinical, seeded.plan, seeded.item, seeded.invoice, fingerprint, JSON.stringify(sourceSnapshot), historicalCommand.reason, _users.owner, ACCOUNTS.owner.username, historicalCommand.commandId, requestFingerprint]);
+    statusCommand = historicalCommand;
   } });
 }, 300_000);
 afterAll(async () => { await journey?.close(); }, 60_000);
