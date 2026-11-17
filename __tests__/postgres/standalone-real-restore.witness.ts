@@ -34,6 +34,20 @@ let firstRevision: string;
 const documentBytes = Buffer.from("SYNTHETIC-RESTORE-HTTP-DOCUMENT-ONLY");
 const documentKey = storageKeyOf(documentBytes.toString("utf8"));
 let server: ChildProcess | undefined;
+async function stopServer() {
+  const child = server;
+  if (child && child.exitCode === null && child.signalCode === null) {
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      }, 3000);
+      timeout.unref();
+      child.once("exit", () => { clearTimeout(timeout); resolve(); });
+      child.kill("SIGTERM");
+    });
+  }
+  server = undefined;
+}
 const originalUrl = process.env.DATABASE_URL, originalSeed = process.env.SKIP_SEED;
 const q = async (sql: string, args: unknown[] = []) => (await db.getPool().query(sql, args)).rows;
 async function activate(pool: Pool) {
@@ -113,7 +127,7 @@ beforeAll(async () => {
   } finally { client.release(); }
 }, 180000);
 afterAll(async () => {
-  if (server && server.exitCode === null) { await new Promise<void>((resolve) => { server!.once("exit", () => resolve()); server!.kill("SIGTERM"); setTimeout(() => { if (server?.exitCode === null) server.kill("SIGKILL"); }, 3000).unref(); }); }
+  await stopServer();
   try { await db?.resetPoolForTesting(); } finally {
     if (originalUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = originalUrl;
     if (originalSeed === undefined) delete process.env.SKIP_SEED; else process.env.SKIP_SEED = originalSeed;
@@ -143,17 +157,23 @@ it("standalone HTTP restores old and fresh synthetic archives and rejects traver
   }
   const sourceUrl = fixture.source.options.connectionString!;
   const targetUrl = fixture.archiveTarget.options.connectionString!;
-  for (const urlText of [sourceUrl, targetUrl, fixture.sqlTarget.options.connectionString!]) {
+  const freshTargetUrl = fixture.freshTarget.options.connectionString!;
+  const invalidTargetUrl = fixture.invalidTarget.options.connectionString!;
+  for (const urlText of [sourceUrl, targetUrl, freshTargetUrl, invalidTargetUrl, fixture.sqlTarget.options.connectionString!]) {
     const u = new URL(urlText);
     if (u.hostname !== "127.0.0.1" || u.port !== "55472" || !/^\/aqlan_backup_precision_[a-f0-9]{32}$/.test(u.pathname)) {
       throw new Error("synthetic owned loopback database required");
     }
   }
-  if (sourceUrl === targetUrl) throw new Error("source and dedicated restore target must differ");
-  const targetIdentity = (await fixture.archiveTarget.query("SELECT current_database() AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=current_database()")).rows[0];
-  const assertOwnedTarget = async () => {
-    const actual = (await fixture.archiveTarget.query("SELECT current_database() AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=current_database()")).rows[0];
-    expect(actual).toEqual(targetIdentity);
+  if (new Set([sourceUrl, targetUrl, freshTargetUrl, invalidTargetUrl, fixture.sqlTarget.options.connectionString!]).size !== 5) {
+    throw new Error("all synthetic source and restore databases must differ");
+  }
+  const identityOf = async (pool: Pool) => (await pool.query("SELECT current_database() AS name, oid::text, datdba::text AS owner FROM pg_database WHERE datname=current_database()")).rows[0];
+  const targetIdentity = await identityOf(fixture.archiveTarget), freshIdentity = await identityOf(fixture.freshTarget),
+    invalidIdentity = await identityOf(fixture.invalidTarget);
+  const assertOwnedTarget = async (pool = fixture.archiveTarget, expected = targetIdentity) => {
+    const actual = await identityOf(pool);
+    expect(actual).toEqual(expected);
     expect(actual.name).toMatch(/^aqlan_backup_precision_[a-f0-9]{32}$/);
   };
   const port = await new Promise<number>((resolve, reject) => {
@@ -185,11 +205,11 @@ it("standalone HTTP restores old and fresh synthetic archives and rejects traver
     method: "POST", headers: { ...(useCookie ? {cookie} : {}), Origin: base, "Sec-Fetch-Site":"same-origin", "Content-Type":"application/json" },
     body: JSON.stringify({ backupId, confirmation: backupId }),
   });
-  async function register(backupId: string, bytes: Uint8Array) {
+  async function register(backupId: string, bytes: Uint8Array, destination = backupDir) {
     const parsed = parseTarBytes(gunzipSync(bytes));
     const manifest = JSON.parse(Buffer.from(parsed.entries.get("manifest.json")!.data).toString("utf8"));
-    await writeFile(join(backupDir, backupId), bytes);
-    await upsertBackupHistoryRecord(backupDir, { backupId, createdAt: new Date().toISOString(), triggerType:"manual",
+    await writeFile(join(destination, backupId), bytes);
+    await upsertBackupHistoryRecord(destination, { backupId, createdAt: new Date().toISOString(), triggerType:"manual",
       archiveSha256:createHash("sha256").update(bytes).digest("hex"), archiveBytes:bytes.byteLength,
       databaseSha256:manifest.databaseSha256, documentCount:manifest.documents.length,
       status:"verified", replicationStatus:"none", destinations:[] });
@@ -233,10 +253,68 @@ it("standalone HTTP restores old and fresh synthetic archives and rejects traver
   try { for await (const part of fullBackupBlocks({source:client, readDocument:async (key)=>key===documentKey?documentBytes:null})) parts.push(part); }
   finally { client.release(); }
   const freshId = "production-backup-20261117-010203-003-abcde123-abcdef12.tar.gz";
-  await register(freshId, gzipSync(Buffer.concat(parts)));
-  await assertOwnedTarget(); const fresh = await post(freshId); expect(fresh.status).toBe(200);
+  // Restart on the same loopback port with a distinct target and volume. The
+  // original target, archive and staged documents remain available for review.
+  await stopServer();
+  const freshVolume = join(directory, "synthetic-fresh-volume"), freshBackupDir = join(freshVolume, "backups");
+  const freshStage = join(backupStateDir(freshBackupDir), "restore-drill-current");
+  await mkdir(backupStateDir(freshBackupDir), { recursive: true });
+  await mkdir(join(freshVolume, "documents"), { recursive: true });
+  await register(freshId, gzipSync(Buffer.concat(parts)), freshBackupDir);
+  server = spawn(process.execPath, [serverEntry], { cwd: directory, env: { ...env,
+    RESTORE_DRILL_DATABASE_URL: freshTargetUrl, RAILWAY_VOLUME_MOUNT_PATH: freshVolume,
+    DOCUMENTS_DIR: join(freshVolume, "documents") }, stdio: ["ignore", "ignore", "ignore"] });
+  const freshDeadline = Date.now() + 60000;
+  while (true) {
+    if (server.exitCode !== null) throw new Error("synthetic fresh standalone server exited during startup");
+    try { if ((await fetch(`${base}/api/ping`)).ok) break; } catch { /* starting */ }
+    if (Date.now() > freshDeadline) throw new Error("synthetic fresh standalone startup timed out");
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  await assertOwnedTarget(fixture.freshTarget, freshIdentity); const fresh = await post(freshId); expect(fresh.status).toBe(200);
   expect(await fresh.json()).toMatchObject({ok:true,readyForCutover:true,documentsVerified:1});
-  expect(await readFile(join(stage, documentKey))).toEqual(documentBytes);
-  expect((await fixture.archiveTarget.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows[0].name).toBeNull();
-  expect((await fixture.archiveTarget.query("SELECT patient_number FROM patients WHERE patient_number='SYN-FRESH-HTTP'")).rows).toHaveLength(1);
+  expect(await readFile(join(freshStage, documentKey))).toEqual(documentBytes);
+  expect((await fixture.freshTarget.query("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name")).rows[0].name).toBeNull();
+  expect((await fixture.freshTarget.query("SELECT patient_number FROM patients WHERE patient_number='SYN-FRESH-HTTP'")).rows).toHaveLength(1);
+  expect(await snapshots(fixture.archiveTarget)).toEqual(before);
+  expect(await readFile(join(directory, "preserved-old-stage", documentKey))).toEqual(documentBytes);
+
+  // A structurally valid archive has historical content but no 0079 registry
+  // row. Its independently owned target contains a synthetic sentinel that
+  // must survive rejection. This is deliberately separate from both results.
+  const oldTar = parseTarBytes(gunzipSync(oldBytes));
+  const oldSql = Buffer.from(oldTar.entries.get("database.sql")!.data).toString("utf8");
+  const strippedSql = oldSql.replace(/^INSERT INTO schema_migrations \("version", "name", "checksum", "applied_at", "adopted"\) VALUES \('0079'.*\);\n/m, "");
+  expect(strippedSql).not.toBe(oldSql);
+  const invalidSql = Buffer.from(strippedSql);
+  const invalidManifest = JSON.parse(Buffer.from(oldTar.entries.get("manifest.json")!.data).toString("utf8"));
+  invalidManifest.databaseSha256 = createHash("sha256").update(invalidSql).digest("hex");
+  invalidManifest.databaseBytes = invalidSql.length;
+  const invalidArchive = tarGzBytes(oldTar.order.map(name => ({ name,
+    data: name === "database.sql" ? invalidSql : name === "manifest.json" ? Buffer.from(JSON.stringify(invalidManifest)) : oldTar.entries.get(name)!.data })));
+  await fixture.invalidTarget.query("CREATE TABLE synthetic_restore_sentinel (value text NOT NULL)");
+  await fixture.invalidTarget.query("INSERT INTO synthetic_restore_sentinel VALUES ('synthetic-must-remain')");
+  await stopServer();
+  const invalidVolume = join(directory, "synthetic-invalid-volume"), invalidBackupDir = join(invalidVolume, "backups");
+  await mkdir(backupStateDir(invalidBackupDir), { recursive: true });
+  await mkdir(join(invalidVolume, "documents"), { recursive: true });
+  const invalidId = "production-backup-20261117-010203-004-abcde123-abcdef12.tar.gz";
+  await register(invalidId, invalidArchive, invalidBackupDir);
+  server = spawn(process.execPath, [serverEntry], { cwd: directory, env: { ...env,
+    RESTORE_DRILL_DATABASE_URL: invalidTargetUrl, RAILWAY_VOLUME_MOUNT_PATH: invalidVolume,
+    DOCUMENTS_DIR: join(invalidVolume, "documents") }, stdio: ["ignore", "ignore", "ignore"] });
+  const invalidDeadline = Date.now() + 60000;
+  while (true) {
+    if (server.exitCode !== null) throw new Error("synthetic invalid-archive server exited during startup");
+    try { if ((await fetch(`${base}/api/ping`)).ok) break; } catch { /* starting */ }
+    if (Date.now() > invalidDeadline) throw new Error("synthetic invalid-archive server startup timed out");
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  await assertOwnedTarget(fixture.invalidTarget, invalidIdentity);
+  const invalid = await post(invalidId);
+  expect(invalid.status).toBeGreaterThanOrEqual(400);
+  expect(await invalid.json()).toMatchObject({ok:false});
+  expect((await fixture.invalidTarget.query("SELECT to_regclass('public.synthetic_restore_sentinel') IS NOT NULL AS present")).rows).toEqual([{present:true}]);
+  expect((await fixture.invalidTarget.query("SELECT value FROM synthetic_restore_sentinel")).rows).toEqual([{value:"synthetic-must-remain"}]);
+  expect(await snapshots(fixture.archiveTarget)).toEqual(before);
 }, 300000);

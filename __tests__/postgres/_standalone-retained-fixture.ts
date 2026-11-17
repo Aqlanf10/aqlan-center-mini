@@ -79,7 +79,9 @@ export async function openBackupTimestampFixture(environment: NodeJS.ProcessEnv)
     const source = await open();
     const sqlTarget = await open();
     const archiveTarget = await open();
-    return { source, sqlTarget, archiveTarget, close };
+    const freshTarget = await open();
+    const invalidTarget = await open();
+    return { source, sqlTarget, archiveTarget, freshTarget, invalidTarget, close };
   } catch (error) {
     try { await close(); } catch (cleanup) { throw new AggregateError([error, cleanup], "Backup timestamp fixture setup/cleanup failed."); }
     throw error;

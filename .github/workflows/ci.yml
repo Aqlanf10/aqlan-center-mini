@@ -365,17 +365,8 @@ jobs:
           node scripts/verify-braces-runtime.mjs
           node scripts/dependency-security/verify-lint-tooling-runtime.mjs
       - name: Verify final preflight and copied assets
+        id: restore_witness_build_guard
         run: node scripts/preflight-build-seal.mjs --verify
-      # Runs once on the isolated CI PostgreSQL service. The witness retains
-      # its synthetic databases and archive for the lifetime of this runner.
-      - name: Restore synthetic historical and fresh archives through standalone HTTP
-        if: matrix.shard == 1
-        env:
-          SYNTHETIC_PRESERVE_EVIDENCE: "1"
-          SYNTHETIC_STANDALONE_SERVER: ${{ github.workspace }}/.next/standalone/server.js
-          DATABASE_URL: postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable
-          TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable
-        run: npx vitest run --config vitest.config.standalone-restore-witness.mts
       # (P2/S14) اختبارات الأمن على HTTP الحقيقي — إلزامية لا اختيارية:
       # رؤوس الأمن وCSP وnonce وCSRF/Origin وحدود الأجسام والمعدل ومصفوفة
       # RBAC/BOLA لا تُثبت إلا على تطبيق مبنيّ فعليًّا خلف HTTP حقيقي، على
@@ -1120,6 +1111,19 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+
+      # Run after the existing HTTP suites and their reports so a witness
+      # failure cannot prevent them. Its PostgreSQL service is separate.
+      - name: Restore synthetic historical and fresh archives through standalone HTTP
+        if: always() && matrix.shard == 1 && steps.restore_witness_build_guard.outcome == 'success'
+        env:
+          SYNTHETIC_PRESERVE_EVIDENCE: "1"
+          SYNTHETIC_STANDALONE_SERVER: ${{ github.workspace }}/.next/standalone/server.js
+          DATABASE_URL: postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable
+          TEST_DATABASE_URL: postgresql://ci:ci@127.0.0.1:55472/aqlan_p1_test?sslmode=disable
+        run: |
+          node scripts/preflight-build-seal.mjs --verify
+          npx vitest run --config vitest.config.standalone-restore-witness.mts
 
   # Actual shared contract components, synthetic fixtures only. No app session,
   # database, customer PDF or external network is used by the renderer.
