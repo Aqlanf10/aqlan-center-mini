@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { restoreDiagnostic } from "../lib/restore/error-diagnostic.mjs";
 /**
  * npm run restore:full — الاستعادة الكاملة بإعداد Staging (P1.12–P1.15 + P1.21).
  *
@@ -100,6 +101,6 @@ async function main(): Promise<number> {
 }
 
 main().then((code) => process.exit(code)).catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
+  console.error(restoreDiagnostic("unknown", error));
   process.exit(1);
 });

@@ -1,3 +1,4 @@
+import { restoreDiagnostic, restorePreflightDiagnostic } from "./error-diagnostic.mjs";
 import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -69,6 +70,8 @@ export interface StagedRestoreResult {
   cutoverSteps: string[];
   errors: string[];
 }
+
+class RestorePhotoError extends Error {}
 
 /** pool-محاكٍ حول Client واحد — ليستخدمه نظام الهجرات على اتصال مخصص. */
 function clientAsPool(client: Client) {
@@ -161,7 +164,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
   try {
     archive = options.archiveSnapshot ?? await readTarGzEntries(options.archivePath);
   } catch (error) {
-    result.errors.push(`تعذّرت قراءة الأرشيف — الملف تالف أو مقطوع أو ليس gzip سليمًا: ${error instanceof Error ? error.message : String(error)}`);
+    result.errors.push(restoreDiagnostic("archive", error));
     return result;
   }
   const validated = validateBackupArchive(archive, { documentsDir: options.stagingDir });
@@ -177,16 +180,18 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
   try {
     prepared = prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), { inspectHistorical0079: true });
   } catch (error) {
-    result.errors.push(`تعذّر التحقق من سجل هجرات النسخة: ${error instanceof Error ? error.message : String(error)}`);
+    result.errors.push(`تعذّر التحقق من سجل هجرات النسخة: ${restorePreflightDiagnostic(error)}`);
     return result;
   }
 
   const client = new Client(restoreClientConfigFor(options.targetUrl));
+  let phase = "connect";
   try {
     await client.connect();
 
     // ── الخطوة ٢أ: مصدرٌ موحّد الهوية (بروتوكول الاستعادة R1): الحجز الدائم قبل أي مخطط أو بيانات.
     // الهدف يجب أن يكون فارغًا تمامًا وبلا أي أثر هوية، ولا خيار لتجاوز ذلك هنا.
+    phase = "hold";
     const canonicalSource = Boolean(validated.manifest.identityProvenance);
     if (canonicalSource) {
       const manifestBytes = archive.entries.get("manifest.json")!.data;
@@ -197,13 +202,14 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
           ? (error.code === "restore_target_has_identity"
             ? "الهدف يحمل هوية موحّدة (جاهزة أو معزولة). استعادة مصدر موحّد إليه مرفوضة؛ استعد إلى قاعدة فارغة جديدة."
             : "الهدف ليس فارغًا. استعادة مصدر موحّد تحتاج قاعدة فارغة جديدة، ولا يُتجاوز ذلك.")
-          : `تعذّر تثبيت حجز الاستعادة؛ لم يُستعد شيء: ${error instanceof Error ? error.message : String(error)}`);
+          : restoreDiagnostic("hold", error));
         return result;
       }
       result.restoreHold = true;
     }
 
     // ── الخطوة ٢: الهدف فارغ؟ (رفض غير الفارغ افتراضًا)
+    phase = "target";
     const tables = canonicalSource ? 0 : await targetTableCount(client);
     if (tables > 0 && !options.allowNonEmptyTarget) {
       result.errors.push(
@@ -216,6 +222,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     // ── الخطوة ٣: المخطط من نظام الهجرات (بلا بذور أبدًا) — قاعدة فارغة.
     // كل فشل من هنا فصاعدًا يُبلَّغ نتيجةً (ok=false + errors) لا استثناءً يُرمى —
     // فالسطر الذي يُفشله يهمّ من يشغّل الاستعادة، والهدف المعزول يُتخلّص منه بأمان.
+    phase = "migration";
     const migrationFiles = await loadMigrationFiles();
     const migrationPool = clientAsPool(client);
     try {
@@ -227,6 +234,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     // ── الخطوة ٤: بيانات SQL — مع استبعاد صفوف تسجيل الهجرات نفسها:
     // حالة الهجرات في الهدف تُعرَّف بما طبَّقته الخطوة ٣ (الملفات الحالية)، لا
     // بلقطة النسخة — فتُستعاد نسخة قديمة على كود أحدث فتظل حالة المخطط صحيحة.
+      phase = "replay";
       result.skippedMigrationRecordLines = prepared.skippedMigrationRecordLines;
       result.sqlRowsStatementLines = prepared.sqlRowsStatementLines;
       const dataSql = prepared.dataSql;
@@ -284,20 +292,21 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
           "SELECT value FROM settings WHERE key = $1", ["clinic.login_photo_asset"],
         );
         const photoProblem = loginPhotoRestoreProblem(photoSettings[0]?.value ?? "", validated.documents);
-        if (photoProblem) throw new Error(photoProblem);
+        if (photoProblem) throw new RestorePhotoError();
         await client.query("COMMIT");
       } catch (error) {
         await client.query("ROLLBACK").catch(() => {});
         throw error;
       }
     } catch (error) {
-      result.errors.push(
-        `فشل تطبيق بيانات الاستعادة على الهدف المعزول: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      result.errors.push(error instanceof RestorePhotoError ? "بيانات صورة الدخول المستعادة غير صالحة؛ الاستعادة مرفوضة."
+        : error && typeof error === "object" && "code" in error && error.code === "partial_staff_authority_schema"
+          ? "partial_staff_authority_schema" : restoreDiagnostic(phase, error));
       return result;
     }
 
     // ── الخطوة ٥: المستندات إلى دليل staging — لا إلى دليل الإنتاج.
+    phase = "documents";
     await mkdir(options.stagingDir, { recursive: true });
     for (const document of validated.documents) {
       const target = path.join(options.stagingDir, document.relativePath);
@@ -307,13 +316,14 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
       // تحقق مستقل بعد الكتابة: قراءة من القرص وبصمة جديدة.
       const written = await readFile(target);
       if (createHash("sha256").update(written).digest("hex") !== document.sha256) {
-        result.errors.push(`فشل تحقق ما بعد الكتابة: ${document.relativePath}`);
+        result.errors.push("فشل تحقق مستند بعد الكتابة.");
         return result;
       }
       result.documentsVerified += 1;
     }
 
     // ── الخطوة ٦: تحقق الهدف بعد الاستعادة.
+    phase = "verification";
     const status = await migrationStatus(migrationPool, migrationFiles);
     result.verification = {
       criticalProbeOk: status.probe.ok,
@@ -332,6 +342,9 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     result.ok = true;
     result.readyForCutover = true;
     result.cutoverSteps = cutoverStepsFor(options, result);
+    return result;
+  } catch (error) {
+    result.errors.push(restoreDiagnostic(phase, error));
     return result;
   } finally {
     await client.end().catch(() => {});

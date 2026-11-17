@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { restoreDiagnostic, restorePreflightDiagnostic } from "../lib/restore/error-diagnostic.mjs";
 import "./load-env.mjs";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
@@ -54,14 +55,16 @@ try {
   }
   sql = prepared.dataSql;
 } catch (error) {
-  console.error(`الملف ناقص أو غير مدعوم: ${error.message}`);
+  console.error(`الملف ناقص أو غير مدعوم: ${restorePreflightDiagnostic(error)}`);
   process.exit(1);
 }
 
 const client = new Client({ connectionString: validatedTarget.connectionString, ssl: false });
+let phase = "connect";
 try {
   await client.connect();
   // Match the backup writer's quote escaping even on a differently configured server.
+  phase = "replay";
   await client.query("SET standard_conforming_strings = on");
   await client.query("BEGIN");
   await client.query(sql);
@@ -74,7 +77,7 @@ try {
   console.log(`تمت الاستعادة. الجداول: ${rows[0].tables}`);
 } catch (error) {
   await client.query("ROLLBACK").catch(() => {});
-  console.error(`فشلت الاستعادة: ${error.message}`);
+  console.error(`فشلت الاستعادة: ${restoreDiagnostic(phase, error)}`);
   process.exitCode = 1;
 } finally {
   await client.end().catch(() => {});

@@ -85,7 +85,7 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   const registryBefore = (await fixture.archiveTarget.query('SELECT version,name,checksum,adopted,applied_at FROM schema_migrations ORDER BY version')).rows;
   const result = await stagedRestore({ archivePath: path, targetUrl: fixture.archiveTarget.options.connectionString!, stagingDir: join(directory, 'failed-documents'), allowNonEmptyTarget: true });
   expect(result.validationErrors).toEqual([]); expect(result.ok).toBe(false); expect(result.readyForCutover).toBe(false);
-  expect(result.errors.join(' ')).toContain('division by zero');
+  expect(result.errors.join(' ')).toContain('SQLSTATE 22012');
   expect(await applicationRows(fixture.archiveTarget)).toEqual(beforeReplay);
   const files = await loadMigrationFiles();
   expect(files.find(file => file.version === '0079')?.checksum).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');

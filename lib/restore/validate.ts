@@ -64,10 +64,10 @@ export function parseManifest(raw: unknown): { manifest: BackupManifest } | { er
   }
   const manifest = raw as Record<string, unknown>;
   if (manifest.format !== "aqlan-full-backup") {
-    errors.push(`صيغة الأرشيف غير معروفة: ${String(manifest.format)}`);
+    errors.push(`صيغة الأرشيف غير معروفة: [غير معروف]`);
   }
   if (manifest.version !== 1) {
-    errors.push(`إصدار الأرشيف غير مدعوم: ${String(manifest.version)}`);
+    errors.push(`إصدار الأرشيف غير مدعوم: [غير معروف]`);
   }
   if (typeof manifest.databaseSha256 !== "string" || !/^[0-9a-f]{64}$/.test(manifest.databaseSha256)) {
     errors.push("بصمة قاعدة البيانات في المفتاح غير صالحة");
@@ -89,7 +89,7 @@ export function parseManifest(raw: unknown): { manifest: BackupManifest } | { er
       continue;
     }
     if (seenKeys.has(doc.storageKey)) {
-      errors.push(`${prefix}: مفتاح تخزين مكرر في المفتاح: ${doc.storageKey}`);
+      errors.push(`${prefix}: مفتاح تخزين مكرر في المفتاح`);
     }
     seenKeys.add(doc.storageKey);
     if (typeof doc.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(doc.sha256)) {
@@ -183,29 +183,29 @@ export function validateBackupArchive(
     const entryName = documentEntryName(doc.storageKey);
     const entry = archive.entries.get(entryName);
     if (!entry) {
-      errors.push(`مستند مفقود من الأرشيف: ${doc.storageKey} (${doc.title || "بلا عنوان"})`);
+      errors.push(`مستند مفقود من الأرشيف: [مفتاح محجوب]`);
       continue;
     }
     const bytes = entry.data;
     if (bytes.length !== doc.sizeBytes) {
-      errors.push(`حجم مستند لا يطابق المفتاح: ${doc.storageKey} — الأرشيف ${bytes.length} والمفتاح ${doc.sizeBytes}.`);
+      errors.push(`حجم مستند لا يطابق المفتاح: [مفتاح محجوب] — الأرشيف ${bytes.length} والمفتاح ${doc.sizeBytes}.`);
       continue;
     }
     const digest = sha256Hex(bytes);
     if (digest !== doc.sha256) {
-      errors.push(`بصمة مستند لا تطابق المفتاح: ${doc.storageKey} — ملف تالف أو مُعدَّل.`);
+      errors.push(`بصمة مستند لا تطابق المفتاح: [مفتاح محجوب] — ملف تالف أو مُعدَّل.`);
       continue;
     }
     // ٧) اسم نسبي سليم
     const pathCheck = validateRelativePath(doc.storageKey);
     if (!pathCheck.ok || !pathCheck.resolved) {
-      errors.push(`مسار مستند غير آمن: ${doc.storageKey} — ${pathCheck.reason}`);
+      errors.push(`مسار مستند غير آمن: [مفتاح محجوب] — [تفصيل محجوب]`);
       continue;
     }
     // ٨) الحل داخل الأساس يظل داخل الأساس (رفض traversal)
     const inside = resolveInsideBase(options.documentsDir, doc.storageKey);
     if (!inside.ok) {
-      errors.push(`مسار مستند يخرج من دليل المستندات: ${doc.storageKey} — ${inside.reason}`);
+      errors.push(`مسار مستند يخرج من دليل المستندات: [مفتاح محجوب] — [تفصيل محجوب]`);
       continue;
     }
     relativePaths.push(doc.storageKey);
@@ -215,7 +215,7 @@ export function validateBackupArchive(
   // ٩) وجهات مكررة بعد الحل
   const batch = validateDestinationBatch(options.documentsDir, relativePaths);
   if (!batch.ok) {
-    errors.push(`وجهات مكررة أو غير آمنة في دفعة المستندات: ${batch.reason}`);
+    errors.push(`وجهات مكررة أو غير آمنة في دفعة المستندات: [تفصيل محجوب]`);
   }
 
   if (errors.length > 0) return { ok: false, errors };

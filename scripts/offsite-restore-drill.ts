@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { restoreDiagnostic } from "../lib/restore/error-diagnostic.mjs";
 /**
  * npm run backup:drill — (P0-3) تجربة استعادة مشهودة من النسخة الخارجية.
  *
@@ -59,6 +60,6 @@ async function main(): Promise<number> {
 }
 
 main().then((code) => process.exit(code), (error) => {
-  console.error(`✘ تعذّرت التجربة: ${error instanceof Error ? error.message : "خطأ غير متوقع"}`);
+  console.error(`✘ تعذّرت التجربة: ${restoreDiagnostic("unknown", error)}`);
   process.exit(3);
 });
