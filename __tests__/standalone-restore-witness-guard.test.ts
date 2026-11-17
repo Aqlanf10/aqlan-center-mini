@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { validateStandaloneWitnessEnvironment } from "./postgres/_standalone-restore-witness-guard";
 
 const valid: NodeJS.ProcessEnv = {
+  NODE_ENV: "test",
   GITHUB_ACTIONS: "true", CI: "true", GITHUB_RUN_ID: "123456",
   GITHUB_WORKSPACE: "/tmp/synthetic-workspace", SYNTHETIC_PRESERVE_EVIDENCE: "1",
   SYNTHETIC_STANDALONE_SERVER: "/tmp/synthetic-workspace/.next/standalone/server.js",
