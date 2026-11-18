@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildWireTimeline, normalizeWireCode, type WireTimelineInput } from "@/lib/ortho-wire-timeline";
+import { buildWireSessionView, buildWireTimeline, normalizeWireCode, type WireTimelineInput } from "@/lib/ortho-wire-timeline";
 
 /**
  * OW-1 (docs/review/ortho-wire-timeline-photo-records-contract-20261118.md, v2.1).
@@ -176,3 +176,60 @@ describe("buildWireTimeline (OW-1)", () => {
     expect(() => buildWireTimeline(base([adj("2026-01-04", "016 NiTi")], { documentedRemovals: [{ adjustmentId: 999999, arch: "upper" }] }))).not.toThrow();
   });
 });
+
+describe("buildWireSessionView (redesign 6993812820: one row per session, same semantics)", () => {
+  const view = (input: WireTimelineInput) => {
+    const result = buildWireSessionView(input);
+    if (result.kind !== "sessions") throw new Error("expected sessions");
+    return result;
+  };
+
+  it("one row per session, newest first, with fixed upper/lower/elastics columns", () => {
+    const a = adj("2026-01-04", "014 NiTi", "014 NiTi"); const b = adj("2026-02-01", null, null, { elastics: "class_ii" });
+    const c = adj("2026-03-01", "016 NiTi", "014 NiTi", { elastics: "class_ii" });
+    const result = view(base([a, b, c]));
+    expect(result.rows.map(r => [r.doneOn, r.upper?.kind, r.upper?.text, r.lower?.kind, r.lower?.text, r.elastics.kind, r.elastics.elastics])).toEqual([
+      ["2026-03-01", "change", "016 NiTi", "same", "014 NiTi", "same", "class_ii"],
+      ["2026-02-01", "unchanged", null, "unchanged", null, "change", "class_ii"],
+      ["2026-01-04", "first", "014 NiTi", "first", "014 NiTi", "first", "none"],
+    ]);
+  });
+
+  it("a blank session names no wire; a documented removal is distinct; blanks after it stay unchanged", () => {
+    const a = adj("2026-01-04", "016 NiTi"); const r = adj("2026-02-01", null); const b = adj("2026-03-01", null);
+    const result = view(base([a, r, b], { documentedRemovals: [{ adjustmentId: r.id, arch: "upper" }] }));
+    expect(result.rows.map(row => [row.upper?.kind, row.upper?.text])).toEqual([["unchanged", null], ["removal", null], ["first", "016 NiTi"]]);
+    expect(result.summary.find(s => s.arch === "upper")).toMatchObject({ kind: "none", text: null, firstDocumentedOn: "2026-02-01" });
+  });
+
+  it("sessions before any recorded wire are 'unknown', never an inferred wire", () => {
+    const result = view(base([adj("2026-01-04", null), adj("2026-02-01", "016 NiTi")]));
+    expect(result.rows.map(row => row.upper?.kind)).toEqual(["first", "unknown"]);
+  });
+
+  it("the summary gives the last documented wire per arch with its first documented date, not today", () => {
+    const result = view(base([adj("2026-01-04", "014 NiTi", "014 NiTi"), adj("2026-03-01", "016 NiTi", null), adj("2026-04-05", null, null)]));
+    expect(result.summary).toEqual([
+      { arch: "upper", treated: true, kind: "wire", text: "016 NiTi", firstDocumentedOn: "2026-03-01", lastSessionOn: "2026-04-05", documentedWeeks: 5 },
+      { arch: "lower", treated: true, kind: "wire", text: "014 NiTi", firstDocumentedOn: "2026-01-04", lastSessionOn: "2026-04-05", documentedWeeks: 13 },
+    ]);
+  });
+
+  it("keeps neutral catalogue flags on change cells only, and hides untreated arches with no record", () => {
+    const upperOnly = { slot: "022" as const, appliance: "fixed_metal" as const, arches: "upper" as const, upperWire: null, lowerWire: null };
+    const result = view(base([adj("2026-01-04", "019×025 SS"), adj("2026-02-01", "016 NiTi"), adj("2026-03-01", "Bioforce 18")], { case: upperOnly }));
+    expect(result.arches).toEqual(["upper"]);
+    expect(result.rows.every(row => row.lower === null)).toBe(true);
+    expect(result.rows.map(row => [row.upper?.kind, row.upper?.catalogueStatus, row.upper?.outOfOrder])).toEqual([
+      ["change", "off_catalogue", false], ["change", "match", true], ["first", "match", false],
+    ]);
+  });
+
+  it("not applicable without archwires; truncation and mismatches carried over", () => {
+    expect(buildWireSessionView(base([adj("2026-01-04", "016 NiTi")], { case: { slot: "022", appliance: "aligners", arches: "both", upperWire: null, lowerWire: null } })).kind).toBe("not_applicable");
+    const result = view(base([adj("2026-01-04", "016 NiTi")], { hasMore: true, case: { slot: "022", appliance: "fixed_metal", arches: "both", upperWire: "019×025 SS", lowerWire: null } }));
+    expect(result.truncated).toBe(true);
+    expect(result.mismatches).toEqual([{ arch: "upper", caseWire: "019×025 SS", lastWire: "016 NiTi" }]);
+  });
+});
+

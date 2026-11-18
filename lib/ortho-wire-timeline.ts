@@ -219,3 +219,115 @@ export function buildWireTimeline(input: WireTimelineInput): WireTimeline {
 
   return { kind: "timeline", lanes, elastics, truncated: input.hasMore, mismatches };
 }
+
+/* ───────────────── عرض الجلسات (مراجعة د. عقلان 6993812820) ─────────────────
+ * صفّ لكل جلسة بتاريخ واحد، وأعمدة ثابتة للعلوي والسفلي والمطاط. الدلالة نفسها:
+ * الفراغ «بلا تغيير» ولا يُسمّى فيه سلك؛ الإزالة بدليل موثّق فقط؛ ما قبل أول تسجيل
+ * «غير موثّق». هذه طبقة عرض فوق القواعد نفسها، لا قواعد جديدة. */
+
+export type WireCellKind =
+  | "first"      // أول تسجيل موثّق لسلك في هذا الفك
+  | "change"     // سلك موثّق يختلف عن السابق
+  | "same"       // سُجّل السلك نفسه صراحةً
+  | "unchanged"  // لم يُدخَل سلك: بلا تغيير (لا يُسمّى سلك)
+  | "removal"    // إزالة موثّقة
+  | "unknown";   // قبل أول تسجيل موثّق
+
+export interface WireCell {
+  kind: WireCellKind;
+  /** النص المسجّل حرفيًا في هذه الجلسة فقط (first/change/same). */
+  text: string | null;
+  catalogueStatus: CatalogueStatus | null;
+  outOfOrder: boolean;
+}
+
+export interface ElasticCell { kind: "first" | "change" | "same"; elastics: ElasticClass; note: string | null }
+
+export interface WireSessionRow {
+  id: number;
+  doneOn: string;
+  upper: WireCell | null;
+  lower: WireCell | null;
+  elastics: ElasticCell;
+}
+
+export interface WireLaneSummary {
+  arch: WireArch;
+  treated: boolean;
+  /** wire: آخر سلك موثّق؛ none: بلا سلك بعد إزالة موثّقة؛ unknown: لا تسجيل موثّق. */
+  kind: "wire" | "none" | "unknown";
+  text: string | null;
+  firstDocumentedOn: string | null;
+  lastSessionOn: string | null;
+  /** «الفترة الموثّقة» بالأسابيع، حتى آخر جلسة لا حتى اليوم. */
+  documentedWeeks: number | null;
+}
+
+export type WireSessionView =
+  | { kind: "not_applicable" }
+  | {
+    kind: "sessions";
+    arches: WireArch[];
+    summary: WireLaneSummary[];
+    /** الأحدث أولًا. */
+    rows: WireSessionRow[];
+    truncated: boolean;
+    mismatches: { arch: WireArch; caseWire: string | null; lastWire: string | null }[];
+  };
+
+export function buildWireSessionView(input: WireTimelineInput): WireSessionView {
+  const timeline = buildWireTimeline(input);
+  if (timeline.kind === "not_applicable") return timeline;
+  const arches = timeline.lanes.map(lane => lane.arch);
+  const sessions = [...input.adjustments].sort((a, b) =>
+    a.doneOn < b.doneOn ? -1 : a.doneOn > b.doneOn ? 1 : a.id - b.id);
+
+  // خلية كل جلسة من مقاطع الفك نفسها، فلا تختلف الدلالة عن الخط الزمني.
+  const cells = new Map<string, WireCell>();
+  for (const lane of timeline.lanes) {
+    lane.segments.forEach((segment, index) => {
+      segment.sessionIds.forEach((sessionId, position) => {
+        const blank = segment.blankSessionIds.includes(sessionId);
+        let kind: WireCellKind;
+        if (segment.kind === "unknown") kind = "unknown";
+        else if (segment.kind === "none") kind = position === 0 ? "removal" : "unchanged";
+        else if (blank) kind = "unchanged";
+        else if (position === 0) kind = index === 0 || lane.segments[index - 1].kind === "unknown" ? "first" : "change";
+        else kind = "same";
+        const session = sessions.find(item => item.id === sessionId)!;
+        const raw = lane.arch === "upper" ? session.upperWire : session.lowerWire;
+        cells.set(`${sessionId}:${lane.arch}`, {
+          kind,
+          text: kind === "first" || kind === "change" || kind === "same" ? raw : null,
+          catalogueStatus: kind === "first" || kind === "change" ? segment.catalogueStatus : null,
+          outOfOrder: kind === "change" && segment.outOfOrder,
+        });
+      });
+    });
+  }
+
+  const rows: WireSessionRow[] = [];
+  let previousElastic: ElasticClass | null = null;
+  for (const session of sessions) {
+    const kind: ElasticCell["kind"] = previousElastic === null ? "first" : previousElastic === session.elastics ? "same" : "change";
+    previousElastic = session.elastics;
+    rows.push({
+      id: session.id, doneOn: session.doneOn,
+      upper: arches.includes("upper") ? cells.get(`${session.id}:upper`) ?? null : null,
+      lower: arches.includes("lower") ? cells.get(`${session.id}:lower`) ?? null : null,
+      elastics: { kind, elastics: session.elastics, note: session.elasticNote || null },
+    });
+  }
+
+  const summary: WireLaneSummary[] = timeline.lanes.map(lane => {
+    const last = lane.segments.at(-1);
+    if (!last || last.kind === "unknown") return { arch: lane.arch, treated: lane.treated, kind: "unknown", text: null, firstDocumentedOn: null, lastSessionOn: last?.lastSessionOn ?? null, documentedWeeks: null };
+    return {
+      arch: lane.arch, treated: lane.treated, kind: last.kind,
+      text: last.kind === "wire" ? last.variants.at(-1) ?? last.text : null,
+      firstDocumentedOn: last.firstDocumentedOn, lastSessionOn: last.lastSessionOn, documentedWeeks: last.documentedWeeks,
+    };
+  });
+
+  return { kind: "sessions", arches, summary, rows: rows.reverse(), truncated: timeline.truncated, mismatches: timeline.mismatches };
+}
