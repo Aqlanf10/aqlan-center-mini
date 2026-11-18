@@ -15,24 +15,13 @@ import { LEGACY_DEFINITION_VERSIONS } from "../ceph-evidence/definition-versions
 import { cephContentHash } from "./canonical-json";
 import { CEPH_ENGINE_ID, CEPH_ENGINE_SOURCE_SHA256, CEPH_ENGINE_VERSION } from "./engine-identity";
 import { parseCephCompletionSnapshot, type CephCompletionSnapshot } from "./snapshot";
+import { parseCephSourceIdentity, type CephSourceIdentity } from "./source-identity";
+export { parseCephSourceIdentity, type CephSourceIdentity } from "./source-identity";
 
 export interface CephReferenceSnapshot {
   readonly key: string; readonly name: string; readonly population: string | null; readonly ageMin: number | null;
   readonly ageMax: number | null; readonly sex: string | null; readonly version: string;
   readonly values: readonly { readonly code: string; readonly mean: number; readonly sd: number }[];
-}
-
-/** What the clinician's screen was showing when "complete" was pressed; compared with the server's capture. */
-export interface CephSourceIdentity {
-  readonly schemaVersion: 1;
-  readonly documentId: number;
-  readonly imageSha256: string;
-  readonly referenceSetKey: string;
-  /** Hash of the reference snapshot, or null when the selected set is not an active stored set (built-in fallback). */
-  readonly referenceSetSha256: string | null;
-  readonly engineId: typeof CEPH_ENGINE_ID;
-  readonly engineVersion: string;
-  readonly engineSourceSha256: string;
 }
 
 export interface CephMeasurementWitness {
@@ -75,16 +64,6 @@ const iso = (x: unknown): x is string => typeof x === "string" && /^\d{4}-\d\d-\
 const keys = (x: Record<string, unknown>, names: readonly string[]) => Object.keys(x).length === names.length && names.every((k) => Object.hasOwn(x, k));
 const byCode = (a: { code: string }, b: { code: string }) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0);
 const LEGACY_DIFFERS = new Set(LEGACY_DEFINITION_VERSIONS.map((v) => v.legacyCode));
-
-export function parseCephSourceIdentity(value: unknown): CephSourceIdentity | null {
-  if (!obj(value) || !keys(value, ["schemaVersion", "documentId", "imageSha256", "referenceSetKey", "referenceSetSha256", "engineId", "engineVersion", "engineSourceSha256"])
-    || value.schemaVersion !== 1 || !posId(value.documentId) || !sha(value.imageSha256)
-    || typeof value.referenceSetKey !== "string" || !value.referenceSetKey.trim() || value.referenceSetKey.length > 200
-    || !(value.referenceSetSha256 === null || sha(value.referenceSetSha256)) || value.engineId !== CEPH_ENGINE_ID
-    || !str(value.engineVersion) || value.engineVersion.length > 200 || !sha(value.engineSourceSha256)) return null;
-  return { schemaVersion: 1, documentId: value.documentId, imageSha256: value.imageSha256, referenceSetKey: value.referenceSetKey,
-    referenceSetSha256: value.referenceSetSha256, engineId: CEPH_ENGINE_ID, engineVersion: value.engineVersion, engineSourceSha256: value.engineSourceSha256 };
-}
 
 export function sameCephSourceIdentity(left: unknown, right: unknown): boolean {
   const a = parseCephSourceIdentity(left), b = parseCephSourceIdentity(right);

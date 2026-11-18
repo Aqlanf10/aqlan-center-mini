@@ -4,11 +4,11 @@
   "generatedBy": "ensureSchema()",
   "generatedOnServerVersion": "18.6 (Ubuntu 18.6-1.pgdg24.04+2)",
   "counts": {
-    "tables": 147,
-    "columns": 1830,
-    "constraints": 2223,
-    "indexes": 454,
-    "triggers": 145
+    "tables": 148,
+    "columns": 1838,
+    "constraints": 2241,
+    "indexes": 455,
+    "triggers": 153
   },
   "tables": {
     "agreement_delta_amendments": {
@@ -2163,7 +2163,117 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "ceph_analysis_provenance_final_state": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT",
+            "UPDATE"
+          ]
+        },
+        "ceph_witnessed_analysis_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "UPDATE"
+          ]
+        }
+      }
+    },
+    "ceph_completion_provenance": {
+      "columns": {
+        "actor_user_id": {
+          "type": "int4",
+          "nullable": false
+        },
+        "analysis_id": {
+          "type": "int8",
+          "nullable": false
+        },
+        "approved_draft_version": {
+          "type": "text",
+          "nullable": false
+        },
+        "schema_version": {
+          "type": "int4",
+          "nullable": false
+        },
+        "sealed_at": {
+          "type": "timestamptz",
+          "nullable": false
+        },
+        "sealed_by": {
+          "type": "text",
+          "nullable": false
+        },
+        "witness": {
+          "type": "jsonb",
+          "nullable": false
+        },
+        "witness_sha256": {
+          "type": "text",
+          "nullable": false
+        }
+      },
+      "primaryKey": [
+        "analysis_id"
+      ],
+      "unique": [],
+      "checks": [
+        "ceph_completion_provenance_approved_draft_version_check",
+        "ceph_completion_provenance_schema_version_check",
+        "ceph_completion_provenance_sealed_by_check",
+        "ceph_completion_provenance_witness_check",
+        "ceph_completion_provenance_witness_sha256_check"
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "analysis_id"
+          ],
+          "refTable": "ceph_analyses",
+          "refColumns": [
+            "id"
+          ]
+        },
+        {
+          "columns": [
+            "actor_user_id"
+          ],
+          "refTable": "users",
+          "refColumns": [
+            "id"
+          ]
+        }
+      ],
+      "indexes": {
+        "ceph_completion_provenance_pkey": {
+          "columns": [
+            "analysis_id"
+          ],
+          "unique": true
+        }
+      },
+      "triggers": {
+        "ceph_completion_provenance_final_state": {
+          "timing": "AFTER",
+          "events": [
+            "INSERT"
+          ]
+        },
+        "ceph_completion_provenance_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "DELETE",
+            "UPDATE"
+          ]
+        },
+        "ceph_completion_provenance_no_truncate": {
+          "timing": "BEFORE",
+          "events": [
+            "TRUNCATE"
+          ]
+        }
+      }
     },
     "ceph_diagnoses": {
       "columns": {
@@ -2228,7 +2338,16 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "ceph_witnessed_diagnoses_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "ceph_landmarks": {
       "columns": {
@@ -2311,7 +2430,16 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "ceph_witnessed_landmarks_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "ceph_measurements": {
       "columns": {
@@ -2374,7 +2502,16 @@
           "unique": true
         }
       },
-      "triggers": {}
+      "triggers": {
+        "ceph_witnessed_measurements_immutable": {
+          "timing": "BEFORE",
+          "events": [
+            "INSERT",
+            "DELETE",
+            "UPDATE"
+          ]
+        }
+      }
     },
     "ceph_reference_sets": {
       "columns": {

@@ -27,7 +27,7 @@ export function CanonicalCephComplete({ patientId, studyId, ownerKey, feed, refr
     const timeout = setTimeout(() => request.abort(), 10000);
     const unknown = () => { pendingRef.current = true; setPending(true); clear(); setMessage("لم تتأكد نتيجة اعتماد الدراسة. لن نعيد الطلب تلقائيًا."); refresh(); };
     try {
-      const response = await fetch(`/api/ceph/${studyId}/complete`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: request.signal, body: JSON.stringify({ expectedVersion: version }) });
+      const response = await fetch(`/api/ceph/${studyId}/complete`, { method: "POST", headers: { "Content-Type": "application/json" }, signal: request.signal, body: JSON.stringify({ expectedVersion: version, ...(feed.completionSources ? { expectedSources: feed.completionSources } : {}) }) });
       const result = await response.json().catch(() => null); if (!active.current) return;
       if (!response.ok) { if (response.status < 500 && result && (response.status === 401 || /^(STAFF_|ceph_complete_|invalid_ceph_complete$)/.test(String(result.code)))) { erase(); clear(); setMessage(typeof result.message === "string" ? result.message : "لم تُعتمد الدراسة. راجع حالتها الحالية."); refresh(); } else unknown(); return; }
       if (!result || Object.keys(result).sort().join(",") !== "ok,status,studyId" || result.ok !== true || result.studyId !== studyId || result.status !== "completed") { unknown(); return; }

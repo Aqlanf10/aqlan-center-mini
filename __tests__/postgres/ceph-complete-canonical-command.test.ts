@@ -47,7 +47,8 @@ it("own, all and protected owner seal precisely the existing engine outputs and 
     const rows=after.measurements.filter((m:{code:string})=>m.code!=="SYN_STORED").map((m:{code:string;value:number})=>({code:m.code,value:m.value})).sort((a:{code:string},b:{code:string})=>a.code.localeCompare(b.code));
     expect(rows).toEqual(expected); expect(after.measurements.find((m:{code:string})=>m.code==="SYN_STORED")).toEqual(before.measurements.find((m:{code:string})=>m.code==="SYN_STORED"));
     expect(await audits(s)).toMatchObject([{action:"ceph.complete",actor:ACCOUNTS[key].username}]);
-    await expect(complete(key,s,input)).rejects.toMatchObject({code:"ceph_complete_conflict"});expect(await audits(s)).toHaveLength(1);
+    // 0137 safe retry: the same actor resubmitting the approved version gets the original receipt, no second audit.
+    expect(await complete(key,s,input)).toEqual({ok:true,studyId:s.id,status:"completed"});expect(await audits(s)).toHaveLength(1);
   }
 });
 it.each(["calibration","missing-landmark","stale-measurement"] as const)("%s blocks approval without deleting saved values or rewriting diagnosis",async kind=>{

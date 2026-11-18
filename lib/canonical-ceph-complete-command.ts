@@ -1,11 +1,13 @@
 import "server-only";
 import { completeCephAnalysisInTransaction, doctorOwnsPatient, getPool, insertAuditRow, patientInDoctorScopeWith } from "./db";
 import { cephDraftVersionWith } from "./canonical-ceph-draft-version";
+import { CephProvenanceSourcesChanged, findCephCompletionReplay, sealCephCompletion } from "./ceph-provenance/capture";
+import { parseCephSourceIdentity, type CephSourceIdentity } from "./ceph-provenance/witness";
 import type { VerifiedDurableSession } from "./staff-durable-session";
 import { assertStaffOperation, staffOperationIdentity, staffOperationPatientScope, withStaffOperation } from "./staff-operation-runtime";
 
 export class CanonicalCephCompleteRefusal extends Error {
-  constructor(readonly code: "invalid_ceph_complete" | "ceph_complete_not_found" | "ceph_complete_conflict" | "ceph_complete_reference_invalid" | "ceph_complete_conditions", readonly status: 400 | 404 | 409, message: string) {
+  constructor(readonly code: "invalid_ceph_complete" | "ceph_complete_not_found" | "ceph_complete_conflict" | "ceph_complete_reference_invalid" | "ceph_complete_conditions" | "ceph_complete_sources_changed" | "ceph_complete_provenance_unavailable", readonly status: 400 | 404 | 409, message: string) {
     super(message); this.name = "CanonicalCephCompleteRefusal";
   }
 }
@@ -15,8 +17,12 @@ export function parseCanonicalCephComplete(rawId: string, body: unknown) {
   const id = Number(rawId), invalid = () => new CanonicalCephCompleteRefusal("invalid_ceph_complete", 400, "اعتماد الدراسة يتطلب قراءة المسودة الحالية وتأكيدًا صريحًا.");
   if (!/^[1-9]\d*$/.test(rawId) || !Number.isSafeInteger(id) || id > 2147483647 || !body || typeof body !== "object" || Array.isArray(body)) throw invalid();
   const value = body as Record<string, unknown>;
-  if (Object.keys(value).join(",") !== "expectedVersion" || typeof value.expectedVersion !== "string" || !/^[a-f0-9]{64}$/.test(value.expectedVersion)) throw invalid();
-  return { id, expectedVersion: value.expectedVersion };
+  const keys = Object.keys(value).sort().join(",");
+  if ((keys !== "expectedVersion" && keys !== "expectedSources,expectedVersion") || typeof value.expectedVersion !== "string" || !/^[a-f0-9]{64}$/.test(value.expectedVersion)) throw invalid();
+  // Optional: the sources the clinician's screen showed. Present → compared with the server capture and refused on change.
+  let expectedSources: CephSourceIdentity | null = null;
+  if (keys === "expectedSources,expectedVersion") { expectedSources = parseCephSourceIdentity(value.expectedSources); if (!expectedSources) throw invalid(); }
+  return { id, expectedVersion: value.expectedVersion, expectedSources };
 }
 
 /** Explicit approval of one observed saved draft; no new image access or historical repair. */
@@ -36,6 +42,14 @@ export async function commandCanonicalCephComplete(session: VerifiedDurableSessi
       const { rows: [study] } = await client.query<{ status: string; document_id: number; ortho_case_id: number | null }>(
         "SELECT status,document_id,ortho_case_id FROM ceph_analyses WHERE id=$1 AND patient_id=$2 AND status<>'discarded' FOR UPDATE NOWAIT", [input.id, initial.patient_id]);
       if (!study) throw missing();
+      if (study.status === "completed") {
+        // Safe retry: the same actor resubmitting the very draft version it approved gets the original receipt.
+        const replayActor = await staffOperationIdentity(client, handle, action);
+        if (await findCephCompletionReplay(client, input.id, input.expectedVersion, replayActor.userId)) {
+          await assertStaffOperation(client, handle, action);
+          return { ok: true as const, studyId: input.id, status: "completed" as const };
+        }
+      }
       if (study.status !== "draft") throw conflict();
       const document = await client.query("SELECT id FROM patient_documents WHERE id=$1 AND patient_id=$2 FOR SHARE NOWAIT", [study.document_id, initial.patient_id]);
       if (!document.rows.length) throw new CanonicalCephCompleteRefusal("ceph_complete_reference_invalid", 409, "تعذّر التحقق من مراجع المسودة؛ لم تتغيّر حالتها.");
@@ -47,6 +61,14 @@ export async function commandCanonicalCephComplete(session: VerifiedDurableSessi
       const actor = await staffOperationIdentity(client, handle, action);
       const done = await completeCephAnalysisInTransaction(client, input.id, actor.username);
       if (!done.result.ok) throw new CanonicalCephCompleteRefusal("ceph_complete_conditions", 409, done.result.message ?? "تعذّر اعتماد المسودة الحالية.");
+      try {
+        await sealCephCompletion(client, { analysisId: input.id, actor: { userId: actor.userId, username: actor.username, role: actor.role },
+          approvedDraftVersion: input.expectedVersion, expectedSources: input.expectedSources, measurements: done.result.measurements ?? [] });
+      } catch (error) {
+        if (error instanceof CephProvenanceSourcesChanged) throw new CanonicalCephCompleteRefusal("ceph_complete_sources_changed", 409, "تغيّرت صورة الأشعة أو مجموعة المرجع أو محرك الحساب منذ مراجعتك. حدّث الدراسة وراجعها قبل الاعتماد؛ لم يُعتمد شيء.");
+        if (error instanceof Error && /^ceph_(provenance|witness)_/.test(error.message)) throw new CanonicalCephCompleteRefusal("ceph_complete_provenance_unavailable", 409, "تعذّر إنشاء سجل اعتماد موثّق من البيانات المحفوظة؛ لم يُعتمد شيء. راجع المعالم والتشخيص والمعايرة.");
+        throw error;
+      }
       await insertAuditRow(client, { action: "ceph.complete", entity: "ceph_analysis", entityId: input.id, entityLabel: done.auditLabel, actor: actor.username, actorRole: actor.role });
       const budget = (await client.query<{ landmarks: string; measurements: string; bytes: string }>(`SELECT
         (SELECT count(*)::text FROM ceph_landmarks WHERE analysis_id=$1) landmarks,
