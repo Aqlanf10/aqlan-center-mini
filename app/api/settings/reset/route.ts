@@ -3,7 +3,7 @@ import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { clinicResetPreview, findUserByUsername, resetClinicData } from "@/lib/db";
 import { verifyPassword } from "@/lib/auth";
-import { ProtectedLabHistoryError, ProtectedOrthoFollowupHistoryError, ProtectedInvoiceActionHistoryError, ProtectedPatientNumberHistoryError, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE, RESET_PREVIEW_GROUPS, isResetPhrase } from "@/lib/clinic-reset";
+import { ProtectedCephProvenanceHistoryError, ProtectedLabHistoryError, ProtectedOrthoFollowupHistoryError, ProtectedInvoiceActionHistoryError, ProtectedPatientNumberHistoryError, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_CONFIRM_PHRASE, RESET_PREVIEW_GROUPS, isResetPhrase } from "@/lib/clinic-reset";
 import { ProtectedInventoryHistoryError } from "@/lib/inventory-domain/reset-protection";
 import { removeFileByKey } from "@/lib/files";
 import { runVerifiedManualBackup } from "@/lib/manual-backup";
@@ -54,6 +54,7 @@ export async function POST(request: Request) {
     body = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   } catch (error) {
     if (error instanceof ProtectedLabHistoryError) return noStore({ message: error.message, code: "protected-lab-history" }, 409);
+    if (error instanceof ProtectedCephProvenanceHistoryError) return noStore({ message: error.message, code: "protected-ceph-provenance-history" }, 409);
     const bounded = bodyErrorResponse(error);
     if (bounded) return bounded;
     return noStore({ message: "طلب غير صالح." }, 400);
@@ -80,6 +81,7 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     if (error instanceof ProtectedLabHistoryError) return noStore({ message: error.message, code: "protected-lab-history" }, 409);
+    if (error instanceof ProtectedCephProvenanceHistoryError) return noStore({ message: error.message, code: "protected-ceph-provenance-history" }, 409);
     if (error instanceof ProtectedPurchaseHistoryError) return noStore({ message: error.message, code: "protected-purchase-history" }, 409);
     if (error instanceof ProtectedOrthoFollowupHistoryError) return noStore({ message: error.message, code: "protected-ortho-followup-history" }, 409);
     if (error instanceof ProtectedInvoiceActionHistoryError) return noStore({ message: error.message, code: "protected-invoice-action-history" }, 409);

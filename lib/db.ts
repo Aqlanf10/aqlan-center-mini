@@ -16,6 +16,7 @@ import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapsh
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
 import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "./commission-participation-schema";
+import { CEPH_COMPLETION_PROVENANCE_SQL } from "./ceph-provenance/schema";
 import { loadCaseParticipationsAt } from "./commission-participation-read";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
@@ -126,7 +127,7 @@ import { CHANNELS, SECRET_FIELDS, mergeSecrets, primarySecret, withDefaults as c
 import { decryptSecret, encryptSecret } from "./secretbox";
 import type { Referral, ReferralDraft } from "./referrals";
 import { LAB_READINESS_STATUSES, type PatientLabWork } from "./lab-readiness";
-import { LAB_HISTORY_TABLES, ProtectedLabHistoryError, ORTHO_FOLLOWUP_HISTORY_TABLES, ProtectedOrthoFollowupHistoryError, INVOICE_ACTION_HISTORY_TABLES, ProtectedInvoiceActionHistoryError, ProtectedPatientNumberHistoryError, AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
+import { CEPH_PROVENANCE_HISTORY_TABLES, ProtectedCephProvenanceHistoryError, LAB_HISTORY_TABLES, ProtectedLabHistoryError, ORTHO_FOLLOWUP_HISTORY_TABLES, ProtectedOrthoFollowupHistoryError, INVOICE_ACTION_HISTORY_TABLES, ProtectedInvoiceActionHistoryError, ProtectedPatientNumberHistoryError, AGREEMENT_HISTORY_TABLES, COLLECTION_ATTEMPT_HISTORY_TABLES, PURCHASE_RESET_FENCE, ProtectedAgreementHistoryError, ProtectedCollectionAttemptHistoryError, ProtectedPurchaseHistoryError, RESET_SEQUENCES, RESET_WIPE_TABLES } from "./clinic-reset";
 import { protectInventoryHistoryForReset } from "./inventory-domain/reset-protection";
 import { rotateResetStaffIdentityInTransaction } from "./staff-authority-lifecycle.mjs";
 import { classifyImportRows, importSummary, type ImportRow } from "./patient-import";
@@ -2137,6 +2138,7 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0126", name: "commission_case_participations", filename: "0126_commission_case_participations.sql", sql: COMMISSION_CASE_PARTICIPATIONS_SQL, checksum: checksumOf(COMMISSION_CASE_PARTICIPATIONS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0137", name: "ceph_completion_provenance", filename: "0137_ceph_completion_provenance.sql", sql: CEPH_COMPLETION_PROVENANCE_SQL, checksum: checksumOf(CEPH_COMPLETION_PROVENANCE_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -29677,6 +29679,10 @@ export async function resetClinicData<F>(
       const { rows: [labHistory] } = await client.query<{ exists: boolean }>(
         `SELECT ${LAB_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
       if (labHistory.exists) throw new ProtectedLabHistoryError();
+      await client.query(`LOCK TABLE ${CEPH_PROVENANCE_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
+      const { rows: [cephHistory] } = await client.query<{ exists: boolean }>(
+        `SELECT ${CEPH_PROVENANCE_HISTORY_TABLES.map((table) => `EXISTS (SELECT 1 FROM ${table})`).join(" OR ")} AS exists`);
+      if (cephHistory.exists) throw new ProtectedCephProvenanceHistoryError();
       // Fence every durable success/refusal before backup; EXCLUSIVE permits backup reads.
       await client.query(`LOCK TABLE ${INVOICE_ACTION_HISTORY_TABLES.join(", ")} IN EXCLUSIVE MODE`);
       const { rows: [invoiceActionHistory] } = await client.query<{ exists: boolean }>(
@@ -29715,7 +29721,7 @@ export async function resetClinicData<F>(
       // provably empty under the held lock; including it satisfies the movement
       // FK. The table trigger rechecks emptiness under TRUNCATE's stronger lock.
       const emptyInventorySuffix = emptyInventoryTables.length ? `, ${emptyInventoryTables.join(", ")}` : "";
-      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")}, ${INVOICE_ACTION_HISTORY_TABLES.join(", ")}, ${LAB_HISTORY_TABLES.join(", ")}${followupTables.length ? ", " + followupTables.join(", ") : ""}${emptyInventorySuffix} RESTART IDENTITY`);
+      await client.query(`TRUNCATE TABLE ${RESET_WIPE_TABLES.join(", ")}, inventory_purchase_receipts, ${AGREEMENT_HISTORY_TABLES.join(", ")}, ${COLLECTION_ATTEMPT_HISTORY_TABLES.join(", ")}, ${INVOICE_ACTION_HISTORY_TABLES.join(", ")}, ${LAB_HISTORY_TABLES.join(", ")}, ${CEPH_PROVENANCE_HISTORY_TABLES.join(", ")}${followupTables.length ? ", " + followupTables.join(", ") : ""}${emptyInventorySuffix} RESTART IDENTITY`);
       for (const sequence of RESET_SEQUENCES) {
         await client.query(`ALTER SEQUENCE ${sequence} RESTART WITH 1`);
       }

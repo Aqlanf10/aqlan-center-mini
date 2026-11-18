@@ -685,3 +685,23 @@ here. Decisions commit with their audit row in one transaction under the case ro
 lock. Rollback of application code must not delete the table or migration
 registry history. Exact-head CI and Staging verification remain required before
 Production rollout.
+
+### 0137_ceph_completion_provenance.sql
+
+Adds `ceph_completion_provenance`: one sealed completion record per NEW
+cephalometric completion (adapted selectively from #530's 0113/0114, on branch
+`feat/claude-ceph-provenance-20261118`). The record holds the witness JSON and
+its SHA-256, the draft version the request approved, the acting user and the
+seal time. Triggers make the record immutable (an empty table may be truncated
+by a fresh restore), make a witnessed analysis and its landmarks, measurements
+and diagnosis immutable (a legal patient merge may still move `patient_id`), and
+require the seal to match the analysis completion signature at commit.
+
+Additive only: no existing table, column or published migration changes, and
+historical completions are never back-filled; they read as "unversioned".
+Clinic reset is refused once any sealed record exists. Numbered and runtime SQL
+use identical bytes. 0137 follows 0136 (grouped lab orders, separate branch);
+0113/0114 belong to #530's line and are not reused. Synthetic tests only; no
+clinical enablement. Exact-head CI and Staging verification remain required
+before any Production rollout.
+

@@ -8,6 +8,11 @@ import { validatePostgresTestTarget } from "./_safe-target";
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
   // Exact case-participation suffix (finance, owner decision 2026-11-11) directly after the shade migration.
+  // Exact ceph completion provenance suffix (0137) directly after case participation.
+  if (files.at(-1)?.version === "0137") {
+    if (files.at(-2)?.version !== "0126" || files.at(-1)?.filename !== "0137_ceph_completion_provenance.sql") throw new Error("Unreviewed ceph provenance migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   if (files.at(-1)?.version === "0126") {
     if (files.at(-2)?.version !== "0089" || files.at(-1)?.filename !== "0126_commission_case_participations.sql") throw new Error("Unreviewed case participation migration suffix.");
     return periodontalCandidateMigrationVersion(files.slice(0, -1));

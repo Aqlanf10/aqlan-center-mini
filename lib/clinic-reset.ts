@@ -171,7 +171,14 @@ export class ProtectedLabHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد حفظ هويات أعمال المختبر أو نتائج طلباتها. لم يُمسح شيء؛ يجب الاحتفاظ بالمصادر ومفاتيح إعادة المحاولة."); this.name = "ProtectedLabHistoryError"; }
 }
 
+/** Sealed cephalometric completion evidence (0137) must survive reset; reset is refused once any exists. */
+export const CEPH_PROVENANCE_HISTORY_TABLES = ["ceph_completion_provenance"] as const;
+export class ProtectedCephProvenanceHistoryError extends Error {
+  constructor() { super("لا يمكن إعادة الضبط بعد اعتماد تحليل سيفالومتري بسجل اعتماد موثّق؛ يجب الاحتفاظ بسجل الاعتماد. لم يُمسح شيء."); this.name = "ProtectedCephProvenanceHistoryError"; }
+}
+
 export const RESET_KEEP_TABLES = [
+  ...CEPH_PROVENANCE_HISTORY_TABLES,
   ...LAB_HISTORY_TABLES,
   "lab_work_intent_schema",
   ...ORTHO_FOLLOWUP_HISTORY_TABLES,
