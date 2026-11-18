@@ -6,6 +6,7 @@ import { isCanonicalCephStudy,type CanonicalCephStudy as SavedCephStudy } from "
 import { CanonicalCephCopy } from "./CanonicalCephCopy";
 import { CanonicalCephComplete } from "./CanonicalCephComplete";
 import { CanonicalCephDraftDiagnosis } from "./CanonicalCephDraftDiagnosis";
+import { cephProvenanceLabelAr } from "@/lib/ceph-provenance/labels";
 
 /** Saved study projection with independently authorized draft diagnosis and correction actions.
  * Never mounts the legacy tracer or requests its image, plan or financial endpoints. */
@@ -66,6 +67,7 @@ export function CanonicalCephStudy({ patientId,studyId,ownerKey,canAnalyze,onCop
           <div><dt className="text-xs text-slate-500">اعتمدها</dt><dd>{feed.analysis.completedBy??"غير مسجل"}</dd></div>
           <div className="sm:col-span-2"><dt className="text-xs text-slate-500">ملاحظة الدراسة</dt><dd className="whitespace-pre-wrap">{feed.analysis.note??"لا توجد ملاحظة"}</dd></div>
         </dl>
+        {cephProvenanceLabelAr(feed.provenance)?<p data-testid="ceph-provenance-label" className={`text-xs ${feed.provenance?.state==="versioned"?"text-navy-800":"text-amber-800"}`}>{cephProvenanceLabelAr(feed.provenance)}</p>:null}
         {feed.analysis.imageState==="unavailable"?<p className="text-xs text-amber-800">مرجع الصورة غير متاح؛ هذه بيانات الدراسة المسجلة فقط.</p>:null}
         <h5 className="font-bold">المعايرة المسجلة</h5>
         {feed.analysis.calibration?<dl className="grid grid-cols-2 gap-2 text-xs" dir="ltr">

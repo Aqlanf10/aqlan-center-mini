@@ -1,8 +1,10 @@
 import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import {
-  getCephReferenceSet, getCephStudy, getPatient, getSettingsSafe,
+  getCephReferenceSet, getCephStudy, getPatient, getPool, getSettingsSafe,
 } from "@/lib/db";
+import { readCephProvenanceState } from "@/lib/ceph-provenance/capture";
+import { cephProvenanceLabelAr } from "@/lib/ceph-provenance/labels";
 import {
   computeAll, enrichWithRefs, getClinicalInterpretation, getSeverityStars, interpret, MEASUREMENTS, projectOnLine,
   type LandmarkCode, type LandmarkMap, type MeasurementResult,
@@ -103,6 +105,8 @@ export default async function CephPrintReportPage({
 
   // C2 + Kim: سبب غياب القيمة أو تحذير التعريف — نصٌّ فقط بجانب الرقم، لا يغيّره.
   const availability = explainAll(points, study.analysis.mmPerPixel ?? NaN);
+  // 0137: سجل الاعتماد الموثّق — يُقرأ ويُطابَق مع المحفوظ الآن، ولا يُعاد حساب شيء.
+  const provenanceNote = cephProvenanceLabelAr(await readCephProvenanceState(getPool(), study.analysis.id));
   const fromApprovedSnapshot = study.analysis.status === "completed" && study.measurements.length > 0;
   // حساب القياسات أو قراءة اللقطة المعتمدة
   const rawResults = computeAll(points, study.analysis.mmPerPixel ?? NaN);
@@ -559,6 +563,7 @@ export default async function CephPrintReportPage({
         <div className="sign-row" style={{ marginTop: "6mm" }}>
           <div>
             <p><b>حرر واعُتمد بواسطة: </b>{study.analysis.completedBy || study.diagnosis?.createdBy || session.username}</p>
+            {provenanceNote ? <p data-testid="ceph-print-provenance" style={{ fontSize: "6.5pt", color: "#475569" }}>{provenanceNote}</p> : null}
             <p style={{ color: "#64748b", fontSize: "7pt" }}>
               تاريخ الاعتماد: {study.analysis.completedAt ? friendlyDateLong(study.analysis.completedAt.split("T")[0]) : "مسودة قيد المراجعة"}
             </p>
