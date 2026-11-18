@@ -45,7 +45,7 @@ export async function commandCanonicalCephComplete(session: VerifiedDurableSessi
       if (study.status === "completed") {
         // Safe retry: the same actor resubmitting the very draft version it approved gets the original receipt.
         const replayActor = await staffOperationIdentity(client, handle, action);
-        if (await findCephCompletionReplay(client, input.id, input.expectedVersion, replayActor.userId)) {
+        if (await findCephCompletionReplay(client, input.id, input.expectedVersion, replayActor.userId, input.expectedSources)) {
           await assertStaffOperation(client, handle, action);
           return { ok: true as const, studyId: input.id, status: "completed" as const };
         }

@@ -31,7 +31,7 @@ it("upgrades a 0126 database with a historical completion additively", async () 
   expect((await upgrade.query("SELECT version FROM schema_migrations WHERE version='0137'")).rows).toHaveLength(1);
   expect(await triggers(upgrade)).toEqual([...TRIGGERS].sort());
   expect((await upgrade.query("SELECT to_jsonb(a) AS a FROM ceph_analyses a WHERE id=$1", [historical.id])).rows[0].a).toEqual(before);
-  expect(await readCephProvenanceState(upgrade, historical.id)).toEqual({ state: "unversioned" });
+  expect(await readCephProvenanceState(upgrade, historical.id)).toEqual({ state: "unversioned", reason: "completed_before_provenance" });
   expect((await upgrade.query("SELECT count(*)::int n FROM ceph_completion_provenance")).rows[0].n).toBe(0);
   // Historical (unwitnessed) studies keep their previous behaviour.
   await upgrade.query("UPDATE ceph_analyses SET note='SYN historical note' WHERE id=$1", [historical.id]);

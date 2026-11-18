@@ -24,6 +24,11 @@ export interface CephReferenceSnapshot {
   readonly values: readonly { readonly code: string; readonly mean: number; readonly sd: number }[];
 }
 
+export interface CephRetainedRows {
+  readonly landmarks: readonly { readonly code: string; readonly x: number; readonly y: number; readonly source: string; readonly confirmedBy: string; readonly confirmedAt: string }[];
+  readonly measurements: readonly { readonly code: string; readonly value: number }[];
+}
+
 export interface CephMeasurementWitness {
   readonly code: string;
   readonly value: number;
@@ -49,6 +54,8 @@ export interface CephCompletionWitness {
   readonly referenceSet: CephReferenceSnapshot | null;
   readonly sourceIdentity: CephSourceIdentity;
   readonly measurements: readonly CephMeasurementWitness[];
+  /** Stored rows outside the engine (unknown historical codes), kept verbatim so a reader can check the FULL set. */
+  readonly retained: CephRetainedRows;
   readonly clinicalMeaning: "clinician_attested_inputs_not_independent_clinical_validation";
   readonly sourceIdentityMeaning: "submitted_source_identity_matches_server_capture" | "server_captured_at_completion_not_confirmed_as_viewed";
 }
@@ -86,6 +93,7 @@ export function buildCephCompletionWitness(input: {
   snapshot: CephCompletionSnapshot; image: CephCompletionWitness["image"];
   landmarkReviews: CephCompletionWitness["landmarkReviews"]; referenceSet: CephReferenceSnapshot | null;
   measurements: readonly { code: string; value: number }[]; expectedSources: CephSourceIdentity | null;
+  retained?: CephRetainedRows;
 }): CephCompletionWitness {
   const snapshot = parseCephCompletionSnapshot(input.snapshot);
   if (!snapshot) throw new Error("ceph_witness_snapshot_invalid");
@@ -117,6 +125,7 @@ export function buildCephCompletionWitness(input: {
     schemaVersion: 1, analysisId: input.analysisId, recordedPatientId: snapshot.patientId, actor: input.actor, sealedAt: input.sealedAt,
     approvedDraftVersion: input.approvedDraftVersion, snapshot, image: input.image, landmarkReviews: [...input.landmarkReviews].sort(byCode),
     referenceSet, sourceIdentity, measurements,
+    retained: { landmarks: [...(input.retained?.landmarks ?? [])].sort(byCode), measurements: [...(input.retained?.measurements ?? [])].sort(byCode) },
     clinicalMeaning: "clinician_attested_inputs_not_independent_clinical_validation",
     sourceIdentityMeaning: input.expectedSources ? "submitted_source_identity_matches_server_capture" : "server_captured_at_completion_not_confirmed_as_viewed",
   }));
@@ -128,7 +137,7 @@ export function buildCephCompletionWitness(input: {
 export function decodeCephCompletionWitness(raw: unknown, expectedHash: unknown): CephCompletionWitness | null {
   try {
     if (!obj(raw) || !sha(expectedHash) || cephContentHash(raw) !== expectedHash
-      || !keys(raw, ["schemaVersion", "analysisId", "recordedPatientId", "actor", "sealedAt", "approvedDraftVersion", "snapshot", "image", "landmarkReviews", "referenceSet", "sourceIdentity", "measurements", "clinicalMeaning", "sourceIdentityMeaning"])
+      || !keys(raw, ["schemaVersion", "analysisId", "recordedPatientId", "actor", "sealedAt", "approvedDraftVersion", "snapshot", "image", "landmarkReviews", "referenceSet", "sourceIdentity", "measurements", "retained", "clinicalMeaning", "sourceIdentityMeaning"])
       || raw.schemaVersion !== 1 || !posId(raw.analysisId) || !posId(raw.recordedPatientId) || !iso(raw.sealedAt) || !sha(raw.approvedDraftVersion)
       || raw.clinicalMeaning !== "clinician_attested_inputs_not_independent_clinical_validation"
       || !["submitted_source_identity_matches_server_capture", "server_captured_at_completion_not_confirmed_as_viewed"].includes(raw.sourceIdentityMeaning as string)) return null;
@@ -174,6 +183,21 @@ export function decodeCephCompletionWitness(raw: unknown, expectedHash: unknown)
         if (!v || v.mean !== r.mean || v.sd !== r.sd || r.source !== `${(ref as Record<string, unknown>).key}@${(ref as Record<string, unknown>).version}`) return null;
       } else if (r.origin !== "builtin_definition_fallback") return null;
       codes.add(m.code);
+    }
+    const retained = raw.retained;
+    if (!obj(retained) || !keys(retained, ["landmarks", "measurements"]) || !Array.isArray(retained.landmarks) || !Array.isArray(retained.measurements)
+      || retained.landmarks.length > 256 || retained.measurements.length > 256) return null;
+    const known = new Set<string>(snapshot.landmarks.map((p) => p.code));
+    const retainedLandmarkCodes = new Set<string>();
+    for (const l of retained.landmarks) {
+      if (!obj(l) || !keys(l, ["code", "x", "y", "source", "confirmedBy", "confirmedAt"]) || !str(l.code) || l.code.length > 100 || known.has(l.code)
+        || retainedLandmarkCodes.has(l.code) || !num(l.x) || !num(l.y) || !str(l.source) || !str(l.confirmedBy) || !iso(l.confirmedAt)) return null;
+      retainedLandmarkCodes.add(l.code);
+    }
+    const retainedCodes = new Set<string>();
+    for (const m of retained.measurements) {
+      if (!obj(m) || !keys(m, ["code", "value"]) || !str(m.code) || m.code.length > 100 || codes.has(m.code) || retainedCodes.has(m.code) || !num(m.value)) return null;
+      retainedCodes.add(m.code);
     }
     return raw as unknown as CephCompletionWitness;
   } catch { return null; }

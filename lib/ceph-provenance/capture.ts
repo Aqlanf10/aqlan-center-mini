@@ -11,7 +11,7 @@ import { isCephLandmarkCode } from "../ceph";
 import { cephContentHash } from "./canonical-json";
 import { parseCephCompletionSnapshot, type CephCompletionSnapshot } from "./snapshot";
 import {
-  buildCephCompletionWitness, cephSourceIdentity, decodeCephCompletionWitness,
+  buildCephCompletionWitness, cephSourceIdentity, decodeCephCompletionWitness, sameCephSourceIdentity,
   type CephCompletionWitness, type CephReferenceSnapshot, type CephSourceIdentity,
 } from "./witness";
 
@@ -52,11 +52,19 @@ async function readSnapshot(q: Query, analysisId: number): Promise<CephCompletio
   });
 }
 
-async function readReviews(q: Query, analysisId: number) {
-  const { rows } = await q.query<{ code: string; confirmedBy: string; confirmedAt: string }>(
-    `SELECT code,confirmed_by AS "confirmedBy",to_char(confirmed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "confirmedAt"
+async function readLandmarkRows(q: Query, analysisId: number) {
+  const { rows } = await q.query<{ code: string; x: number; y: number; source: string; confirmedBy: string; confirmedAt: string }>(
+    `SELECT code,x,y,source,confirmed_by AS "confirmedBy",to_char(confirmed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "confirmedAt"
      FROM ceph_landmarks WHERE analysis_id=$1 ORDER BY code`, [analysisId]);
-  return rows.filter((r) => isCephLandmarkCode(r.code));
+  return {
+    reviews: rows.filter((r) => isCephLandmarkCode(r.code)).map((r) => ({ code: r.code, confirmedBy: r.confirmedBy, confirmedAt: r.confirmedAt })),
+    retained: rows.filter((r) => !isCephLandmarkCode(r.code)).map((r) => ({ code: r.code, x: Number(r.x), y: Number(r.y), source: r.source, confirmedBy: r.confirmedBy, confirmedAt: r.confirmedAt })),
+  };
+}
+
+async function readStoredMeasurements(q: Query, analysisId: number) {
+  const { rows } = await q.query<{ code: string; value: number }>("SELECT code,value FROM ceph_measurements WHERE analysis_id=$1 ORDER BY code", [analysisId]);
+  return rows.map((m) => ({ code: m.code, value: Number(m.value) }));
 }
 
 export class CephProvenanceSourcesChanged extends Error { constructor() { super("ceph_reviewed_sources_changed"); } }
@@ -76,11 +84,15 @@ export async function sealCephCompletion(client: DbClient, input: {
   const { rows: [sealed] } = await client.query<{ at: string; status: string; completed_by: string | null }>(
     `SELECT to_char(completed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS at,status,completed_by FROM ceph_analyses WHERE id=$1`, [input.analysisId]);
   if (!sealed || sealed.status !== "completed" || sealed.completed_by !== input.actor.username || !sealed.at) throw new Error("ceph_provenance_signature_unavailable");
+  const landmarks = await readLandmarkRows(client, input.analysisId);
+  const stored = await readStoredMeasurements(client, input.analysisId);
+  const engineCodes = new Set(input.measurements.map((m) => m.code));
   let witness: CephCompletionWitness;
   try {
     witness = buildCephCompletionWitness({ analysisId: input.analysisId, actor: input.actor, sealedAt: sealed.at, approvedDraftVersion: input.approvedDraftVersion,
       snapshot, image: { documentId: image.documentId, sha256: image.sha256, width: image.width, height: image.height },
-      landmarkReviews: await readReviews(client, input.analysisId), referenceSet, measurements: input.measurements, expectedSources: input.expectedSources });
+      landmarkReviews: landmarks.reviews, referenceSet, measurements: input.measurements, expectedSources: input.expectedSources,
+      retained: { landmarks: landmarks.retained, measurements: stored.filter((m) => !engineCodes.has(m.code)) } });
   } catch (error) {
     if (error instanceof Error && error.message === "ceph_reviewed_sources_changed") throw new CephProvenanceSourcesChanged();
     throw error;
@@ -93,15 +105,29 @@ export async function sealCephCompletion(client: DbClient, input: {
   return { witnessSha256 };
 }
 
-/** A same-actor retry of the same approved draft version returns the original receipt instead of a conflict. */
-export async function findCephCompletionReplay(q: Query, analysisId: number, approvedDraftVersion: string, actorUserId: number): Promise<boolean> {
-  const { rows } = await q.query("SELECT 1 FROM ceph_completion_provenance WHERE analysis_id=$1 AND approved_draft_version=$2 AND actor_user_id=$3", [analysisId, approvedDraftVersion, actorUserId]);
-  return rows.length === 1;
+/**
+ * A same-actor retry returns the original receipt only if it is the SAME request: same approved draft version, same
+ * actor, and the same reviewed sources (or, equally, none). A request with different or missing sources is a different
+ * request and is refused as a conflict, never acknowledged as a replay.
+ */
+export async function findCephCompletionReplay(q: Query, analysisId: number, approvedDraftVersion: string, actorUserId: number,
+  expectedSources: CephSourceIdentity | null): Promise<boolean> {
+  const { rows: [p] } = await q.query<{ witness: unknown; witness_sha256: string }>(
+    "SELECT witness,witness_sha256 FROM ceph_completion_provenance WHERE analysis_id=$1 AND approved_draft_version=$2 AND actor_user_id=$3",
+    [analysisId, approvedDraftVersion, actorUserId]);
+  if (!p) return false;
+  const witness = decodeCephCompletionWitness(p.witness, p.witness_sha256);
+  if (!witness) return false;
+  if (expectedSources === null) return witness.sourceIdentityMeaning === "server_captured_at_completion_not_confirmed_as_viewed";
+  return witness.sourceIdentityMeaning === "submitted_source_identity_matches_server_capture" && sameCephSourceIdentity(witness.sourceIdentity, expectedSources);
 }
 
 export type CephProvenanceState =
   | { readonly state: "not-completed" }
-  | { readonly state: "unversioned" }
+  /** No sealed record. `completed_before_provenance`: completed before 0137 was applied (historical).
+   * `completed_without_seal`: completed after 0137 through a path that does not seal (the legacy session path).
+   * Neither is recomputed or back-filled; the canonical path is not silently enabled for them. */
+  | { readonly state: "unversioned"; readonly reason: "completed_before_provenance" | "completed_without_seal" | "provenance_start_unknown" }
   | { readonly state: "integrity-unavailable"; readonly reason: string }
   | { readonly state: "versioned"; readonly witnessSha256: string; readonly sealedAt: string; readonly sealedBy: string;
       readonly engineVersion: string; readonly sourceIdentityMeaning: CephCompletionWitness["sourceIdentityMeaning"];
@@ -114,7 +140,12 @@ export async function readCephProvenanceState(q: Query, analysisId: number): Pro
   if (!a || a.status !== "completed") return { state: "not-completed" };
   const { rows: [p] } = await q.query<{ witness: unknown; witness_sha256: string; sealed_by: string; actor_user_id: number }>(
     "SELECT witness,witness_sha256,sealed_by,actor_user_id FROM ceph_completion_provenance WHERE analysis_id=$1", [analysisId]);
-  if (!p) return { state: "unversioned" };
+  if (!p) {
+    const { rows: [m] } = await q.query<{ before: boolean | null }>(
+      "SELECT (SELECT completed_at FROM ceph_analyses WHERE id=$1) < (SELECT applied_at FROM schema_migrations WHERE version='0137') AS before", [analysisId]);
+    const reason = m?.before === true ? "completed_before_provenance" : m?.before === false ? "completed_without_seal" : "provenance_start_unknown";
+    return { state: "unversioned", reason };
+  }
   const witness = decodeCephCompletionWitness(p.witness, p.witness_sha256);
   if (!witness || witness.analysisId !== analysisId || witness.actor.username !== p.sealed_by || witness.actor.userId !== p.actor_user_id
     || witness.sealedAt !== a.completed_at || a.completed_by !== p.sealed_by) return { state: "integrity-unavailable", reason: "invalid_completion_witness" };
@@ -122,9 +153,12 @@ export async function readCephProvenanceState(q: Query, analysisId: number): Pro
   if (!current || cephContentHash({ ...current, patientId: witness.recordedPatientId }) !== cephContentHash(witness.snapshot)) return { state: "integrity-unavailable", reason: "stored_inputs_differ_from_witness" };
   const { rows: image } = await q.query<{ sha256: string }>("SELECT sha256 FROM patient_documents WHERE id=$1", [witness.image.documentId]);
   if (image[0]?.sha256 !== witness.image.sha256) return { state: "integrity-unavailable", reason: "source_image_changed" };
-  const { rows: stored } = await q.query<{ code: string; value: number }>("SELECT code,value FROM ceph_measurements WHERE analysis_id=$1", [analysisId]);
-  const byCode = new Map(stored.map((m) => [m.code, Number(m.value)]));
-  if (witness.measurements.some((m) => byCode.get(m.code) !== m.value)) return { state: "integrity-unavailable", reason: "stored_values_differ_from_witness" };
+  // The FULL stored set must equal what was sealed: engine values plus retained rows — no change, no removal, no addition.
+  const sealedValues = [...witness.measurements.map((m) => ({ code: m.code, value: m.value })), ...witness.retained.measurements].sort((x, y) => (x.code < y.code ? -1 : 1));
+  if (cephContentHash(await readStoredMeasurements(q, analysisId)) !== cephContentHash(sealedValues)) return { state: "integrity-unavailable", reason: "stored_values_differ_from_witness" };
+  const landmarkRows = await readLandmarkRows(q, analysisId);
+  if (cephContentHash(landmarkRows.reviews) !== cephContentHash(witness.landmarkReviews) || cephContentHash(landmarkRows.retained) !== cephContentHash(witness.retained.landmarks))
+    return { state: "integrity-unavailable", reason: "landmark_reviews_differ_from_witness" };
   return { state: "versioned", witnessSha256: p.witness_sha256, sealedAt: witness.sealedAt, sealedBy: witness.actor.username,
     engineVersion: witness.sourceIdentity.engineVersion, sourceIdentityMeaning: witness.sourceIdentityMeaning,
     measurementsWithAssumption: witness.measurements.filter((m) => m.completeness === "measured-with-assumption").length,

@@ -117,3 +117,22 @@ it("HTTP: canceled durable session refuses approval without fallback; a newly ad
  await journey.db.query("UPDATE users SET is_active=true WHERE id=$1",[journey.ids.own]);
  const fresh=(await journey.login("own")).cookie;expect((await complete(fresh,studyId,input)).status).toBe(200);expect(await audits()).toBe(1);
 });
+
+// 0137 provenance over real HTTP: the reviewed sources from the study read are sent back; the read then reports a
+// sealed record; an identical retry returns the same receipt; a retry with altered sources is a conflict.
+it("HTTP: completion with reviewed sources seals one record and the study read reports it", async () => {
+  const cookie = (await journey.login("own")).cookie;
+  const read = await journey.api(`/api/ceph/${studyId}`, cookie); expect(read.status).toBe(200);
+  const seen = await read.json();
+  expect(seen.completionSources).toMatchObject({ schemaVersion: 1, engineId: "aqlan-legacy-ceph" });
+  const body = { expectedVersion: seen.discardVersion, expectedSources: seen.completionSources };
+  const first = await complete(cookie, studyId, body); expect(first.status).toBe(200);
+  expect(await first.json()).toEqual({ ok: true, studyId, status: "completed" });
+  const retry = await complete(cookie, studyId, body); expect(retry.status).toBe(200);
+  const altered = await complete(cookie, studyId, { ...body, expectedSources: { ...seen.completionSources, imageSha256: "d".repeat(64) } });
+  expect(altered.status).toBe(409);
+  expect((await journey.db.query("SELECT count(*)::int n FROM ceph_completion_provenance WHERE analysis_id=$1", [studyId])).rows[0].n).toBe(1);
+  expect(await audits()).toBe(1);
+  const after = await (await journey.api(`/api/ceph/${studyId}`, cookie)).json();
+  expect(after.provenance).toMatchObject({ state: "versioned", sealedBy: ACCOUNTS.own.username, sourceIdentityMeaning: "submitted_source_identity_matches_server_capture" });
+});

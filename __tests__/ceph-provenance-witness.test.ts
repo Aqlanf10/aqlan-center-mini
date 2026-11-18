@@ -144,3 +144,16 @@ describe("hash compatibility with #530 (owner review 6967467169)", () => {
     expect(cephContentHash([1, 2])).not.toBe(cephContentHash([2, 1]));
   });
 });
+
+describe("retained rows (owner review 6968168056 point 3)", () => {
+  it("records unknown historical rows verbatim and rejects any overlap with engine values or known landmarks", () => {
+    const retained = { landmarks: [{ code: "SYN_OLD", x: 1, y: 2, source: "manual", confirmedBy: "SYN", confirmedAt: "2026-11-18T07:00:00.000000Z" }], measurements: [{ code: "SYN_STORED", value: 42.125 }] };
+    const w = buildCephCompletionWitness({ ...base, expectedSources: null, retained });
+    expect(w.retained).toEqual(retained);
+    expect(decodeCephCompletionWitness(w, cephContentHash(w))).not.toBeNull();
+    const bad = (f: (c: Record<string, any>) => void) => { const c = JSON.parse(JSON.stringify(w)); f(c); return decodeCephCompletionWitness(c, cephContentHash(c)); };
+    expect(bad((c) => { c.retained.measurements.push({ code: "SNA", value: 1 }); })).toBeNull();
+    expect(bad((c) => { c.retained.landmarks.push({ ...retained.landmarks[0], code: "S" }); })).toBeNull();
+    expect(bad((c) => { delete c.retained; })).toBeNull();
+  });
+});

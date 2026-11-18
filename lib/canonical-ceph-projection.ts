@@ -52,7 +52,8 @@ export function isCanonicalCephStudy(value:unknown,patientId:number,studyId:numb
   if(a.calibration!==null&&(!a.calibration||![a.calibration.x1,a.calibration.y1,a.calibration.x2,a.calibration.y2,a.calibration.mm].every(n=>typeof n==="number"&&Number.isFinite(n))||a.calibration.mm<=0))return false;
   if(v.discardVersion!==undefined&&v.discardVersion!==null&&(a.status!=="draft"||typeof v.discardVersion!=="string"||!/^[a-f0-9]{64}$/.test(v.discardVersion)))return false;
   if(v.completionSources!==undefined&&(a.status!=="draft"||v.completionSources!==null&&!parseCephSourceIdentity(v.completionSources)))return false;
-  if(v.provenance!==undefined&&(a.status!=="completed"||!v.provenance||!["unversioned","integrity-unavailable","versioned"].includes(v.provenance.state)))return false;
+  if(v.provenance!==undefined&&(a.status!=="completed"||!v.provenance||!["unversioned","integrity-unavailable","versioned"].includes(v.provenance.state)
+    ||v.provenance.state==="unversioned"&&!["completed_before_provenance","completed_without_seal","provenance_start_unknown"].includes(v.provenance.reason)))return false;
   if(v.measurementsState!==(a.status==="completed"?"saved-approved":"saved-unapproved"))return false;
   if(!Array.isArray(v.landmarks)||v.landmarks.length>256||v.landmarks.some(p=>!p||typeof p.code!=="string"||!p.code.length||p.code.length>100||!Number.isFinite(p.x)||!Number.isFinite(p.y)||(p.source!=="manual"&&p.source!=="suggested")||typeof p.confirmedBy!=="string"))return false;
   if(!Array.isArray(v.measurements)||v.measurements.length>256||v.measurements.some(m=>!m||typeof m.code!=="string"||!m.code.length||m.code.length>100||!Number.isFinite(m.value)))return false;

@@ -117,7 +117,13 @@ it("sealed records and witnessed inputs are immutable; a legal patient move is s
 it("a historical completion without a record reads as unversioned, and a corrupted store as integrity-unavailable", async () => {
   const patientId = (await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,$1,$2) RETURNING id", [`SYN-CPV-H-${++seq}`, fx.parties.own])).rows[0].id;
   const historical = await seedCanonicalCeph(fx.pool, { patientId, status: "completed" });
-  expect((await reads.readCanonicalCephStudy(await fx.session("owner"), historical.id)).provenance).toEqual({ state: "unversioned" });
+  // The fixture's completion predates 0137: historical.
+  expect((await reads.readCanonicalCephStudy(await fx.session("owner"), historical.id)).provenance).toEqual({ state: "unversioned", reason: "completed_before_provenance" });
+  // A NEW approval through the legacy session path writes no record and is reported as such, never as historical.
+  const legacy = await scenario();
+  expect(await db.completeCephAnalysis(legacy.id, "SYN legacy approver")).toMatchObject({ ok: true });
+  expect(await provenance(legacy)).toEqual([]);
+  expect((await observe(legacy)).provenance).toEqual({ state: "unversioned", reason: "completed_without_seal" });
   const s = await scenario(), seen = await observe(s);
   await complete("own", s, { expectedVersion: seen.discardVersion });
   await fx.pool.query("ALTER TABLE ceph_measurements DISABLE TRIGGER ceph_witnessed_measurements_immutable");
@@ -186,6 +192,51 @@ it("a retry re-checks the actor's scope: after the patient leaves the doctor's l
   await fx.pool.query("UPDATE patients SET primary_doctor_id=NULL WHERE id=$1", [s.patientId]);
   await expect(complete("own", s, body)).rejects.toMatchObject({ code: "ceph_complete_not_found" });
   expect(await audits(s)).toHaveLength(1); expect(await provenance(s)).toHaveLength(1);
+});
+
+// ── Owner review 6968168056 ──
+it("a retry with different or missing reviewed sources is a different request: refused, never a replay", async () => {
+  const s = await scenario(), seen = await observe(s), body = { expectedVersion: seen.discardVersion, expectedSources: seen.completionSources };
+  await complete("own", s, body);
+  await expect(complete("own", s, { expectedVersion: seen.discardVersion })).rejects.toMatchObject({ code: "ceph_complete_conflict" });
+  await expect(complete("own", s, { expectedVersion: seen.discardVersion, expectedSources: { ...seen.completionSources, imageSha256: "d".repeat(64) } })).rejects.toMatchObject({ code: "ceph_complete_conflict" });
+  expect(await complete("own", s, body)).toEqual({ ok: true, studyId: s.id, status: "completed" });
+  const unseen = await scenario(), seenU = await observe(unseen);
+  await complete("own", unseen, { expectedVersion: seenU.discardVersion });
+  await expect(complete("own", unseen, { expectedVersion: seenU.discardVersion, expectedSources: seenU.completionSources })).rejects.toMatchObject({ code: "ceph_complete_conflict" });
+  expect(await audits(s)).toHaveLength(1); expect(await audits(unseen)).toHaveLength(1);
+});
+
+it.each([
+  ["an added measurement row", "ceph_measurements", "ceph_witnessed_measurements_immutable", "INSERT INTO ceph_measurements(analysis_id,code,value) VALUES($1,'SYN_ADDED',1)", "stored_values_differ_from_witness"],
+  ["a removed retained measurement", "ceph_measurements", "ceph_witnessed_measurements_immutable", "DELETE FROM ceph_measurements WHERE analysis_id=$1 AND code=(SELECT min(code) FROM ceph_measurements WHERE analysis_id=$1)", "stored_values_differ_from_witness"],
+  ["an added unknown landmark", "ceph_landmarks", "ceph_witnessed_landmarks_immutable", "INSERT INTO ceph_landmarks(analysis_id,code,x,y,source,confirmed_by) VALUES($1,'SYN_EXTRA',1,1,'manual','SYN')", "landmark_reviews_differ_from_witness"],
+  ["a changed review author", "ceph_landmarks", "ceph_witnessed_landmarks_immutable", "UPDATE ceph_landmarks SET confirmed_by='SYN other' WHERE analysis_id=$1 AND code='S'", "landmark_reviews_differ_from_witness"],
+  ["a changed review time", "ceph_landmarks", "ceph_witnessed_landmarks_immutable", "UPDATE ceph_landmarks SET confirmed_at=confirmed_at+interval '1 second' WHERE analysis_id=$1 AND code='S'", "landmark_reviews_differ_from_witness"],
+  ["a changed retained landmark", "ceph_landmarks", "ceph_witnessed_landmarks_immutable", "UPDATE ceph_landmarks SET x=x+1 WHERE analysis_id=$1 AND code='SYN_OLD_CODE'", "landmark_reviews_differ_from_witness"],
+] as const)("the reader checks the full stored set: %s is detected without relying on triggers", async (_name, table, trigger, sql, reason) => {
+  const s = await sealed();
+  await tamper(table, trigger, sql, [s.id]);
+  expect((await observe(s)).provenance).toEqual({ state: "integrity-unavailable", reason });
+});
+
+it("two concurrent completions of one draft seal exactly once", async () => {
+  const s = await scenario(), seen = await observe(s), body = { expectedVersion: seen.discardVersion, expectedSources: seen.completionSources };
+  const results = await Promise.allSettled([complete("own", s, body), complete("all", s, body)]);
+  expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+  expect(results.find((r) => r.status === "rejected")).toMatchObject({ reason: { code: "ceph_complete_conflict" } });
+  expect(await provenance(s)).toHaveLength(1); expect(await audits(s)).toHaveLength(1);
+});
+
+it("a failure injected after the seal, at commit time, rolls everything back", async () => {
+  const s = await scenario(), seen = await observe(s);
+  await fx.pool.query(`CREATE FUNCTION syn_cpv_commit_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'SYN commit-time failure'; END $$;
+    CREATE CONSTRAINT TRIGGER syn_cpv_commit_fail AFTER INSERT ON ceph_completion_provenance DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION syn_cpv_commit_fail()`);
+  try { await expect(complete("own", s, { expectedVersion: seen.discardVersion })).rejects.toThrow(); }
+  finally { await fx.pool.query("DROP TRIGGER syn_cpv_commit_fail ON ceph_completion_provenance; DROP FUNCTION syn_cpv_commit_fail()"); }
+  expect(await provenance(s)).toEqual([]); expect(await audits(s)).toEqual([]);
+  expect((await fx.pool.query("SELECT status FROM ceph_analyses WHERE id=$1", [s.id])).rows[0].status).toBe("draft");
+  expect((await fx.pool.query("SELECT count(*)::int n FROM ceph_measurements WHERE analysis_id=$1", [s.id])).rows[0].n).toBe(0);
 });
 
 it("clinic reset is refused once a sealed record exists, before any backup", async () => {

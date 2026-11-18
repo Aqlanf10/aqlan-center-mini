@@ -7,7 +7,12 @@ describe("provenance label", () => {
   it("says nothing for drafts and distinguishes historical, broken and sealed completions", () => {
     expect(cephProvenanceLabelAr(undefined)).toBeNull();
     expect(cephProvenanceLabelAr({ state: "not-completed" })).toBeNull();
-    expect(cephProvenanceLabelAr({ state: "unversioned" })).toMatch(/بلا سجل اعتماد موثّق/);
+    expect(cephProvenanceLabelAr({ state: "unversioned", reason: "completed_before_provenance" })).toMatch(/سابق لتفعيل سجل الاعتماد/);
+    // A NEW approval through the legacy path is not described as historical.
+    const legacy = cephProvenanceLabelAr({ state: "unversioned", reason: "completed_without_seal" })!;
+    expect(legacy).toMatch(/مسار لا يكتب سجلًا موثّقًا/);
+    expect(legacy).not.toMatch(/سابق/);
+    expect(cephProvenanceLabelAr({ state: "unversioned", reason: "provenance_start_unknown" })).toMatch(/تعذّر تحديد/);
     expect(cephProvenanceLabelAr({ state: "integrity-unavailable", reason: "x" })).toMatch(/تعذّر التحقق/);
     const sealed = cephProvenanceLabelAr({ state: "versioned", witnessSha256: "a".repeat(64), sealedAt: "2026-11-18T08:00:00.000000Z", sealedBy: "synthetic.doctor",
       engineVersion: "2026-11-18.1", sourceIdentityMeaning: "submitted_source_identity_matches_server_capture", measurementsWithAssumption: 2, measurementsWithLegacyDefinitionDifference: 5 })!;
