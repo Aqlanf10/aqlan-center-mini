@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { availabilityMessageAr, explainAll } from "@/lib/ceph-availability";
-import { legacyDefinitionWarningAr } from "@/lib/ceph-evidence/definition-versions";
+import { explainAll, measurementNoteAr } from "@/lib/ceph-availability";
 import {
   CEPH_SCHOOLS, computeAll, enrichWithRefs, generateCephExpertDiagnosis, interpret, LANDMARK_ORDER, landmarkDef, MEASUREMENTS, projectOnLine, REQUIRED_LANDMARKS, round1,
   suggestDiagnosis, suggestLandmarks, summarize,
@@ -565,15 +564,8 @@ export function CephTracer({
 
   // C2: سبب غياب القيمة (أو أنها غير مقيسة بالكامل) من المعالم نفسها — شرحٌ فقط، لا يغيّر أي رقم.
   const availability = useMemo(() => explainAll(points, scale ?? NaN), [points, scale]);
-  const reasonFor = (code: string, activeVal: number | null): string | null => {
-    const a = availability.get(code);
-    const why = a ? availabilityMessageAr(a) : null;
-    if (completed && stamped && activeVal == null) return why ? `لا قيمة في اللقطة المعتمدة — ${why}` : "لا قيمة في اللقطة المعتمدة.";
-    // A shown number whose legacy definition differs from the sources carries that warning (value unchanged).
-    const definition = activeVal != null ? legacyDefinitionWarningAr(code) : null;
-    const lines = [activeVal != null && a?.status === "not-computable" ? null : why, definition].filter(Boolean);
-    return lines.length ? lines.join(" ") : null;
-  };
+  const reasonFor = (code: string, activeVal: number | null): string | null =>
+    measurementNoteAr(code, activeVal, availability.get(code), Boolean(completed && stamped));
 
   const summary = useMemo(() => (table ? summarize(table) : null), [table]);
 

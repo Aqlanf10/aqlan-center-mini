@@ -8,6 +8,7 @@ import {
   type LandmarkCode, type LandmarkMap, type MeasurementResult,
 } from "@/lib/ceph";
 import { PrintFooter, PrintHeader } from "@/components/PrintHeader";
+import { explainAll, measurementNoteAr } from "@/lib/ceph-availability";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
@@ -100,6 +101,9 @@ export default async function CephPrintReportPage({
     points[lm.code] = { x: lm.x, y: lm.y };
   }
 
+  // C2 + Kim: سبب غياب القيمة أو تحذير التعريف — نصٌّ فقط بجانب الرقم، لا يغيّره.
+  const availability = explainAll(points, study.analysis.mmPerPixel ?? NaN);
+  const fromApprovedSnapshot = study.analysis.status === "completed" && study.measurements.length > 0;
   // حساب القياسات أو قراءة اللقطة المعتمدة
   const rawResults = computeAll(points, study.analysis.mmPerPixel ?? NaN);
   const table: MeasurementResult[] = study.analysis.status === "completed" && study.measurements.length > 0
@@ -379,6 +383,14 @@ export default async function CephPrintReportPage({
                                   {r.interpretationAr}
                                 </div>
                               )}
+                              {(() => {
+                                const note = measurementNoteAr(r.code, r.value, availability.get(r.code), fromApprovedSnapshot);
+                                return note ? (
+                                  <div data-testid={`ceph-print-note-${r.code}`} style={{ fontSize: "6pt", color: "#b45309", marginTop: "0.3mm" }}>
+                                    {note}
+                                  </div>
+                                ) : null;
+                              })()}
                             </td>
                             <td className="num" style={{ fontWeight: 700, color: statusColor }}>
                               {r.value != null ? `${r.value}${r.unit}` : "—"}
@@ -455,6 +467,14 @@ export default async function CephPrintReportPage({
                                   {r.interpretationAr}
                                 </div>
                               )}
+                              {(() => {
+                                const note = measurementNoteAr(r.code, r.value, availability.get(r.code), fromApprovedSnapshot);
+                                return note ? (
+                                  <div data-testid={`ceph-print-note-${r.code}`} style={{ fontSize: "6pt", color: "#b45309", marginTop: "0.3mm" }}>
+                                    {note}
+                                  </div>
+                                ) : null;
+                              })()}
                             </td>
                             <td className="num" style={{ fontWeight: 700, color: statusColor }}>
                               {r.value != null ? `${r.value}${r.unit}` : "—"}

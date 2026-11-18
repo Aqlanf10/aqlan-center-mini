@@ -138,8 +138,28 @@ describe("legacy definition warnings beside the shown value", () => {
     expect(legacyDefinitionWarningAr("SNA")).toBeNull();
     expect(legacyDefinitionWarningAr("APDI")).toMatch(/معكوسة/);
   });
-  it("the tracer adds the warning only next to a shown number", () => {
+  it("the tracer uses the shared note", () => {
     const tracer = readFileSync(new URL("../components/CephTracer.tsx", import.meta.url), "utf8");
-    expect(tracer).toContain("const definition = activeVal != null ? legacyDefinitionWarningAr(code) : null;");
+    expect(tracer).toContain("measurementNoteAr(code, activeVal, availability.get(code), Boolean(completed && stamped))");
+  });
+});
+
+describe("one shared measurement note for screen and print", () => {
+  it("explains a missing draft value, a missing approved value, and flags shown values without touching them", async () => {
+    const { measurementNoteAr } = await import("../lib/ceph-availability");
+    const noA = without(L, "A");
+    expect(measurementNoteAr("ANB", null, explainMeasurement("ANB", noA, SCALE), false)).toBe("نقاط ناقصة: A.");
+    expect(measurementNoteAr("ANB", null, explainMeasurement("ANB", noA, SCALE), true)).toBe("لا قيمة في اللقطة المعتمدة — نقاط ناقصة: A.");
+    expect(measurementNoteAr("SNA", 82, explainMeasurement("SNA", L, SCALE), false)).toBeNull();
+    const apdi = measurementNoteAr("APDI", 98, explainMeasurement("APDI", without(L, "ANS"), SCALE), true)!;
+    expect(apdi).toMatch(/غير مقيسة بالكامل/);
+    expect(apdi).toMatch(/يخالف المصدر/);
+    expect(measurementNoteAr("FH_AB", 97.6, explainMeasurement("FH_AB", L, SCALE), false)).toMatch(/مكمّل/);
+  });
+
+  it("the approved print page shows the same note under both measurement tables", () => {
+    const print = readFileSync(new URL("../app/print/ceph/[id]/page.tsx", import.meta.url), "utf8");
+    expect(print.match(/measurementNoteAr\(r\.code, r\.value, availability\.get\(r\.code\), fromApprovedSnapshot\)/g)).toHaveLength(2);
+    expect(print).toContain("const availability = explainAll(points, study.analysis.mmPerPixel ?? NaN);");
   });
 });

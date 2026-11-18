@@ -10,6 +10,7 @@
  *     read as fully measured. Changing these formulas is a clinical decision (C5), not made here.
  */
 import { MEASUREMENTS, measure, type LandmarkCode, type LandmarkMap, type MeasurementDef } from "./ceph";
+import { legacyDefinitionWarningAr } from "./ceph-evidence/definition-versions";
 
 export type NotComputableReason =
   | "unknown-measurement" | "missing-landmarks" | "invalid-landmark-coordinates"
@@ -85,4 +86,23 @@ export function availabilityMessageAr(a: MeasurementAvailability): string | null
 
 export function explainAll(L: LandmarkMap, mmPerPixel: number): ReadonlyMap<string, MeasurementAvailability> {
   return new Map(MEASUREMENTS.map((d) => [d.code, explainMeasurement(d.code, L, mmPerPixel)]));
+}
+
+/**
+ * The single note shown under a measurement on screen and in print (C2 + Kim directive):
+ *  - no value in an approved snapshot → says so, with the reason from the stored landmarks;
+ *  - no value in a draft → the not-computable reason;
+ *  - a shown value → the not-fully-measured flag (if any) and the legacy-definition warning (if any).
+ * Text only: it never supplies, changes or recomputes a number.
+ */
+export function measurementNoteAr(
+  code: string, shownValue: number | null, availability: MeasurementAvailability | undefined, fromApprovedSnapshot: boolean,
+): string | null {
+  const why = availability ? availabilityMessageAr(availability) : null;
+  if (shownValue == null) {
+    if (fromApprovedSnapshot) return why ? `لا قيمة في اللقطة المعتمدة — ${why}` : "لا قيمة في اللقطة المعتمدة.";
+    return why;
+  }
+  const lines = [availability?.status === "measured-with-assumption" ? why : null, legacyDefinitionWarningAr(code)].filter(Boolean);
+  return lines.length ? lines.join(" ") : null;
 }
