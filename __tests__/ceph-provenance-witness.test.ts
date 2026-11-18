@@ -115,3 +115,32 @@ describe("witness", () => {
     expect(() => buildCephCompletionWitness({ ...base, measurements: [{ code: "SNA", value: sna.value + 0.1 }], expectedSources: null })).toThrow("ceph_witness_value_not_reproducible");
   });
 });
+
+describe("hash compatibility with #530 (owner review 6967467169)", () => {
+  // Expected digests computed with #530's own journeyContentHash(canonicalJourneyJSON) taken verbatim from
+  // review/ortho-ceph-current-source-20261107 @ f2a968da (lib/ortho-case-journey-json.ts + ortho-case-journey-hash.ts).
+  // The neutral module must produce the same bytes: same key sort, kept array order, -0 → 0, same refusals.
+  const VECTORS: [string, unknown, string][] = [
+    ["key-order", { b: 1, a: 2, c: { z: [3, 2, 1], y: "ي" } }, "81e1096b06ac0c0dfa0dfac322accdb912a24d727be976ff1e1f5b8e9379034a"],
+    ["array-order", [3, 1, 2], "51bda7ab4e44726cde71fcb6e4b515357059bb6b6dd5146d1fc50f73f11678c6"],
+    ["negative-zero", { x: -0, y: [-0, 0] }, "443bbd8571ffe36b22c0771e64e2c92da4ecbdabaff64effda8604b4bd721869"],
+    ["nested-null", { a: null, b: [null, { c: null }] }, "dcf65ed0b6d4f0928ee0bff437459c665617f48201243e8e083fc875add9153c"],
+    ["unicode-text", { finalDx: "صنف هيكلي ثانٍ", note: "line\nbreak\t\"q\"" }, "bac820713878c1c9371ffbe94ce5ae37d846a15db36d1515d86d6b566b0274ed"],
+    ["numbers", { a: 1.25, b: 1e-7, c: 123456789.123, d: -42 }, "04a7fbecf2be436edb264d8ee88092e02f3f2b041d353e04d4cb3377f67e88a6"],
+    ["empty", {}, "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"],
+    ["empty-array", [], "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"],
+    ["booleans", { t: true, f: false }, "c22848c47426fcf4d27e55573c22f1d23546315c251e8e4bc384820ba5fae568"],
+    ["null-proto", Object.assign(Object.create(null), { b: 2, a: 1 }), "43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777"],
+  ];
+  it.each(VECTORS)("%s hashes to the same digest as #530", (_name, value, digest) => {
+    expect(cephContentHash(value)).toBe(digest);
+  });
+  it.each([["NaN", { x: Number.NaN }], ["Infinity", { x: Number.POSITIVE_INFINITY }], ["undefined", { x: undefined }], ["Date", { x: new Date(0) }],
+    ["function", { x: () => 1 }], ["bigint", { x: BigInt(1) }], ["Map", new Map()]] as const)("refuses %s exactly like #530", (_name, value) => {
+    expect(() => cephContentHash(value)).toThrow("invalid_json_value");
+  });
+  it("key order never changes the digest; array order always does", () => {
+    expect(cephContentHash({ a: 1, b: { c: 2, d: 3 } })).toBe(cephContentHash({ b: { d: 3, c: 2 }, a: 1 }));
+    expect(cephContentHash([1, 2])).not.toBe(cephContentHash([2, 1]));
+  });
+});

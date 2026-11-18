@@ -2,8 +2,10 @@
  * compared; a same-actor retry returns the original receipt; sealed rows and witnessed inputs are immutable; reset is
  * refused. Synthetic data only, on the owned disposable database. */
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { Pool } from "pg";
 import { assertRealPostgresUrl, stubPostgresEnv } from "./_setup";
 import { openCanonicalInventoryDatabase, type CanonicalInventoryDatabase } from "./_canonical-inventory-fixture";
+import { waitForBlockedBy } from "./_canonical-ready-fixture";
 import { REQUIRED_LANDMARKS } from "../../lib/ceph";
 import { seedCanonicalCeph } from "../fixtures/canonical-ceph";
 import { cephContentHash } from "../../lib/ceph-provenance/canonical-json";
@@ -18,9 +20,9 @@ const ACCOUNTS = {
   all: { username: "SYN-CPV-ALL", role: "reception", patientScope: "all", grants: ANALYZE },
 } as const;
 type Key = keyof typeof ACCOUNTS;
-let fx: CanonicalInventoryDatabase<Key>, seq = 0;
-beforeAll(async () => { fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner"); }, 180000);
-afterAll(async () => { await fx?.close(); });
+let fx: CanonicalInventoryDatabase<Key>, side: Pool, seq = 0;
+beforeAll(async () => { fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner"); side = new Pool({ connectionString: fx.pool.options.connectionString, max: 4 }); }, 180000);
+afterAll(async () => { await side?.end(); await fx?.close(); });
 
 async function scenario() {
   const patientId = (await fx.pool.query("INSERT INTO patients(patient_number,full_name,primary_doctor_id) VALUES($1,$1,$2) RETURNING id", [`SYN-CPV-${++seq}`, fx.parties.own])).rows[0].id as number;
@@ -122,6 +124,68 @@ it("a historical completion without a record reads as unversioned, and a corrupt
   try { await fx.pool.query("UPDATE ceph_measurements SET value=value+1 WHERE analysis_id=$1 AND code='ANB'", [s.id]); }
   finally { await fx.pool.query("ALTER TABLE ceph_measurements ENABLE TRIGGER ceph_witnessed_measurements_immutable"); }
   expect((await observe(s)).provenance).toEqual({ state: "integrity-unavailable", reason: "stored_values_differ_from_witness" });
+});
+
+
+// ── Owner review 6967509327: tampering, concurrency, atomicity, retry re-checks ──
+const tamper = async (table: string, trigger: string, sql: string, values: unknown[]) => {
+  await fx.pool.query(`ALTER TABLE ${table} DISABLE TRIGGER ${trigger}`);
+  try { await fx.pool.query(sql, values); } finally { await fx.pool.query(`ALTER TABLE ${table} ENABLE TRIGGER ${trigger}`); }
+};
+async function sealed() { const s = await scenario(); await complete("own", s, { expectedVersion: (await observe(s)).discardVersion }); return s; }
+
+it.each([
+  ["landmark", "ceph_landmarks", "ceph_witnessed_landmarks_immutable", "UPDATE ceph_landmarks SET x=x+0.5 WHERE analysis_id=$1 AND code='S'", "stored_inputs_differ_from_witness"],
+  ["calibration", "ceph_analyses", "ceph_witnessed_analysis_immutable", "UPDATE ceph_analyses SET mm_per_pixel=mm_per_pixel*1.01 WHERE id=$1", "stored_inputs_differ_from_witness"],
+  ["diagnosis", "ceph_diagnoses", "ceph_witnessed_diagnoses_immutable", "UPDATE ceph_diagnoses SET final_dx='SYN altered' WHERE analysis_id=$1", "stored_inputs_differ_from_witness"],
+  ["witness value", "ceph_completion_provenance", "ceph_completion_provenance_immutable", "UPDATE ceph_completion_provenance SET witness=jsonb_set(witness,'{measurements,0,value}','1') WHERE analysis_id=$1", "invalid_completion_witness"],
+  ["witness reference", "ceph_completion_provenance", "ceph_completion_provenance_immutable", "UPDATE ceph_completion_provenance SET witness=jsonb_set(witness,'{sourceIdentity,referenceSetKey}','\"other\"') WHERE analysis_id=$1", "invalid_completion_witness"],
+  ["witness engine", "ceph_completion_provenance", "ceph_completion_provenance_immutable", "UPDATE ceph_completion_provenance SET witness=jsonb_set(witness,'{sourceIdentity,engineVersion}','\"0000\"') WHERE analysis_id=$1", "invalid_completion_witness"],
+  ["image", "patient_documents", "USER", "UPDATE patient_documents SET sha256=repeat('e',64) WHERE id=(SELECT document_id FROM ceph_analyses WHERE id=$1)", "source_image_changed"],
+] as const)("tampering with the %s is detected on read and never recomputed", async (_name, table, trigger, sql, reason) => {
+  const s = await sealed();
+  const before = (await provenance(s))[0].witness_sha256;
+  await tamper(table, trigger, sql, [s.id]);
+  expect((await observe(s)).provenance).toEqual({ state: "integrity-unavailable", reason });
+  expect((await observe(s)).provenance).toEqual({ state: "integrity-unavailable", reason }); // stable on re-read
+  if (table !== "ceph_completion_provenance") expect((await provenance(s))[0].witness_sha256).toBe(before);
+});
+
+it("a later reference-catalogue change does not alter a sealed record or its state", async () => {
+  const s = await sealed(), was = (await observe(s)).provenance;
+  await fx.pool.query("INSERT INTO ceph_reference_sets(key,name,version,created_by) VALUES('builtin_default','SYN','syn-late','SYN') ON CONFLICT (key) DO UPDATE SET version='syn-late'");
+  expect((await observe(s)).provenance).toEqual(was);
+});
+
+it("a reference change committed while the completion waits for the catalogue lock is refused, never sealed with stale sources", async () => {
+  const s = await scenario(), seen = await observe(s), gate = await side.connect(); let pending: Promise<unknown> | undefined;
+  try {
+    await gate.query("BEGIN"); const pid = (await gate.query("SELECT pg_backend_pid() pid")).rows[0].pid;
+    await gate.query("INSERT INTO ceph_reference_sets(key,name,version,created_by) VALUES('builtin_default','SYN','syn-race','SYN') ON CONFLICT (key) DO UPDATE SET version='syn-race'");
+    pending = complete("own", s, { expectedVersion: seen.discardVersion, expectedSources: seen.completionSources }); void pending.catch(() => undefined);
+    await waitForBlockedBy(side, pid, 8000);
+    await gate.query("COMMIT");
+    await expect(pending).rejects.toMatchObject({ code: expect.stringMatching(/^ceph_complete_(sources_changed|conflict)$/) });
+    expect(await provenance(s)).toEqual([]); expect(await audits(s)).toEqual([]);
+    expect((await fx.pool.query("SELECT status FROM ceph_analyses WHERE id=$1", [s.id])).rows[0].status).toBe("draft");
+  } finally { await gate.query("ROLLBACK").catch(() => undefined); gate.release(); await pending?.catch(() => undefined); }
+});
+
+it("a failing audit rolls back completion, measurements and the sealed record together", async () => {
+  const s = await scenario(), seen = await observe(s);
+  await fx.pool.query("CREATE FUNCTION syn_cpv_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='ceph.complete' THEN RAISE EXCEPTION 'SYN audit refused'; END IF; RETURN NEW; END $$; CREATE TRIGGER syn_cpv_audit BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION syn_cpv_audit()");
+  try { await expect(complete("own", s, { expectedVersion: seen.discardVersion })).rejects.toThrow(/SYN audit refused/); }
+  finally { await fx.pool.query("DROP TRIGGER syn_cpv_audit ON audit_log; DROP FUNCTION syn_cpv_audit()"); }
+  expect(await provenance(s)).toEqual([]);
+  expect((await fx.pool.query("SELECT status FROM ceph_analyses WHERE id=$1", [s.id])).rows[0].status).toBe("draft");
+});
+
+it("a retry re-checks the actor's scope: after the patient leaves the doctor's list the receipt is refused", async () => {
+  const s = await scenario(), seen = await observe(s), body = { expectedVersion: seen.discardVersion };
+  await complete("own", s, body);
+  await fx.pool.query("UPDATE patients SET primary_doctor_id=NULL WHERE id=$1", [s.patientId]);
+  await expect(complete("own", s, body)).rejects.toMatchObject({ code: "ceph_complete_not_found" });
+  expect(await audits(s)).toHaveLength(1); expect(await provenance(s)).toHaveLength(1);
 });
 
 it("clinic reset is refused once a sealed record exists, before any backup", async () => {
