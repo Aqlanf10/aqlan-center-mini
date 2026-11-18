@@ -52,7 +52,9 @@ export type PhotoView =
   | "intraoral_right"
   | "intraoral_left"
   | "upper_occlusal"
-  | "lower_occlusal";
+  | "lower_occlusal"
+  /** OP-1: optional view, never required by default (owner decision 6992947396). */
+  | "overjet";
 
 export const PHOTO_VIEW_LABEL: Record<PhotoView, string> = {
   lateral_ceph: "أشعة سيفالومترية جانبية",
@@ -67,6 +69,7 @@ export const PHOTO_VIEW_LABEL: Record<PhotoView, string> = {
   intraoral_left: "داخل الفم يسار",
   upper_occlusal: "قوام علوي",
   lower_occlusal: "قوام سفلي",
+  overjet: "البروز الأمامي (جانبي للقواطع)",
 };
 
 export interface WebCephSlotDef {
@@ -110,6 +113,71 @@ export const FULL_SET_VIEWS: PhotoView[] = [
   "upper_occlusal",
   "lower_occlusal",
 ];
+
+/* ─────────────────────── OP-1: متطلبات الصور لكل مرحلة ─────────────────────── */
+
+/** الأشعة منفصلة عن اكتمال الصور الفوتوغرافية — لا تدخل المتطلبات ولا النسبة. */
+export const RADIOGRAPH_VIEWS: PhotoView[] = ["lateral_ceph", "pa_ceph", "panoramic"];
+export const PHOTOGRAPHIC_VIEWS: PhotoView[] = PHOTO_VIEWS.filter((view) => !RADIOGRAPH_VIEWS.includes(view));
+
+export interface StagePhotoRequirement { required: PhotoView[]; optional: PhotoView[] }
+export type PhotoStageRequirements = Record<PhotoStage, StagePhotoRequirement>;
+
+/**
+ * الافتراضي = سلوك اليوم: المناظر الثمانية مطلوبة في كل مرحلة، و45° والبروز الأمامي
+ * اختياريان. المركز يغيّرها لكل مرحلة من الإعدادات (`ortho.photo_stage_requirements`)،
+ * فيعتمد مثلًا تسعة مناظر للبداية والنهاية إن اختار. عددٌ تشغيلي لا إلزام علمي عالمي.
+ */
+export const DEFAULT_PHOTO_STAGE_REQUIREMENTS: PhotoStageRequirements = Object.freeze({
+  initial: { required: FULL_SET_VIEWS, optional: ["extraoral_45", "overjet"] },
+  progress: { required: FULL_SET_VIEWS, optional: ["extraoral_45", "overjet"] },
+  debond: { required: FULL_SET_VIEWS, optional: ["extraoral_45", "overjet"] },
+  retention: { required: FULL_SET_VIEWS, optional: ["extraoral_45", "overjet"] },
+}) as PhotoStageRequirements;
+
+/** فارغ = الافتراضي؛ وإلا JSON بالمراحل المعروفة فقط (الناقصة تأخذ افتراضيّها). */
+export function parsePhotoStageRequirements(raw: string):
+  | { ok: true; value: PhotoStageRequirements } | { ok: false; message: string } {
+  const text = raw.trim();
+  if (text === "") return { ok: true, value: DEFAULT_PHOTO_STAGE_REQUIREMENTS };
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return { ok: false, message: "صيغة JSON غير صالحة." }; }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { ok: false, message: "يجب أن تكون القيمة كائنًا بأسماء المراحل." };
+  const value: PhotoStageRequirements = { ...DEFAULT_PHOTO_STAGE_REQUIREMENTS };
+  for (const [stage, entry] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!isPhotoStage(stage)) return { ok: false, message: `مرحلة غير معروفة: ${stage}.` };
+    const label = PHOTO_STAGE_LABEL[stage];
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return { ok: false, message: `${label}: القيمة يجب أن تحوي required وoptional.` };
+    const keys = Object.keys(entry);
+    if (keys.length !== 2 || !keys.includes("required") || !keys.includes("optional")) {
+      return { ok: false, message: `${label}: الحقول المسموحة required وoptional فقط.` };
+    }
+    const { required, optional } = entry as { required: unknown; optional: unknown };
+    if (!Array.isArray(required) || !Array.isArray(optional)) return { ok: false, message: `${label}: required وoptional قائمتان.` };
+    if (required.length === 0) return { ok: false, message: `${label}: يلزم منظر مطلوب واحد على الأقل.` };
+    const seen = new Set<string>();
+    for (const view of [...required, ...optional]) {
+      if (typeof view !== "string" || !isPhotoView(view)) return { ok: false, message: `${label}: منظر غير معروف: ${String(view)}.` };
+      if (RADIOGRAPH_VIEWS.includes(view)) return { ok: false, message: `${label}: الأشعة منفصلة عن متطلبات الصور (${PHOTO_VIEW_LABEL[view]}).` };
+      if (seen.has(view)) return { ok: false, message: `${label}: المنظر مكرر أو مطلوب واختياري معًا (${PHOTO_VIEW_LABEL[view]}).` };
+      seen.add(view);
+    }
+    value[stage] = { required: required as PhotoView[], optional: optional as PhotoView[] };
+  }
+  return { ok: true, value };
+}
+
+/** فاصل المجموعة الكاملة (أشهر) للعرض: خارج 1–24 أو فاسد = 6، الافتراضي التشغيلي. */
+export function photoSetIntervalMonths(raw: string | null | undefined): number {
+  const value = Number((raw ?? "").trim());
+  return Number.isInteger(value) && value >= 1 && value <= 24 && (raw ?? "").trim() !== "" ? value : 6;
+}
+
+/** قراءة للعرض: قيمة مخزّنة فاسدة تعود إلى الافتراضي (الحفظ يرفضها في الخادم). */
+export function photoStageRequirements(raw: string | null | undefined): PhotoStageRequirements {
+  const parsed = parsePhotoStageRequirements(raw ?? "");
+  return parsed.ok ? parsed.value : DEFAULT_PHOTO_STAGE_REQUIREMENTS;
+}
 
 /* ─────────────────────────── اقتراح الدور ─────────────────────────── */
 
@@ -159,15 +227,17 @@ export interface FullSetInput {
   phase: "aligning" | "working" | "finishing" | "retention";
   /** الوجهات المصوَّرة في هذه الجلسة حتى الآن. */
   capturedViews: PhotoView[];
+  /** OP-1: المطلوب لمرحلة الجلسة من الإعدادات؛ غيابه = الثمانية (سلوك اليوم). */
+  requiredViews?: readonly PhotoView[];
 }
 
 
-/** A complete saved eight-view set, with its recorded provenance. */
+/** A complete saved set (the stage's required views; eight by default), with its recorded provenance. */
 export interface SavedFullPhotoSet {
   adjustmentId: number;
   stage: PhotoStage;
   takenOn: string;
-  /** One persisted document per required view, in FULL_SET_VIEWS order. */
+  /** One persisted document per required view, in the stage requirement's order. */
   documentIds: number[];
 }
 
@@ -214,7 +284,10 @@ export function savedFullPhotoSetHistory(input: {
   /** Date of the form/session whose prior saved history is being assessed. */
   asOfDate: string;
   adjustments: unknown;
+  /** OP-1: completeness per stage; absent = the eight views (today's behaviour). */
+  requirements?: PhotoStageRequirements;
 }): SavedFullPhotoSetHistory {
+  const requiredFor = (stage: PhotoStage) => (input.requirements ?? DEFAULT_PHOTO_STAGE_REQUIREMENTS)[stage].required;
   const unknown = (): SavedFullPhotoSetHistory => ({ status: "unknown", reason: "metadata", latest: null });
   if (input.photosVisible !== true) return { status: "unknown", reason: "visibility", latest: null };
   if (!photoId(input.patientId) || !photoId(input.orthoCaseId)
@@ -243,7 +316,7 @@ export function savedFullPhotoSetHistory(input: {
         || !Object.hasOwn(PHOTO_STAGE_LABEL, photo.photoStage) || !isPhotoView(photo.photoView)
         || !photoCalendarDate(photo.takenOn) || photo.takenOn > input.today) return unknown();
       if (adjustment.doneOn > input.asOfDate || photo.takenOn > input.asOfDate
-        || !FULL_SET_VIEWS.includes(photo.photoView)) continue;
+        || !requiredFor(photo.photoStage).includes(photo.photoView)) continue;
 
       const key = `${photo.photoStage}:${photo.takenOn}`;
       let group = groups.get(key);
@@ -257,10 +330,11 @@ export function savedFullPhotoSetHistory(input: {
     }
 
     for (const group of groups.values()) {
-      if (!FULL_SET_VIEWS.every(view => group.views.has(view))) continue;
+      const required = requiredFor(group.stage);
+      if (!required.every(view => group.views.has(view))) continue;
       const candidate: SavedFullPhotoSet = {
         adjustmentId: adjustment.id, stage: group.stage, takenOn: group.takenOn,
-        documentIds: FULL_SET_VIEWS.map(view => group.views.get(view)!),
+        documentIds: required.map(view => group.views.get(view)!),
       };
       if (!latest || candidate.takenOn > latest.takenOn
         || (candidate.takenOn === latest.takenOn && (candidate.adjustmentId > latest.adjustmentId
@@ -283,7 +357,7 @@ const MONTH_DAYS = 30.44;
  */
 export function fullPhotoSetCheck(input: FullSetInput): FullSetCheck {
   const captured = new Set(input.capturedViews);
-  const missing = FULL_SET_VIEWS.filter((view) => !captured.has(view));
+  const missing = (input.requiredViews ?? FULL_SET_VIEWS).filter((view) => !captured.has(view));
 
   const daysSinceLast = input.lastFullSetDate
     ? Math.round(

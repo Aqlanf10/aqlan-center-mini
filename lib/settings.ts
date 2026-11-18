@@ -44,6 +44,8 @@ export type SettingKey =
   | "documents.max_megabytes"
   | "workflow.doctor_financial_view"
   | "ortho.case_doctor_no_charge"
+  | "ortho.full_photo_set_interval_months"
+  | "ortho.photo_stage_requirements"
   | "display.privacy_mode"
   | "display.voice_uri"
   | "display.voice_rate"
@@ -146,6 +148,10 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   // (قرار المالك 6629149113) «بلا رسوم» لشدّة تقويم خارج الاتفاق: للمالك دائمًا، ولطبيب
   // الحالة المسؤول المخوّل بالتقويم فقط إذا فعّله المالك هنا. مغلق افتراضيًا: لا منح تلقائي.
   "ortho.case_doctor_no_charge": "false",
+  // OP-1: operational interval (not a scientific standard) — equals the former constant 6.
+  "ortho.full_photo_set_interval_months": "6",
+  // OP-1: empty = defaults (eight required per stage; 45° and overjet optional).
+  "ortho.photo_stage_requirements": "",
   // عشرون ميغابايت تكفي أشعةً بانورامية بجودةٍ عالية، وتردّ ملفًّا رُفع بالخطأ
   // — مقطعَ فيديو مثلًا — قبل أن يملأ القرص.
   "documents.max_megabytes": "20",
@@ -266,6 +272,9 @@ export const PUBLIC_SETTING_KEYS: SettingKey[] = [
   "clinical.phrases_exam",
   "clinical.phrases_diagnosis",
   "clinical.phrases_next",
+  // (OP-1) سياسة تصوير تشغيلية للتقويم — أسماء مناظر وعدد أشهر، لا بيانات مرضى.
+  "ortho.full_photo_set_interval_months",
+  "ortho.photo_stage_requirements",
 ];
 
 export function withDefaults(stored: Partial<Record<string, string>>): SettingsMap {

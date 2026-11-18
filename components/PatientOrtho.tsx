@@ -21,7 +21,7 @@ import {
   type OrthoPhase, type RetainerType, type SlotSize,
 } from "@/lib/ortho";
 import {
-  PHOTO_STAGE_LABEL, PHOTO_VIEW_LABEL, buildComparison, fullPhotoSetCheck, savedFullPhotoSetHistory,
+  PHOTO_STAGE_LABEL, PHOTO_VIEW_LABEL, buildComparison, fullPhotoSetCheck, photoSetIntervalMonths, photoStageRequirements, savedFullPhotoSetHistory,
   suggestPhotoStage, type PhotoStage, type PhotoView, type StagePhoto,
 } from "@/lib/ortho-photos";
 import {
@@ -35,6 +35,7 @@ import { OrthoCaseAssessmentV2, type AssessmentLifetimeV2 } from "./OrthoCaseAss
 import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentStrategy";
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
+import { OrthoPhotoCompletenessPanel } from "./OrthoPhotoCompleteness";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
   LEGACY_FINANCIAL_HINT, LEGACY_FINANCIAL_LABEL, LEGACY_FINANCIAL_MODES, monthsBefore, checkOrthoSessionDraft,
@@ -961,6 +962,10 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                           startDate={row.startDate}
                         />
                       </section>
+                      {/* OP-2: اكتمال الصور لكل مجموعة تصوير — قراءة فقط، الأشعة منفصلة */}
+                      <section>
+                        <OrthoPhotoCompletenessPanel patientId={patientId} caseId={row.id} photosVisible={row.photosVisible} />
+                      </section>
 
                       {/* السيفالومتري ومخطط ويب سيف (WebCeph Station) */}
                       <section className="rounded-2xl border border-navy-100 bg-slate-50/50 p-3.5">
@@ -1491,6 +1496,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
       isFirstSession: caseRow.adjustments.length === 0,
     }),
   );
+  const photoRequirements = photoStageRequirements(useSetting("ortho.photo_stage_requirements"));
+  const photoIntervalMonths = photoSetIntervalMonths(useSetting("ortho.full_photo_set_interval_months"));
   const cameraInput = useRef<HTMLInputElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
 
@@ -1580,16 +1587,18 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   const options = [...new Set([...wires.map((wire) => wire.code),
     upperWire, lowerWire, caseRow.upperWire, caseRow.lowerWire].filter(Boolean) as string[])];
 
+  // OP-1: requirements and interval come from Settings; defaults equal today's behaviour.
   const savedPhotoHistory = savedFullPhotoSetHistory({
     patientId, orthoCaseId: caseRow.id, adjustments: caseRow.adjustments, today, asOfDate: doneOn,
-    photosVisible: form.caseGranted() ? caseRow.photosVisible : undefined,
+    photosVisible: form.caseGranted() ? caseRow.photosVisible : undefined, requirements: photoRequirements,
   });
   const fullSet = savedPhotoHistory.status === "ready" ? fullPhotoSetCheck({
     sessionDate: doneOn,
     startDate: caseRow.startDate,
     lastFullSetDate: savedPhotoHistory.latest?.takenOn ?? null,
-    intervalMonths: 6,
+    intervalMonths: photoIntervalMonths,
     phase: caseRow.phase,
+    requiredViews: photoRequirements[stage].required,
     // This is only the prospective queue; it never establishes saved history.
     capturedViews: queue.map((photo) => photo.view).filter((view): view is PhotoView => view !== ""),
   }) : null;

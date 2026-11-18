@@ -13,6 +13,7 @@ import { isKnownZone } from "./clinicZone";
 import { DOCUMENT_PREFIX_SETTING } from "./document-numbers";
 import { parseSpecialtyTemplates } from "./specialty-templates";
 import { parseBalanceWarning } from "./chair-readiness";
+import { parsePhotoStageRequirements } from "./ortho-photos";
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 export const CLINIC_HOURS_KEYS = ["clinic.day_start", "clinic.day_end", "clinic.shift2_start", "clinic.shift2_end"] as const;
@@ -55,6 +56,12 @@ export function validateTypedSetting(key: string, raw: string): string | null {
   /* (CHAIR-1) عتبة الرصيد لكل عملة: فارغٌ = مغلق؛ وإلا JSON بعملاتٍ معروفة وأعدادٍ صحيحة. */
   if (key === "reception.balance_warning_minor") {
     const parsed = parseBalanceWarning(value);
+    return parsed.ok ? null : `${definition.label}: ${parsed.message}`;
+  }
+
+  /* (OP-1) متطلبات صور التقويم لكل مرحلة: فارغٌ = الافتراضي؛ وإلا بنيةٌ تُفحص كاملة. */
+  if (key === "ortho.photo_stage_requirements") {
+    const parsed = parsePhotoStageRequirements(value);
     return parsed.ok ? null : `${definition.label}: ${parsed.message}`;
   }
 
