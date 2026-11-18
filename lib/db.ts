@@ -24474,6 +24474,8 @@ export interface OrthoCase {
   legacyFinancialMode: LegacyFinancialMode | null;
   remainingObjectives: string | null;
   adjustments: OrthoAdjustment[];
+  /** OW-1: documented explicit wire removals (existing audit rows), read-only. */
+  documentedWireRemovals: DocumentedWireRemoval[];
   progress: CaseProgress;
 }
 
@@ -24561,6 +24563,9 @@ async function hydrateCasesWith(q: Pick<DbClient, "query">, rows: CaseRow[], tod
     list.push(toAdjustment(row, photos.get(row.id) ?? []));
     byCase.set(row.case_id, list);
   }
+  const removals = await documentedWireRemovalsWith(q, rows.map((row) => ({
+    caseId: row.id, patientId: row.patient_id, adjustmentIds: (byCase.get(row.id) ?? []).map((entry) => entry.id),
+  })));
 
   return rows.map((row) => {
     const adjustments = byCase.get(row.id) ?? [];
@@ -24593,6 +24598,7 @@ async function hydrateCasesWith(q: Pick<DbClient, "query">, rows: CaseRow[], tod
       legacyFinancialMode: isLegacyFinancialMode(row.legacy_financial_mode) ? row.legacy_financial_mode : null,
       remainingObjectives: row.remaining_objectives,
       adjustments,
+      documentedWireRemovals: removals.get(row.id) ?? [],
       progress: caseProgress({
         startDate: dateText(row.start_date),
         plannedMonths: row.planned_months,
@@ -24610,6 +24616,44 @@ export async function listPatientOrthoCases(patientId: number, today: string): P
     `${CASE_SELECT} WHERE c.patient_id = $1 ORDER BY c.created_at DESC`, [patientId],
   );
   return hydrateCases(rows, today);
+}
+
+/**
+ * OW-1 (docs/review/ortho-wire-timeline-photo-records-contract-20261118.md): documented explicit
+ * wire removals, read from the existing `ortho.adjustment` audit rows that the only adjustment
+ * writer records in the same transaction. Read-only; no parallel record. A removal counts only
+ * when the row names this case, an adjustment of this case, and this case's patient — any other
+ * audit content is never returned.
+ */
+export type DocumentedWireRemoval = { adjustmentId: number; arch: "upper" | "lower" };
+export async function documentedWireRemovalsWith(
+  q: Pick<DbClient, "query">,
+  cases: readonly { caseId: number; patientId: number; adjustmentIds: readonly number[] }[],
+): Promise<Map<number, DocumentedWireRemoval[]>> {
+  const result = new Map<number, DocumentedWireRemoval[]>(cases.map(item => [item.caseId, []]));
+  const scoped = cases.filter(item => item.adjustmentIds.length > 0);
+  if (scoped.length === 0) return result;
+  const { rows } = await q.query<{ entity_id: string | null; case_id: string | null; adjustment_id: string | null; upper: boolean | null; lower: boolean | null }>(
+    `SELECT entity_id, details->>'الحالة' AS case_id, details->>'الشدّة' AS adjustment_id,
+            (details->>'إجراء_السلك_العلوي') = 'إزالة' AS upper, (details->>'إجراء_السلك_السفلي') = 'إزالة' AS lower
+       FROM audit_log
+      WHERE action = 'ortho.adjustment' AND entity = 'patient'
+        AND details->>'الحالة' = ANY($1::text[])
+        AND ((details->>'إجراء_السلك_العلوي') = 'إزالة' OR (details->>'إجراء_السلك_السفلي') = 'إزالة')
+      ORDER BY id`,
+    [scoped.map(item => String(item.caseId))],
+  );
+  const byCase = new Map(scoped.map(item => [item.caseId, { patient: String(item.patientId), adjustments: new Set(item.adjustmentIds) }]));
+  for (const row of rows) {
+    const caseId = Number(row.case_id), adjustmentId = Number(row.adjustment_id);
+    const scope = byCase.get(caseId);
+    if (!scope || row.entity_id !== scope.patient || !scope.adjustments.has(adjustmentId)) continue;
+    const list = result.get(caseId)!;
+    for (const arch of ["upper", "lower"] as const) {
+      if (row[arch] === true && !list.some(item => item.adjustmentId === adjustmentId && item.arch === arch)) list.push({ adjustmentId, arch });
+    }
+  }
+  return result;
 }
 
 export async function getOrthoCase(id: number, today: string): Promise<OrthoCase | null> {
@@ -24738,6 +24782,9 @@ export async function getOrthoClinicalDetailWith(
       elasticNote: a.elastic_note, done: a.done, nextWeeks: a.next_weeks, note: a.note, recordedBy: a.recorded_by,
     })),
     hasMore: history.length > 100,
+    documentedWireRemovals: (await documentedWireRemovalsWith(q, [{
+      caseId: row.id, patientId: row.patient_id, adjustmentIds: history.slice(0, 100).map(a => a.id),
+    }])).get(row.id) ?? [],
     progress: caseProgress({ startDate: dateText(row.start_date), plannedMonths: row.planned_months,
       adjustments: stats.count, lastAdjustmentDate: stats.last ? dateText(stats.last) : null, today }),
   };

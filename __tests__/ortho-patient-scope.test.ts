@@ -38,6 +38,7 @@ function fixture(id: number, patientId: number): OrthoCase {
     note: `Synthetic clinical note ${id}`, closedAt: null, closedBy: null, closedNote: null,
     baselineKind: null, baselineRecordedAt: null, elastics: null, responsibleDoctorId: 8,
     responsibleDoctorName: "Synthetic other case doctor", legacyFinancialMode: null, remainingObjectives: null,
+    documentedWireRemovals: [],
     adjustments: [{
       id: id + 1000, visitId: null, visitSigned: false, doneOn: "2026-10-01", phase: "aligning",
       upperWire: "014 NiTi", lowerWire: "014 NiTi", elastics: "none", elasticNote: null,

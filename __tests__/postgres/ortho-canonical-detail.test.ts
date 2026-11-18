@@ -49,7 +49,8 @@ it.each(["all", "owner"] as const)("%s sees active and closed native clinical hi
   const result = await read(key);
   expect(result).toMatchObject({ projection: "case-clinical", hasMore: false, progress: { adjustments: 1 }, adjustments: [expect.objectContaining({ note: "SYN-private-adjustment" })] });
   expect((await read(key, ids.closed)).case.note).toBe("SYN-private-note");
-  expect(Object.keys(result).sort()).toEqual(["projection", "case", "clinicTimeZone", "adjustments", "editVersion", "hasMore", "progress", "today"].sort());
+  expect(Object.keys(result).sort()).toEqual(["projection", "case", "clinicTimeZone", "adjustments", "documentedWireRemovals", "editVersion", "hasMore", "progress", "today"].sort());
+  expect(result.documentedWireRemovals).toEqual([]);
   expect(result.editVersion).toMatch(/^[a-f0-9]{64}$/);
   expect((await read(key, ids.closed)).editVersion).toBeNull();
   expect(Object.keys(result.case).sort()).toEqual(["id", "patientId", "patientName", "appliance", "arches", "slot", "bracketSystem", "status", "phase", "startDate", "plannedMonths", "upperWire", "lowerWire", "retainer", "retainerOn", "note", "closedAt", "closedNote", "baselineKind", "baselineRecordedAt", "elastics", "remainingObjectives", "responsibleDoctorId", "responsibleDoctorName"].sort());
@@ -89,7 +90,10 @@ it("uses one read-only RR lease and never touches independent tables, schema, au
     expect(connect).toHaveBeenCalledTimes(1); expect(query).not.toHaveBeenCalled();
     // The central membership predicate legitimately references plan/visit ids; the
     // domain projection must not join/fetch those records or any document payload.
-    expect(statements).toHaveLength(3);
+    // OW-1 adds exactly one read-only SELECT over the existing ortho.adjustment audit rows.
+    expect(statements).toHaveLength(4);
+    expect(statements[3]).toMatch(/^\s*SELECT entity_id, details->>'الحالة'/);
+    expect(statements[3]).toMatch(/FROM audit_log\s+WHERE action = 'ortho\.adjustment' AND entity = 'patient'/);
     expect(statements.join(" ")).not.toMatch(/JOIN visits|JOIN treatment_plans|patient_documents|plan_id|legacy_financial_mode|INSERT |UPDATE |DELETE |CREATE /i);
   } finally { connect.mockRestore(); query.mockRestore(); reader.mockRestore(); }
   expect((await fx.pool.query("SELECT (SELECT count(*) FROM audit_log)::int AS audits,(SELECT count(*) FROM invoices)::int AS invoices,(SELECT count(*) FROM clinical_cases)::int AS bridges")).rows).toEqual(before);
@@ -186,4 +190,39 @@ it("legacy full reader and independent financial fields remain unchanged", async
   const old = await db.getOrthoCase(ids.closed, "2026-10-30");
   expect(old).toMatchObject({ legacyFinancialMode: "installments", note: "SYN-private-note", planId: null });
   expect(JSON.stringify(await read("owner", ids.closed))).not.toContain("installments");
+});
+it("OW-1: documented wire removals come from the real writer's audit row, scoped to this case, identical in both reads", async () => {
+  const wireCase = (await fx.pool.query("INSERT INTO ortho_cases(patient_id,start_date,created_by,upper_wire,lower_wire) VALUES($1,'2026-01-01','SYN','014 NiTi','014 NiTi') RETURNING id", [ids.empty])).rows[0].id;
+  const session = (extra: { doneOn: string; upperWire?: string | null; upperWireAction?: "remove" }) => ({
+    caseId: wireCase, visitId: null, phase: null, upperWire: null, lowerWire: null, elastics: "none" as const,
+    elasticNote: null, done: "Synthetic OW-1 session", nextWeeks: 4, note: null, recordedBy: "SYN-OD-OWNER", ...extra,
+  });
+  const wired = await db.recordAdjustment(session({ doneOn: "2026-02-01", upperWire: "016 NiTi" }));
+  const blank = await db.recordAdjustment(session({ doneOn: "2026-03-01" }));
+  const removed = await db.recordAdjustment(session({ doneOn: "2026-04-01", upperWire: "", upperWireAction: "remove" }));
+  if (!wired.ok || !blank.ok || !removed.ok) throw new Error("synthetic session refused");
+  // Blank stays unchanged at write time; explicit removal stores null on the row only.
+  expect((await fx.pool.query("SELECT id,upper_wire,lower_wire FROM ortho_adjustments WHERE case_id=$1 ORDER BY id", [wireCase])).rows).toEqual([
+    { id: wired.id, upper_wire: "016 NiTi", lower_wire: "014 NiTi" },
+    { id: blank.id, upper_wire: "016 NiTi", lower_wire: "014 NiTi" },
+    { id: removed.id, upper_wire: null, lower_wire: "014 NiTi" },
+  ]);
+  // Forged or foreign rows never count: another case, an adjustment of another case, another patient.
+  const foreignAdjustment = (await fx.pool.query("INSERT INTO ortho_adjustments(case_id,recorded_by) VALUES($1,'SYN') RETURNING id", [ids.foreignCase])).rows[0].id;
+  const forge = (entityId: number, details: Record<string, unknown>) => fx.pool.query(
+    "INSERT INTO audit_log(action,entity,entity_id,summary,details,actor) VALUES('ortho.adjustment','patient',$1,'SYN',$2::jsonb,'SYN')", [String(entityId), JSON.stringify(details)]);
+  await forge(ids.empty, { "الحالة": ids.foreignCase, "الشدّة": foreignAdjustment, "إجراء_السلك_السفلي": "إزالة" });
+  await forge(ids.empty, { "الحالة": wireCase, "الشدّة": foreignAdjustment, "إجراء_السلك_السفلي": "إزالة" });
+  await forge(ids.outside, { "الحالة": wireCase, "الشدّة": blank.id, "إجراء_السلك_السفلي": "إزالة" });
+  await forge(ids.empty, { "الحالة": wireCase, "الشدّة": blank.id, "إجراء_السلك_السفلي": "تغيير" });
+  try {
+    const expected = [{ adjustmentId: removed.id, arch: "upper" }];
+    for (const key of ["own", "all", "owner"] as const) expect((await read(key, wireCase)).documentedWireRemovals).toEqual(expected);
+    expect((await db.getOrthoCase(wireCase, "2026-11-18"))?.documentedWireRemovals).toEqual(expected);
+    expect(JSON.stringify(await read("own", wireCase))).not.toMatch(/المصدر|"summary"|"actor"|"entity_id"/);
+  } finally {
+    // audit_log is append-only by trigger; the synthetic rows stay and are scoped to these synthetic ids.
+    await fx.pool.query("DELETE FROM ortho_adjustments WHERE case_id=$1 OR id=$2", [wireCase, foreignAdjustment]);
+    await fx.pool.query("DELETE FROM ortho_cases WHERE id=$1", [wireCase]);
+  }
 });

@@ -35,6 +35,7 @@ import { OrthoCaseAssessmentV2, type AssessmentLifetimeV2 } from "./OrthoCaseAss
 import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentStrategy";
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
+import { OrthoWireTimeline } from "./OrthoWireTimeline";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
   LEGACY_FINANCIAL_HINT, LEGACY_FINANCIAL_LABEL, LEGACY_FINANCIAL_MODES, monthsBefore, checkOrthoSessionDraft,
@@ -98,6 +99,8 @@ interface OrthoCase {
   /** Absent on older payloads; explicit false means withheld, not an empty album. */
   photosVisible?: boolean;
   adjustments: Adjustment[];
+  /** OW-1: documented explicit wire removals; absent on older payloads (said so in the timeline). */
+  documentedWireRemovals?: { adjustmentId: number; arch: "upper" | "lower" }[];
   progress: {
     monthsElapsed: number; monthsPlanned: number; monthsRemaining: number;
     percent: number; overdue: boolean; adjustments: number;
@@ -319,7 +322,13 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
       })
       || !Object.hasOwn(CASE_STATUS_LABEL, row.status) || !Object.hasOwn(PHASE_LABEL, row.phase)
       || !Object.hasOwn(APPLIANCE_LABEL, row.appliance) || !Object.hasOwn(ARCHES_LABEL, row.arches)
-      || !Object.hasOwn(SLOT_LABEL, row.slot)) throw new Error("تعذّر التحقق من حالات التقويم.");
+      || !Object.hasOwn(SLOT_LABEL, row.slot)
+      || (row.documentedWireRemovals !== undefined && (!Array.isArray(row.documentedWireRemovals)
+        || row.documentedWireRemovals.some((item: unknown) => {
+          const one = item as { adjustmentId?: unknown; arch?: unknown } | null;
+          return !one || typeof one !== "object" || !Number.isSafeInteger(one.adjustmentId) || Number(one.adjustmentId) <= 0
+            || (one.arch !== "upper" && one.arch !== "lower");
+        })))) throw new Error("تعذّر التحقق من حالات التقويم.");
     ids.add(row.id);
   }
   return list as OrthoCase[];
@@ -871,6 +880,14 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                           )}
                         </div>
                       )}
+
+                      {/* OW-1: الخط الزمني للأسلاك — قراءة فقط فوق السجل، بلا خطوة جديدة */}
+                      {usesArchwires(row.appliance) && row.adjustments.length > 0 ? (
+                        <OrthoWireTimeline slot={row.slot} appliance={row.appliance} arches={row.arches}
+                          upperWire={row.upperWire} lowerWire={row.lowerWire}
+                          closed={row.status === "completed" || row.status === "discontinued"}
+                          adjustments={row.adjustments} documentedWireRemovals={row.documentedWireRemovals} />
+                      ) : null}
 
                       {/* سجل الشدّات السابقة وألبومات الجلسات */}
                       {row.photosVisible === false ? (

@@ -394,6 +394,8 @@ export interface OrthoClinicalDetail {
   case: OrthoClinicalCase;
   adjustments: OrthoClinicalAdjustment[];
   hasMore: boolean;
+  /** OW-1: documented explicit wire removals for the shown adjustments (existing audit rows). */
+  documentedWireRemovals: { adjustmentId: number; arch: "upper" | "lower" }[];
   progress: CaseProgress;
   today: string;
 }
