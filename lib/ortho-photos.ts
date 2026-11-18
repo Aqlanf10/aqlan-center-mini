@@ -179,6 +179,49 @@ export function photoStageRequirements(raw: string | null | undefined): PhotoSta
   return parsed.ok ? parsed.value : DEFAULT_PHOTO_STAGE_REQUIREMENTS;
 }
 
+/* ─────────────────────── OP-3: ترتيب صفحة الطباعة ─────────────────────── */
+
+/** تسميات الطباعة: الجانب يُقال بجانب المريض صراحةً. الرموز الداخلية كما هي. */
+export const PHOTO_VIEW_PRINT_LABEL: Record<PhotoView, string> = {
+  ...PHOTO_VIEW_LABEL,
+  intraoral_right: "داخل الفم — جانب المريض الأيمن",
+  intraoral_left: "داخل الفم — جانب المريض الأيسر",
+};
+
+/** صفوف الطباعة الافتراضية؛ المركز يغيّرها من `ortho.photo_print_layout`. */
+export const DEFAULT_PHOTO_PRINT_LAYOUT: PhotoView[][] = [
+  ["profile", "extraoral_frontal", "smile", "extraoral_45"],
+  ["intraoral_right", "intraoral_frontal", "intraoral_left"],
+  ["upper_occlusal", "lower_occlusal"],
+  ["overjet"],
+];
+
+/** فارغ = الافتراضي؛ وإلا صفوف (1–4 مناظر) من المناظر الفوتوغرافية بلا تكرار. */
+export function parsePhotoPrintLayout(raw: string):
+  | { ok: true; value: PhotoView[][] } | { ok: false; message: string } {
+  const text = raw.trim();
+  if (text === "") return { ok: true, value: DEFAULT_PHOTO_PRINT_LAYOUT };
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { return { ok: false, message: "صيغة JSON غير صالحة." }; }
+  if (!Array.isArray(parsed) || parsed.length === 0) return { ok: false, message: "يجب أن تكون القيمة قائمة صفوف غير فارغة." };
+  const seen = new Set<string>();
+  for (const row of parsed) {
+    if (!Array.isArray(row) || row.length === 0 || row.length > 4) return { ok: false, message: "كل صف قائمة من منظر واحد إلى أربعة مناظر." };
+    for (const view of row) {
+      if (typeof view !== "string" || !isPhotoView(view)) return { ok: false, message: `منظر غير معروف: ${String(view)}.` };
+      if (RADIOGRAPH_VIEWS.includes(view)) return { ok: false, message: `الأشعة لا تُطبع في صفحة الصور (${PHOTO_VIEW_LABEL[view]}).` };
+      if (seen.has(view)) return { ok: false, message: `المنظر مكرر: ${PHOTO_VIEW_LABEL[view]}.` };
+      seen.add(view);
+    }
+  }
+  return { ok: true, value: parsed as PhotoView[][] };
+}
+
+export function photoPrintLayout(raw: string | null | undefined): PhotoView[][] {
+  const parsed = parsePhotoPrintLayout(raw ?? "");
+  return parsed.ok ? parsed.value : DEFAULT_PHOTO_PRINT_LAYOUT;
+}
+
 /* ─────────────────────────── اقتراح الدور ─────────────────────────── */
 
 export interface StageSuggestionInput {

@@ -46,6 +46,7 @@ export type SettingKey =
   | "ortho.case_doctor_no_charge"
   | "ortho.full_photo_set_interval_months"
   | "ortho.photo_stage_requirements"
+  | "ortho.photo_print_layout"
   | "display.privacy_mode"
   | "display.voice_uri"
   | "display.voice_rate"
@@ -152,6 +153,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "ortho.full_photo_set_interval_months": "6",
   // OP-1: empty = defaults (eight required per stage; 45° and overjet optional).
   "ortho.photo_stage_requirements": "",
+  // OP-3: empty = default print rows (extraoral, intraoral by patient side, occlusal, overjet).
+  "ortho.photo_print_layout": "",
   // عشرون ميغابايت تكفي أشعةً بانورامية بجودةٍ عالية، وتردّ ملفًّا رُفع بالخطأ
   // — مقطعَ فيديو مثلًا — قبل أن يملأ القرص.
   "documents.max_megabytes": "20",

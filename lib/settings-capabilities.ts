@@ -73,6 +73,7 @@ export const SETTING_KEY_CLASSES: Readonly<Record<string, KeyClass>> = Object.fr
   "plans.specialty_templates": k("operational"), "ortho.adjustment_service_ids": k("finance"),
   // (OP-1) سياسة تصوير التقويم — تشغيلية، لا مال ولا صلاحيات.
   "ortho.full_photo_set_interval_months": k("operational"), "ortho.photo_stage_requirements": k("operational"),
+  "ortho.photo_print_layout": k("operational"),
   "clinical.medical_history_review_months": k("operational"), "documents.max_megabytes": k("operational"),
   "inventory.expiry_soon_days": k("operational"),
   // Finance.

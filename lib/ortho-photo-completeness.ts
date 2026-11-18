@@ -8,7 +8,7 @@
  * الأشعة منفصلة عن نسبة الصور. وبلا صلاحية الصور تُخفى اللوحة كلها، حتى الأعداد.
  */
 import {
-  PHOTO_STAGE_ORDER, RADIOGRAPH_VIEWS, isPhotoStage, isPhotoView,
+  PHOTO_STAGE_ORDER, RADIOGRAPH_VIEWS, isPhotoStage, isPhotoView, PHOTOGRAPHIC_VIEWS,
   type PhotoStage, type PhotoStageRequirements, type PhotoView,
 } from "./ortho-photos";
 
@@ -126,3 +126,46 @@ export function photoCompleteness(input: {
   const stagesWithoutSets = PHOTO_STAGE_ORDER.filter(stage => !sets.some(set => set.stage === stage));
   return { status: "ready", sets, stagesWithoutSets, unclassified, radiographs };
 }
+
+/* ─────────────────────── OP-3: ورقة مجموعة تصوير واحدة للطباعة ─────────────────────── */
+
+export interface SheetCell { view: PhotoView; photo: { id: number } | null; extraCount: number }
+export type CaptureSheet =
+  | { status: "empty" }
+  | { status: "ready"; rows: SheetCell[][]; otherViews: SheetCell[]; missingRequired: PhotoView[] };
+
+/**
+ * مجموعة تصوير واحدة فقط (مرحلة + تاريخ + جلسة) — لا تُخلط بغيرها أبدًا.
+ * المطلوب الناقص إطار فارغ؛ الاختياري غير المصوّر لا يُرسم؛ والمصوّر خارج الترتيب
+ * يُضاف صفًّا أخيرًا فلا يُخفى. المنظر المكرر يُعرض أقدمه مع عدد البقية.
+ */
+export function buildCaptureSheet(input: {
+  documents: readonly CompletenessDocument[];
+  patientId: number; caseId: number;
+  stage: PhotoStage; takenOn: string; adjustmentId: number | null;
+  requirements: PhotoStageRequirements;
+  layout: PhotoView[][];
+}): CaptureSheet {
+  const byView = new Map<PhotoView, number[]>();
+  for (const doc of input.documents) {
+    if (doc.patientId !== input.patientId || doc.orthoCaseId !== input.caseId || !doc.isImage || doc.removedAt !== null
+      || doc.photoStage !== input.stage || doc.takenOn !== input.takenOn || doc.adjustmentId !== input.adjustmentId
+      || !isPhotoView(doc.photoView) || !PHOTOGRAPHIC_VIEWS.includes(doc.photoView)) continue;
+    const list = byView.get(doc.photoView) ?? [];
+    list.push(doc.id);
+    byView.set(doc.photoView, list);
+  }
+  if (byView.size === 0) return { status: "empty" };
+  const required = input.requirements[input.stage].required;
+  const cell = (view: PhotoView): SheetCell => {
+    const ids = [...(byView.get(view) ?? [])].sort((a, b) => a - b);
+    return { view, photo: ids.length ? { id: ids[0] } : null, extraCount: Math.max(0, ids.length - 1) };
+  };
+  const placed = new Set(input.layout.flat());
+  const rows = input.layout
+    .map(row => row.filter(view => required.includes(view) || byView.has(view)).map(cell))
+    .filter(row => row.length > 0);
+  const otherViews = PHOTOGRAPHIC_VIEWS.filter(view => !placed.has(view) && byView.has(view)).map(cell);
+  return { status: "ready", rows, otherViews, missingRequired: required.filter(view => !byView.has(view)) };
+}
+

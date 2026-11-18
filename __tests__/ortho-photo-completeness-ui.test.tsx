@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { OrthoPhotoCompletenessPanel, PhotoCompletenessView } from "../components/OrthoPhotoCompleteness";
+import { OrthoPhotoCompletenessPanel, PhotoCompletenessView, photoSheetHref } from "../components/OrthoPhotoCompleteness";
 import { DEFAULT_PHOTO_STAGE_REQUIREMENTS, FULL_SET_VIEWS } from "@/lib/ortho-photos";
 import { photoCompleteness, type CompletenessDocument } from "@/lib/ortho-photo-completeness";
 
@@ -35,6 +35,17 @@ describe("PhotoCompletenessView (OP-2)", () => {
     expect(out).toContain("الأشعة (مؤشر منفصل، لا يدخل نسبة الصور):");
     expect(out).toMatch(/سيفالومترية جانبية\s*موجودة بتاريخ <span><bdi dir="ltr">2026-01-04<\/bdi><\/span>/);
     expect(out).toContain("لم تُصوَّر بعد:");
+  });
+
+  it("links each capture set to its own print sheet (stage + date + session)", () => {
+    expect(photoSheetHref(2, { stage: "initial", takenOn: "2026-01-04", adjustmentId: 3 })).toBe("/print/ortho-photos/2?stage=initial&date=2026-01-04&adjustment=3");
+    expect(photoSheetHref(2, { stage: "progress", takenOn: "2026-06-01", adjustmentId: null })).toBe("/print/ortho-photos/2?stage=progress&date=2026-06-01&adjustment=none");
+    const out = renderToStaticMarkup(createElement(PhotoCompletenessView, {
+      caseId: 2, requirements: DEFAULT_PHOTO_STAGE_REQUIREMENTS,
+      result: photoCompleteness({ documents: [doc({ photoView: "smile" })], patientId: 1, caseId: 2, photosVisible: true, requirements: DEFAULT_PHOTO_STAGE_REQUIREMENTS }),
+    }));
+    expect(out).toContain('href="/print/ortho-photos/2?stage=initial&amp;date=2026-01-04&amp;adjustment=3"');
+    expect(out).toContain(">طباعة</a>");
   });
 
   it("states unclassified images and an empty case honestly", () => {

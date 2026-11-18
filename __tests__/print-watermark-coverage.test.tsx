@@ -20,13 +20,13 @@ describe("one shared print-document watermark across all paper families", () => 
     expect(html).toContain('data-logo-state="unavailable"'); expect(html).not.toContain("<img");
     expect(source("components/PrintDocumentWatermark.tsx")).toContain("onError={() => setFailed(true)}");
   });
-  it("covers all 25 dedicated routes through their existing shared identity renderers", () => {
+  it("covers all 26 dedicated routes through their existing shared identity renderers", () => {
     const pages: string[] = [];
     function visit(path: string) { for (const entry of readdirSync(path, { withFileTypes: true })) {
       const full = join(path, entry.name); if (entry.isDirectory()) visit(full); else if (entry.name === "page.tsx") pages.push(full);
     } }
     visit(new URL("../app/print", import.meta.url).pathname);
-    expect(pages).toHaveLength(25);
+    expect(pages).toHaveLength(26); // OP-3 adds /print/ortho-photos/[caseId]
     for (const page of pages) expect(readFileSync(page, "utf8")).toMatch(/PrintHeader|PrintableReportDocument/);
   });
   it("uses fixed-size agreement/page marks and retains compact paper choice", () => {
@@ -46,6 +46,7 @@ describe("one shared print-document watermark across all paper families", () => 
     expect(source("app/print/consent/[id]/page.tsx")).toContain('<img data-signature-img src={`/api/documents/${resolution.documentId}`}');
     expect(source("app/print/lab/[id]/page.tsx")).toContain('className="print-watermark-protected" src={qrCodeDataUrl}');
     expect(source("app/print/ceph/[id]/page.tsx")).toContain('className="print-watermark-protected"');
+    expect(source("app/print/ortho-photos/[caseId]/page.tsx")).toContain('<img className="print-watermark-protected" src={`/api/documents/${cell.photo.id}`}');
     expect(source("app/print/print.css")).toContain("z-index: 50;"); // reprint warning remains above the decorative logo
   });
   it("exempts only the decorative singleton from modal sibling suppression", () => {

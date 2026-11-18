@@ -19,7 +19,13 @@ function DateText({ value }: { value: string }) {
   return <bdi dir="ltr">{value}</bdi>;
 }
 
-export function PhotoCompletenessView({ result, requirements }: { result: PhotoCompleteness; requirements: PhotoStageRequirements }) {
+/** OP-3: رابط ورقة الطباعة لمجموعة تصوير واحدة بعينها. */
+export function photoSheetHref(caseId: number, set: { stage: string; takenOn: string; adjustmentId: number | null }): string {
+  const query = new URLSearchParams({ stage: set.stage, date: set.takenOn, adjustment: set.adjustmentId === null ? "none" : String(set.adjustmentId) });
+  return `/print/ortho-photos/${caseId}?${query.toString()}`;
+}
+
+export function PhotoCompletenessView({ result, requirements, caseId }: { result: PhotoCompleteness; requirements: PhotoStageRequirements; caseId?: number }) {
   if (result.status === "hidden") {
     return <p role="status" className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">{HIDDEN_TEXT}</p>;
   }
@@ -40,8 +46,12 @@ export function PhotoCompletenessView({ result, requirements }: { result: PhotoC
                   <span className="font-extrabold text-navy-900">
                     {PHOTO_STAGE_LABEL[set.stage]} · <DateText value={set.takenOn} />{set.adjustmentId === null ? " · بلا جلسة" : ""}
                   </span>
-                  <span className="font-bold text-slate-700">
+                  <span className="flex items-center gap-2 font-bold text-slate-700">
                     {set.requiredPresent} من {set.requiredCount} مطلوبة{complete ? " · مكتملة" : ""}
+                    {caseId !== undefined ? (
+                      <a href={photoSheetHref(caseId, set)} target="_blank" rel="noopener"
+                        className="rounded-md border border-sky-200 bg-white px-2 py-0.5 text-[11px] text-sky-800 hover:bg-sky-50">طباعة</a>
+                    ) : null}
                   </span>
                 </div>
                 {!complete ? (
@@ -109,5 +119,5 @@ export function OrthoPhotoCompletenessPanel({ patientId, caseId, photosVisible }
   if (photosVisible !== true) return <PhotoCompletenessView result={{ status: "hidden" }} requirements={requirements} />;
   if (state.status === "error") return <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">{PHOTO_COMPLETENESS_READ_FAILURE}</p>;
   if (!result) return <p className="text-xs text-slate-500">جارٍ تحميل اكتمال الصور…</p>;
-  return <PhotoCompletenessView result={result} requirements={requirements} />;
+  return <PhotoCompletenessView result={result} requirements={requirements} caseId={caseId} />;
 }
