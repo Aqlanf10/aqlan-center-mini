@@ -72,7 +72,12 @@ function WireCellView({ cell }: { cell: WireCell }) {
         </span>
       );
     case "same":
-      return <WireText text={cell.text ?? ""} strong={false} />;
+      // قرار د. عقلان (6994419378): السلك نفسه مسجّلًا صراحةً ليس تغييرًا — اسمه خافت مع «سُجّل مجددًا».
+      return (
+        <span className="flex flex-wrap items-center gap-1.5 text-slate-400">
+          <WireText text={cell.text ?? ""} strong={false} /><span>بلا تغيير · سُجّل مجددًا</span>
+        </span>
+      );
     case "removal":
       return <Badge tone="amber">إزالة موثّقة</Badge>;
     case "unchanged":

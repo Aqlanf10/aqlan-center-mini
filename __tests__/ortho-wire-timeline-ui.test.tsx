@@ -51,6 +51,20 @@ describe("OrthoWireTimeline — session rows (OW-1 redesign)", () => {
     expect(quiet).toContain('class="text-slate-400">بلا تغيير');
   });
 
+  it("an explicitly re-recorded same wire shows its name faintly with «بلا تغيير · سُجّل مجددًا», never as a change", () => {
+    const same = html({ adjustments: [
+      { id: 2, doneOn: "2026-02-01", phase: null, upperWire: "016 NiTi", lowerWire: null, elastics: "none", elasticNote: null },
+      { id: 1, doneOn: "2026-01-04", phase: null, upperWire: "016 NiTi", lowerWire: null, elastics: "none", elasticNote: null },
+    ], documentedWireRemovals: [] });
+    const row = tableRows(same)[0];
+    expect(row).toContain('<bdi dir="ltr" class="text-slate-500">016 NiTi</bdi><span>بلا تغيير · سُجّل مجددًا</span>');
+    expect(row).not.toMatch(/>تغيير<|أول تسجيل/);
+    const [, , lower, elastics] = tableRows(same)[0].split("</td>");
+    expect(lower).toContain("غير موثّق");
+    expect(elastics).toContain("بلا تغيير");
+    expect(elastics).not.toContain("سُجّل مجددًا");
+  });
+
   it("stacks sessions vertically for mobile: date first, then upper, lower and elastics", () => {
     const out = html();
     expect(out).toContain('class="space-y-2 sm:hidden" data-testid="wire-sessions-list"');
