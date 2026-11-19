@@ -130,3 +130,25 @@ it("keeps the printed invoice on the same clinic day as its account and statemen
   expect(await render()).toContain("الجمعة 30/10/2026");
   expect(record).toEqual(before);
 });
+
+
+describe("filling invoice print tooth identities", () => {
+  it("renders each persisted-style tooth and its own surfaces without copying surfaces to an empty tooth", async () => {
+    const record = { ...structuredClone(invoice), totalMinor: 80000, discountMinor: 5000,
+      items: [
+        { id: 81, serviceId: 31, doctorId: 1, description: "SYNTHETIC-FILLING", toothCode: 16, surfaces: "MO", quantity: 1, unitPriceMinor: 25000, totalMinor: 25000 },
+        { id: 82, serviceId: 31, doctorId: 2, description: "SYNTHETIC-FILLING", toothCode: 26, surfaces: "DB", quantity: 1, unitPriceMinor: 30000, totalMinor: 30000 },
+        { id: 83, serviceId: 31, doctorId: 1, description: "SYNTHETIC-FILLING", toothCode: 36, surfaces: null, quantity: 1, unitPriceMinor: 25000, totalMinor: 25000 },
+      ] };
+    const before = structuredClone(record);
+    mocks.getInvoice.mockResolvedValue(record);
+    const html = await render();
+    const rows = html.match(/<tr>[\s\S]*?<\/tr>/g)!.filter(row => row.includes("SYNTHETIC-FILLING"));
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toContain("سن 16"); expect(rows[0]).toContain("<bdi>MO</bdi>"); expect(rows[0]).not.toContain("<bdi>DB</bdi>");
+    expect(rows[1]).toContain("سن 26"); expect(rows[1]).toContain("<bdi>DB</bdi>"); expect(rows[1]).not.toContain("<bdi>MO</bdi>");
+    expect(rows[2]).toContain("سن 36"); expect(rows[2]).not.toContain("أسطح");
+    expect(html).toContain(formatMoney(75000, "YER"));
+    expect(record).toEqual(before);
+  });
+});
