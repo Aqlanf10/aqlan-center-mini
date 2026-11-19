@@ -55,11 +55,14 @@ describe("daily-clinic spending query on PostgreSQL", () => {
   });
 
   it("keeps both repeated midnight hours in a configured DST timezone", async () => {
+    // Havana fell back 01:00 -> 00:00 on 2025-11-02, so that day repeats its midnight hour. A past
+    // transition is fixed in every tz database; 2026-11-01 stopped repeating in tzdata 2026f (Cuba
+    // stays on -04 through 2027-11-07), so a future date must not carry this assertion.
     await client.query(`INSERT INTO pg_temp.expenses (id,voucher_number,created_at,amount_minor,currency)
       SELECT row_number() OVER ()::int, 'DST-' || row_number() OVER (), instant, 1, 'YER'
-      FROM generate_series('2026-11-01 03:00+00'::timestamptz, '2026-11-02 07:00+00'::timestamptz, interval '30 minute') instant`);
-    const expected = (await client.query("SELECT id FROM pg_temp.expenses WHERE (created_at AT TIME ZONE 'America/Havana')::date = '2026-11-01' ORDER BY created_at,id")).rows;
-    const report = await read("2026-11-01", "America/Havana");
+      FROM generate_series('2025-11-02 03:00+00'::timestamptz, '2025-11-03 07:00+00'::timestamptz, interval '30 minute') instant`);
+    const expected = (await client.query("SELECT id FROM pg_temp.expenses WHERE (created_at AT TIME ZONE 'America/Havana')::date = '2025-11-02' ORDER BY created_at,id")).rows;
+    const report = await read("2025-11-02", "America/Havana");
     expect(report.movements.map((row) => row.id)).toEqual(expected.map((row) => row.id));
     expect(report.movements).toHaveLength(50);
   });
