@@ -103,10 +103,13 @@ describe("document association boundary over real authenticated HTTP", () => {
     expect((await db.query("SELECT patient_id,visit_id,ortho_case_id,adjustment_id FROM patient_documents WHERE id=$1", [document.id])).rows).toEqual([{
       patient_id: ownPatient, visit_id: ownVisit, ortho_case_id: ownCase, adjustment_id: ownAdjustment,
     }]);
-    const download = await authedGet(`/api/documents/${document.id}`, h.sessions.doctorA);
+    const download = await authedGet(`/api/documents/${document.id}`, h.sessions.doctorA, { "Accept-Encoding": "identity" });
     expect(download.status).toBe(200);
     expect(download.headers.get("content-type")).toBe("image/png");
-    expect(download.headers.get("content-length")).toBe(String(png.length));
+    expect(download.headers.get("content-disposition")).toBe(`inline; filename*=UTF-8''${encodeURIComponent(title)}`);
+    // Next's Node adapter can omit Content-Length; the exact body remains required.
+    const advertisedLength = download.headers.get("content-length");
+    if (advertisedLength !== null) expect(advertisedLength).toBe(String(png.length));
     expect(download.headers.get("cache-control")).toContain("private");
     expect(download.headers.get("cache-control")).toContain("no-store");
     expect(download.headers.get("x-content-type-options")).toBe("nosniff");
