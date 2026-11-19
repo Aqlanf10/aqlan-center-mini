@@ -206,6 +206,13 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
         await expect.poll(() => tooth.getAttribute("aria-pressed")).toBe("true");
         expect(await dialog.locator('[data-testid^="odontogram-tooth-"][aria-pressed="true"]').count()).toBe(1);
         geometry.push({ code, ...proof });
+        // Filling selection toggles; return to an empty selection before testing the next target.
+        if (code !== ALL_TEETH.at(-1)) {
+          const unpick = await revealDialogControlByWheel(page, tooth);
+          await page.mouse.click((unpick.rect.left + unpick.rect.right) / 2, (unpick.rect.top + unpick.rect.bottom) / 2);
+          await expect.poll(() => tooth.getAttribute("aria-pressed")).toBe("false");
+          expect(await dialog.locator('[data-testid^="odontogram-tooth-"][aria-pressed="true"]').count()).toBe(0);
+        }
       }
       expect(geometry.map(one => one.code)).toEqual(ALL_TEETH);
       const confirmControl = page.getByTestId("tooth-dialog-confirm");
