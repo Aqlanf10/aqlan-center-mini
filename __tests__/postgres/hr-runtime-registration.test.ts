@@ -1,4 +1,3 @@
-import { GROUPED_LAB_ORDER_SQL } from "../../lib/grouped-lab-order-schema";
 import { LAB_WORK_INTENT_SQL } from "../../lib/lab-work-intent-schema";
 import { PATIENT_NUMBERING_SQL } from "../../lib/patient-numbering-schema";
 import { INVOICE_ARCHIVE_SQL } from "../../lib/invoice-archive-schema";

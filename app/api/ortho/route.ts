@@ -1,3 +1,4 @@
+import { APPLIANCE_LABEL } from "@/lib/ortho";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -23,7 +24,8 @@ export const dynamic = "force-dynamic";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ACCESS_BATCH_SIZE = 8;
 
-const APPLIANCES = ["fixed_metal", "fixed_ceramic", "aligners", "removable", "functional"];
+// One list for every entry point: the saved labels decide which appliance values are accepted.
+const APPLIANCES: readonly string[] = Object.keys(APPLIANCE_LABEL);
 const ARCHES = ["upper", "lower", "both"];
 const SLOTS = ["018", "022"];
 
