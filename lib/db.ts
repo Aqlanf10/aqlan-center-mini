@@ -18506,7 +18506,10 @@ export const ORTHO_CASE_FUNDED_SQL =
       AND (EXISTS (SELECT 1 FROM plan_installments fpi WHERE fpi.plan_id = fp.id)
         OR EXISTS (SELECT 1 FROM approved_agreement_principals fap WHERE fap.plan_id = fp.id AND fap.patient_id = fp.patient_id)))`;
 
-/** One source of truth for the adjustment, in preview and in the sign transaction. */
+/** One source of truth for the adjustment, in preview and in the sign transaction.
+ * Governance candidate: missing or unproven evidence keeps main's OUTSIDE_CONTRACT
+ * (a pending billing decision). REVIEW_REQUIRED stays readable for rows saved
+ * by the retired 0079 line; no new row is classified with it here. */
 async function baseOrthoAdjustmentBillingClass(
   db: Pick<DbClient, "query">, caseId: number, patientId: number,
 ): Promise<BillingClassification> {
@@ -18527,14 +18530,14 @@ async function baseOrthoAdjustmentBillingClass(
        FROM ortho_cases c WHERE c.id = $1 AND c.patient_id = $2`,
     [caseId, patientId],
   );
-  if (!evidence) return "REVIEW_REQUIRED";
+  if (!evidence) return "OUTSIDE_CONTRACT";
   const checkedScope = validateLineSite({ category: "ortho", toothCode: null, scope: evidence.arches });
   const legacyEvidence = evidence.legacy_evidence ?? [];
-  if (legacyEvidence.some((entry) => entry.review || legacyCoverageStateFromContext(entry.context).kind !== "verified")) return "REVIEW_REQUIRED";
+  if (legacyEvidence.some((entry) => entry.review || legacyCoverageStateFromContext(entry.context).kind !== "verified")) return "OUTSIDE_CONTRACT";
   // Clearance and spatial proof must belong to the SAME historical item, never a live row plus a void row's wider scope.
   const legacyCovered = evidence.legacy_agreement && checkedScope.ok
     && legacyEvidence.some((entry) => entry.covered && legacyCoverageContains(legacyCoverageStateFromContext(entry.context), checkedScope.site));
-  if (legacyEvidence.length > 0 && !legacyCovered) return "REVIEW_REQUIRED";
+  if (legacyEvidence.length > 0 && !legacyCovered) return "OUTSIDE_CONTRACT";
   return classifyOrthoAdjustment({
     legacy: evidence.baseline_kind === "legacy",
     financialMode: isLegacyFinancialMode(evidence.legacy_financial_mode)
