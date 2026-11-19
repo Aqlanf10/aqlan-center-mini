@@ -211,8 +211,8 @@ export function checkOrthoSessionDraft(
   if (!Number.isInteger(nextWeeks) || nextWeeks < 1 || nextWeeks > 52) {
     return { ok: false, message: "المدة حتى الشدّة القادمة بين أسبوع و52 أسبوعًا." };
   }
+  // "What was done" stays optional, as on main: the owner's daily session steps are unchanged.
   const done = text(source.done, 400);
-  if (!done) return { ok: false, message: "وثّق ما تم في جلسة التقويم، أو المراجعة دون تغيير." };
   for (const arch of ["upper", "lower"] as const) {
     const action = source[`${arch}WireAction`];
     if (action !== undefined && action !== "remove") return { ok: false, message: "إجراء السلك غير صالح." };
