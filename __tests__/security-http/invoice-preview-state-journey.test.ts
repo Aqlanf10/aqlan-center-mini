@@ -647,10 +647,9 @@ describe("invoice form preview safety and shared chart interruption journeys", (
   });
 
   it.each([
-    { price: "abc", quantity: "1", currency: "YER" },
-    { price: "", quantity: "1", currency: "SAR" },
-    { price: "", quantity: "1", currency: "USD" },
-    { price: "1500000", quantity: "1000", currency: "YER" },
+    { price: "abc", currency: "YER" },
+    { price: "", currency: "SAR" },
+    { price: "", currency: "USD" },
   ])("invalid current values never retain a ready preview or enable save: %j", async (input) => {
     const { page, context } = await openInvoice();
     await page.route("**/api/invoices/clinical-preview", (route) => json(route, success(route)));
@@ -659,11 +658,31 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       await ready(page);
       await page.getByLabel("عملة الفاتورة", { exact: true }).selectOption(input.currency);
       await page.getByTestId("invoice-row-0").getByLabel("السعر", { exact: true }).fill(input.price);
-      await page.getByTestId("invoice-row-0").getByLabel("الكمية", { exact: true }).fill(input.quantity);
+      const quantity = page.getByTestId("invoice-row-0").getByLabel("الكمية", { exact: true });
+      expect(await quantity.isDisabled()).toBe(true);
+      expect(await quantity.inputValue()).toBe("1");
       await page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="invalid"]').waitFor();
       expect(await save(page).isEnabled()).toBe(false);
       expect(await page.getByTestId("invoice-input-problem-0").innerText()).not.toBe("");
       expect(await page.getByTestId("invoice-clinical-preview-0").innerText()).not.toContain("ستنشئ/تربط");
+    } finally { await context.close(); }
+  });
+
+  it("rejects quantity above 999 on an ordinary editable line", async () => {
+    const { page, context } = await openInvoice();
+    await page.route("**/api/invoices/clinical-preview", (route) => json(route, success(route)));
+    try {
+      const row = page.getByTestId("invoice-row-0");
+      await row.getByLabel("الخدمة", { exact: true }).selectOption(String(consultation));
+      await expect.poll(() => save(page).isEnabled()).toBe(true);
+      const quantity = row.getByLabel("الكمية", { exact: true });
+      expect(await quantity.isEnabled()).toBe(true);
+      await quantity.fill("1000");
+      await page.getByTestId("invoice-input-problem-0").waitFor();
+      expect(await page.getByTestId("invoice-input-problem-0").innerText()).toContain("999");
+      expect(await save(page).isEnabled()).toBe(false);
+      await quantity.fill("1");
+      await expect.poll(() => save(page).isEnabled()).toBe(true);
     } finally { await context.close(); }
   });
 
@@ -713,7 +732,7 @@ describe("invoice form preview safety and shared chart interruption journeys", (
     } finally { await context.close(); }
   });
 
-  it.each(["failure", "malformed"])("%s chart reads show unknown selectable anatomy; surfaces reset on tooth change and focus remains in the dialog", async (failure) => {
+  it.each(["failure", "malformed"])("%s chart reads show unknown selectable anatomy; surfaces stay tooth-specific and focus remains in the dialog", async (failure) => {
     const { page, context } = await openInvoice();
     const charts: string[] = [];
     await page.route("**/api/patients/*/chart", async (route) => {
@@ -735,11 +754,22 @@ describe("invoice form preview safety and shared chart interruption journeys", (
       expect(await tooth.locator("path").first().getAttribute("stroke-dasharray")).toBe("2 2");
       expect(await tooth.isEnabled()).toBe(true);
       await tooth.click();
-      await dialog.getByTestId("surface-M").click();
-      await dialog.getByTestId("surface-O").click();
+      const previous = dialog.getByRole("group", { name: /أسطح السن 26/ });
+      await previous.getByTestId("surface-M").click();
+      await previous.getByTestId("surface-O").click();
       await dialog.getByTestId("odontogram-tooth-27").click();
-      expect(await dialog.getByTestId("surface-M").getAttribute("aria-pressed")).toBe("false");
-      expect(await dialog.getByTestId("surface-O").getAttribute("aria-pressed")).toBe("false");
+      const added = dialog.getByRole("group", { name: /أسطح السن 27/ });
+      for (const surface of ["M", "O"]) {
+        expect(await previous.getByTestId("surface-" + surface).getAttribute("aria-pressed")).toBe("true");
+        expect(await added.getByTestId("surface-" + surface).getAttribute("aria-pressed")).toBe("false");
+      }
+      await tooth.click();
+      expect(await previous.count()).toBe(0);
+      await tooth.click();
+      for (const surface of ["M", "O"]) {
+        expect(await previous.getByTestId("surface-" + surface).getAttribute("aria-pressed")).toBe("false");
+      }
+      expect(await dialog.getByTestId("odontogram-tooth-27").getAttribute("aria-pressed")).toBe("true");
       await dialog.getByRole("button", { name: "إغلاق", exact: true }).focus();
       await page.keyboard.press("Shift+Tab");
       expect(await page.getByTestId("tooth-dialog-confirm").evaluate((element) => element === document.activeElement)).toBe(true);

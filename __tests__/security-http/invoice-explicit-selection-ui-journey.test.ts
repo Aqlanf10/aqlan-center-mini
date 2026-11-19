@@ -77,7 +77,15 @@ async function open(patientId: number, width: number) {
 async function tooth(page: Page, code: number) {
   await page.getByTestId("invoice-tooth-button-0").click();
   const dialog = page.getByTestId("tooth-dialog");
-  await dialog.getByTestId(`odontogram-tooth-${code}`).click();
+  // This helper represents deliberately replacing the single FDI identity used for a selected plan item.
+  // Ordinary filling invoices can still keep multiple teeth in the same display group.
+  const target = dialog.getByRole("button", { name: new RegExp("^" + code + " — ") });
+  expect(await target.getAttribute("data-testid")).toBe("odontogram-tooth-" + code);
+  const otherSelected = dialog.locator('[data-testid^="odontogram-tooth-"][aria-pressed="true"]:not([data-testid="odontogram-tooth-' + code + '"])');
+  for (let count = await otherSelected.count(); count > 0; count--) await otherSelected.first().click();
+  if (await target.getAttribute("aria-pressed") !== "true") await target.click();
+  expect(await target.getAttribute("aria-pressed")).toBe("true");
+  expect(await dialog.locator('[data-testid^="odontogram-tooth-"][aria-pressed="true"]').count()).toBe(1);
   await dialog.getByTestId("tooth-dialog-confirm").click();
   await dialog.waitFor({ state: "detached" });
   expect(await page.getByTestId("invoice-row-0").getAttribute("data-tooth")).toBe(String(code));

@@ -6,7 +6,7 @@ import type { ToothScopeMode } from "@/lib/invoice-clinical-linkage";
 import { toggleTooth } from "../ToothPicker";
 import { Odontogram } from "./Odontogram";
 import { SurfaceSelector } from "./SurfaceSelector";
-import { MODE_HINT, PER_TOOTH_SPLIT_NOTICE, multiSelect, type ToothSelection } from "./invoice-tooth-selection";
+import { MODE_HINT, PER_TOOTH_SPLIT_NOTICE, multiSelect, selectedToothSurfaces, type ToothSelection } from "./invoice-tooth-selection";
 
 function isChartRecord(value: unknown): value is ToothRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -44,9 +44,10 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
   const hintId = useId();
   const chartId = useId();
   const chartScroll = useRef<HTMLDivElement>(null);
-  const multi = multiSelect(mode);
-  const [teeth, setTeeth] = useState<number[]>(() => [...initial.teeth].sort((a, b) => a - b));
-  const [surfaces, setSurfaces] = useState<string[]>(() => initial.surfaces.split("").filter(Boolean));
+  const multi = multiSelect(mode) && !(purpose === "legacy_agreement" && mode === "tooth_surfaces");
+  const [teeth, setTeeth] = useState<number[]>(() => [...new Set(initial.teeth)].sort((a, b) => a - b));
+  const [surfacesByTooth, setSurfacesByTooth] = useState<Record<number, string>>(() =>
+    Object.fromEntries(initial.teeth.map(tooth => [tooth, selectedToothSurfaces(initial, tooth)])));
   const [showPrimary, setShowPrimary] = useState(() => initial.teeth.some((tooth) => tooth >= 51));
   const [chartRead, setChartRead] = useState<{ patientId: number; records: ToothRecord[]; status: "ready" | "unavailable" } | null>(null);
   if (chartRead && chartRead.patientId !== patientId) setChartRead(null);
@@ -108,14 +109,21 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
 
   const pick = (code: number) => {
     // A surface selection describes one specific tooth and must never migrate to its replacement.
-    if (!multi) setSurfaces([]);
+    setSurfacesByTooth(current => {
+      if (!multi) return {};
+      const next = { ...current };
+      delete next[code];
+      return next;
+    });
     setTeeth((current) => multi ? toggleTooth(current, code) : current.includes(code) ? [] : [code]);
   };
   const needsTooth = mode !== "region";
   const canConfirm = !needsTooth || teeth.length > 0;
   const confirm = () => {
     if (!canConfirm) return;
-    onConfirm({ teeth, surfaces: mode === "tooth_surfaces" ? surfaces.join("") : "", scope: initial.scope });
+    onConfirm({ teeth, surfaces: mode === "tooth_surfaces" && teeth.length === 1 ? surfacesByTooth[teeth[0]] ?? "" : "",
+      ...(mode === "tooth_surfaces" ? { surfacesByTooth: Object.fromEntries(teeth.map(tooth => [tooth, surfacesByTooth[tooth] ?? ""])) } : {}),
+      scope: initial.scope });
   };
 
   const summary = teeth.length === 0 ? "لم يُختر سن بعد — انقر على السن في المخطط."
@@ -133,7 +141,8 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
           <div className="min-w-0">
             <h3 id={titleId} className="text-sm font-extrabold text-navy-900">تحديد الأسنان — {serviceName}</h3>
             <p id={hintId} className="mt-0.5 text-[11px] font-semibold text-slate-500">{purpose === "legacy_agreement" && mode === "multi_tooth_episode" ? "اختر كل أسنان الحلقة التي يغطيها اتفاق تاريخي واحد."
-              : purpose === "legacy_agreement" && mode === "per_tooth_episode" ? "اختر سنًّا واحدًا لكل اتفاق تاريخي مستقل." : groupedInvoice && multi ? "اختر الأسنان؛ تظهر الخدمة في بند واحد والكمية بعدد الأسنان، مع ربط العلاج لكل سن." : MODE_HINT[mode]}</p>
+              : purpose === "legacy_agreement" && (mode === "per_tooth_episode" || mode === "tooth_surfaces") ? "اختر سنًّا واحدًا لكل اتفاق تاريخي مستقل."
+              : mode === "tooth_surfaces" ? MODE_HINT[mode] : groupedInvoice && multi ? "اختر الأسنان؛ تظهر الخدمة في بند واحد والكمية بعدد الأسنان، مع ربط العلاج لكل سن." : MODE_HINT[mode]}</p>
           </div>
           <button type="button" onClick={onCancel} aria-label="إغلاق"
             className="min-h-[44px] min-w-[44px] shrink-0 rounded-xl bg-slate-100 text-xs font-black text-slate-600 hover:bg-slate-200">✕</button>
@@ -170,14 +179,18 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
               <div className="mb-1 flex justify-between text-[10px] font-bold text-slate-400">
                 <span>يمين المريض</span><span>يسار المريض</span>
               </div>
-              <Odontogram chart={chart} selected={teeth} onPick={pick} showPrimary={showPrimary} chartKnown={chartState === "ready"} touch />
+              <Odontogram chart={chart} selected={teeth} onPick={pick} showPrimary={showPrimary} chartKnown={chartState === "ready"} touch labelVisibleNumber={purpose === "invoice"} />
             </div>
           </div>
 
           {mode === "tooth_surfaces" && teeth.length > 0 ? (
-            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-              <p className="mb-2 text-xs font-bold text-slate-700">أسطح السن {teeth[0]} (اختياري):</p>
-              <SurfaceSelector value={surfaces} onChange={setSurfaces} />
+            <div className="mt-3 space-y-3">
+              {teeth.map(tooth => <fieldset key={tooth} data-testid={`tooth-surfaces-${tooth}`}
+                className="min-w-0 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                <legend className="px-1 text-xs font-bold text-slate-700">أسطح السن {tooth} (اختياري)</legend>
+                <SurfaceSelector value={(surfacesByTooth[tooth] ?? "").split("").filter(Boolean)}
+                  onChange={next => setSurfacesByTooth(current => ({ ...current, [tooth]: next.join("") }))} />
+              </fieldset>)}
             </div>
           ) : null}
 
@@ -195,11 +208,12 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-3">
-          <p className="min-w-0 flex-1 basis-full text-xs font-bold text-navy-900 sm:basis-auto" data-testid="tooth-dialog-summary">
+          <p className="min-w-0 flex-1 basis-full text-xs font-bold text-navy-900 sm:basis-auto" data-testid="tooth-dialog-summary"
+            aria-live={purpose === "invoice" && mode === "tooth_surfaces" ? "polite" : undefined}>
             {summary}
           </p>
           {teeth.length > 0 ? (
-            <button type="button" onClick={() => { setTeeth([]); setSurfaces([]); }}
+            <button type="button" onClick={() => { setTeeth([]); setSurfacesByTooth({}); }}
               className="min-h-[44px] rounded-xl px-3 text-xs font-bold text-red-700 hover:bg-red-50">
               مسح
             </button>
