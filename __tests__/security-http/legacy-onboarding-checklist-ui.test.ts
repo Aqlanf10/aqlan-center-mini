@@ -16,7 +16,8 @@ let caseId = 0;
 let planId = 0;
 const stamp = Date.now();
 const included = "الشدّة اليوم مشمولة بالاتفاق — بلا فاتورة مستقلة.";
-const reviewRequired = "شمول الشدّة ضمن الاتفاق غير محدد؛ راجع نطاق المتابعات دون فاتورة بديلة.";
+// Governance candidate: main's classification — unfunded adjustments are a pending outside-contract decision.
+const reviewRequired = "الشدّة اليوم تحتاج قرار فوترة (خارج العقد أو تُفوتر كل جلسة).";
 const unavailable = "تعذّر تحديث تهيئة الحالة السابقة؛ لا يمكن تأكيد تغطية الشدّة من هذه القراءة.";
 const retry = "أعد تحميل تهيئة الحالة السابقة";
 const checklistPath = () => `/api/patients/${patientId}/legacy-onboarding`;
@@ -122,7 +123,7 @@ async function open(width: number, failPlans: boolean) {
         const body = await response.text();
         // Missing compatibility funding needs review; it is not evidence of an
         // explicit per-session/outside-contract billing decision.
-        expect(JSON.parse(body)).toMatchObject({ onboarding: { caseId, complete: false, adjustmentClass: "REVIEW_REQUIRED" } });
+        expect(JSON.parse(body)).toMatchObject({ onboarding: { caseId, complete: false, adjustmentClass: "OUTSIDE_CONTRACT" } });
         held.push({ route, body }); return;
       }
     }
