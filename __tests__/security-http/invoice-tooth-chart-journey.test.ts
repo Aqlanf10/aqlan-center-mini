@@ -361,7 +361,7 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     await chooseService(page, services.filling);
     await pickTeeth(page, 0, [26], ["M", "O"]);
     await confirm(page);
-    expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("سن 26 — أسطح MO");
+    expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("الأسنان: 26 (MO)");
     await page.getByTestId("invoice-clinical-preview-0").waitFor();
     await save(page);
     expect(await planItems(patientId)).toEqual([{ tooth_code: 26, surfaces: "MO" }]);
