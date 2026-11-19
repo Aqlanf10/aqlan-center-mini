@@ -403,10 +403,10 @@ describe("standalone orthodontic ongoing regimen defaults", () => {
 
 
 describe("standalone adjustment input fidelity", () => {
-  it("rejects a blank performed-work narrative before posting", async () => {
+  it("keeps the performed-work narrative optional, as on main (owner: daily steps unchanged)", async () => {
     await submit(false);
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(onError).toHaveBeenCalledWith(expect.stringContaining("وثّق"));
+    expect(fetchMock).toHaveBeenCalled();
+    expect(onError).not.toHaveBeenCalledWith(expect.stringContaining("وثّق"));
   });
   it.each(["0", "abc", "", "1.5"])("does not replace invalid %s weeks with four", async (weeks) => {
     edit("أسابيع حتى الشدّة القادمة", weeks);

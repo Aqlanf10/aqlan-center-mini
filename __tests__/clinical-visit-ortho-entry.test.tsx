@@ -210,11 +210,11 @@ describe("orthodontic chairside entry", () => {
     expect(contents(render())).toContain("بين أسبوع و52 أسبوعًا");
   });
 
-  it("requires documented adjustment work or review, not merely adding an empty session", async () => {
+  it("keeps the performed-work narrative optional, as on main (owner: daily steps unchanged)", async () => {
     await mount(); await start();
     await review(); await flush();
-    expect(writes()).toHaveLength(0);
-    expect(contents(render())).toContain("وثّق ما تم");
+    expect(contents(render())).not.toContain("وثّق ما تم في جلسة التقويم");
+    expect(find(node => node.props["data-testid"] === "ortho-session-review")).toBeDefined();
   });
 
   it("sends explicit wire removal only after selection and shows removal in review", async () => {

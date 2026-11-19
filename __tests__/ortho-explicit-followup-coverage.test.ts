@@ -52,7 +52,7 @@ afterAll(async()=>{await db.resetPoolForTesting();});
 describe("actual SQL explicit routine followup source decisions",()=>{
   it("keeps an ordinary invoice unknown until the exact scoped decision is recorded",async()=>{
     const f=await fixture();
-    expect(await db.orthoAdjustmentBillingClass(db.getPool(),f.ortho,f.patient)).toBe("REVIEW_REQUIRED");
+    expect(await db.orthoAdjustmentBillingClass(db.getPool(),f.ortho,f.patient)).toBe("OUTSIDE_CONTRACT"); // governance candidate: main's base class without a decision
     const saved=await append(f,await command(f));
     expect(await db.orthoAdjustmentCoverage(db.getPool(),f.ortho,f.patient)).toEqual({classification:"INCLUDED",revisionId:saved.revision.id});
     expect((await q("SELECT count(*)::int AS n FROM plan_installments WHERE plan_id=$1",[f.plan]))[0].n).toBe(0);
@@ -172,7 +172,7 @@ describe("actual SQL explicit routine followup source decisions",()=>{
     try{
       expect(await coverage.followupCoverageAvailable(db.getPool())).toBe(false);
       await expect(append(f,c)).rejects.toMatchObject({status:503,code:'coverage_not_ready'});
-      expect(await db.orthoAdjustmentBillingClass(db.getPool(),f.ortho,f.patient)).toBe('REVIEW_REQUIRED');
+      expect(await db.orthoAdjustmentBillingClass(db.getPool(),f.ortho,f.patient)).toBe('OUTSIDE_CONTRACT'); // governance candidate: main's base class without a decision
     }finally{await q("ALTER TABLE synthetic_temporarily_unavailable_coverage RENAME TO ortho_followup_coverage_revisions");}
   });
 

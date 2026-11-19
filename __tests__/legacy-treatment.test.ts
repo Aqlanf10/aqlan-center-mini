@@ -117,10 +117,10 @@ describe("(INV-LEGACY) labels, messages and coverage classification", () => {
 
   it("does not confuse absent coverage evidence with an explicitly per-session legacy agreement", () => {
     const common = { openingCurrencies: [], fundedPlan: false };
-    // A new case with no verified coverage must be reviewed, not declared included
-    // or outside the agreement. A known per-session baseline remains distinct.
+    // Governance candidate: main's classification — no verified coverage is outside the contract
+    // (a pending billing decision), never included. A per-session baseline is the same class.
     for (const legacyAgreement of [undefined, false]) {
-      expect(classifyOrthoAdjustment({ legacy: false, financialMode: null, ...common, legacyAgreement })).toBe("REVIEW_REQUIRED");
+      expect(classifyOrthoAdjustment({ legacy: false, financialMode: null, ...common, legacyAgreement })).toBe("OUTSIDE_CONTRACT");
       expect(classifyOrthoAdjustment({ legacy: true, financialMode: "per_session", ...common, legacyAgreement })).toBe("OUTSIDE_CONTRACT");
     }
   });
