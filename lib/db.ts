@@ -1537,10 +1537,13 @@ export function ensureSchema(): Promise<void> {
       -- المواءمة مع ما هو موجود، **إلى الأمام فقط**: GREATEST مع قيمة العدّاد
       -- الحالية تمنع إرجاعه إلى الخلف عند إقلاع لاحق — وإرجاعه يعني إصدار رقم
       -- مستعمل، وهو ما يُفشل الإدراج بدل أن يُصلحه.
-      SELECT setval('patient_number_seq', GREATEST(
-        (SELECT last_value FROM patient_number_seq),
-        (SELECT COALESCE(MAX(${counterIdentifierBigintSql("patient_number")}), 0) FROM patients)
-      ), true);
+      -- Keep an unconsumed next value intact, and do not rewrite a sequence that
+      -- is already ahead. Historical identifier projection is intentionally unchanged.
+      SELECT setval('patient_number_seq', existing.max_number, true)
+      FROM (SELECT COALESCE(MAX(${counterIdentifierBigintSql("patient_number")}), 0) AS max_number FROM patients) existing,
+           patient_number_seq current_number
+      WHERE existing.max_number > current_number.last_value
+         OR (existing.max_number = current_number.last_value AND NOT current_number.is_called);
       SELECT setval('invoice_number_seq', GREATEST(
         (SELECT last_value FROM invoice_number_seq),
         (SELECT COALESCE(MAX(${counterIdentifierBigintSql("invoice_number")}), 0) FROM invoices)
