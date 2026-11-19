@@ -106,7 +106,10 @@ describe("document association boundary over real authenticated HTTP", () => {
     const download = await authedGet(`/api/documents/${document.id}`, h.sessions.doctorA);
     expect(download.status).toBe(200);
     expect(download.headers.get("content-type")).toBe("image/png");
-    expect(download.headers.get("content-length")).toBe(String(png.length));
+    // Next 16.4.5 (GHSA-mfr8-8qww-v76h patch) strips content-length/content-encoding/transfer-encoding
+    // from route responses to keep framing valid. The header may be absent, but never wrong; the exact
+    // bytes are asserted below.
+    expect([null, String(png.length)]).toContain(download.headers.get("content-length"));
     expect(download.headers.get("cache-control")).toContain("private");
     expect(download.headers.get("cache-control")).toContain("no-store");
     expect(download.headers.get("x-content-type-options")).toBe("nosniff");

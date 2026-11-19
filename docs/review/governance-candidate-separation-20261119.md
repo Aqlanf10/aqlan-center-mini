@@ -65,3 +65,26 @@
   - Moving them onto main's existing writer is a new backend design, the A/B choice that the coordinator has not decided. Copying 0109 would bring part of the excluded line in.
   - They stay on #541, unchanged.
 - **Patient numbering (0080):** present in #506 and left exactly as it is. No numbering work was done in this task.
+
+## 6. Test changes that follow from the separation (recorded, not hidden)
+
+- **Coverage editor journey:** the nine browser cases that drove the retired 0079 authoring form were replaced.
+  - **Replacements:** read-only witnesses for the owner and the case doctor, with and without a historical decision. They check that there is no authoring control, no write request, no change to money, coverage or audit rows, and no DDL.
+  - **Added:** Codex `4ad839c8` exact-status journal witnesses.
+  - **Unchanged:** the HTTP cases, including `coverage_authoring_retired`.
+- **Adjustment classification and session narrative:**
+  - suites that encoded `REVIEW_REQUIRED` for missing evidence, or a mandatory "what was done", now assert main's behavior;
+  - several are restored to main verbatim.
+- **Document download with Next 16.4.5:**
+  - the patched Next strips `content-length` from route responses (its `FORBIDDEN_HEADERS` framing fix);
+  - the header may now be absent but never wrong, and the exact downloaded bytes are still asserted.
+
+## 7. Before/after comparison (synthetic PostgreSQL)
+
+| Head | Ortho, billing and onboarding suites |
+|---|---|
+| #506 `8586f991` | 35 files / 563 tests passed |
+| Candidate | 37 files / 567 tests passed (the same suites plus two retired-0079 suites) |
+
+- **Covered by these suites:** case creation, opening a legacy case, recording an adjustment with the same steps, billing, and permissions.
+- **Only intended difference:** an adjustment without proven funding is `OUTSIDE_CONTRACT` (main's behavior) instead of `REVIEW_REQUIRED`.
