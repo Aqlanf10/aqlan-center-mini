@@ -4,9 +4,10 @@ import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { stubPostgresEnv } from './_setup';
 import { validatePostgresTestTarget } from './_safe-target';
 import { PATIENT_NUMBER_SQL } from '../../lib/document-numbers';
+import { RESET_SEQUENCES } from '../../lib/clinic-reset';
 import { parseCsv } from '../../lib/patient-import';
 
-// Synthetic owned databases only; exact-main characterization, not a migration or fix.
+// Synthetic owned databases only; verify the new-only patient-number floor.
 // Validate BEFORE stubPostgresEnv changes runtime markers. Use the same exact
 // database/loopback/query-parameter policy as the required PostgreSQL CI gate.
 // TEST_DATABASE_URL is mandatory: never fall back to an ambient application DB.
@@ -21,7 +22,7 @@ async function admin(sql: string) { const c = new Client({connectionString: orig
 const input = (label: string) => ({fullName:`SYNTHETIC NUMBERING ${label}`,phone:null,altPhone:null,gender:'unknown' as const,birthYear:null,address:null,medicalAlert:null,note:null});
 const q = (sql: string, values: unknown[] = []) => db.getPool().query(sql, values);
 const restart = async () => { db.schemaReadyReset(); await db.ensureSchema(); };
-const seed = async () => { await q("INSERT INTO patients(patient_number,full_name) VALUES('P-00042','SYNTHETIC HISTORICAL FILE')"); await q("SELECT setval('patient_number_seq',6999,true)"); };
+const seed = async () => { await q("INSERT INTO patients(patient_number,full_name) VALUES('P-00042','SYNTHETIC HISTORICAL FILE')"); };
 beforeEach(async () => {
   createdDatabase=false;
   name=`aqlan_number_witness_${randomUUID().replaceAll('-','')}`;
@@ -39,7 +40,15 @@ afterEach(async () => {
   if (originalTestDatabaseUrl === undefined) delete process.env.TEST_DATABASE_URL; else process.env.TEST_DATABASE_URL=originalTestDatabaseUrl;
 });
 
-describe('exact-main numbering: numeric 7000 is displayed P-07000', () => {
+describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => {
+  it('fresh initialization leaves P-07000 pending without an external reseed', async () => {
+    expect((await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0])
+      .toEqual({last_value:'7000',is_called:false});
+    expect((await db.createPatient(input('FRESH'))).patientNumber).toBe('P-07000');
+  });
+  it('the demo reset sequence plan does not reset the patient high-water counter', () => {
+    expect(RESET_SEQUENCES).toEqual(['invoice_number_seq','receipt_number_seq','voucher_number_seq']);
+  });
   it('ordinary creation after startup yields P-07000 then P-07001 and keeps the historical file', async () => {
     await restart();
     const a=await db.createPatient(input('A'));const b=await db.createPatient(input('B'));
@@ -77,9 +86,10 @@ describe('exact-main numbering: numeric 7000 is displayed P-07000', () => {
     await restart();expect((await db.createPatient(input('AFTER NONCANONICAL'))).patientNumber).toBe('P-900001');
     expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC NONCANONICAL ACTUAL FILE'")).rows[0].patient_number).toBe('LEGACY-900000');
   });
-  it('characterizes untouched low counter: main has no automatic 7000 policy', async () => {
+  it('reconciles a low restored counter without renumbering the historical file', async () => {
     await q("SELECT setval('patient_number_seq',1,true)");await restart();
-    expect((await db.createPatient(input('LOW COUNTER'))).patientNumber).toBe('P-00043');
+    expect((await db.createPatient(input('LOW COUNTER'))).patientNumber).toBe('P-07000');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
   });
   it('walk-in file opening consumes exactly one shared number on repeated opening', async () => {
     await restart();

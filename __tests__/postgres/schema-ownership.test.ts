@@ -474,7 +474,7 @@ describe("PG18 schema ownership characterization", () => {
       await client.connect();
       try {
         const { rows: patients } = await client.query<{ id: number }>(
-          "INSERT INTO patients (patient_number, full_name) VALUES ('P-000123', 'Synthetic sequence fixture') RETURNING id",
+          "INSERT INTO patients (patient_number, full_name) VALUES ('P-007123', 'Synthetic sequence fixture') RETURNING id",
         );
         const { rows: shifts } = await client.query<{ id: number }>(
           "INSERT INTO cashier_shifts (opened_by) VALUES ('fixture') RETURNING id",
@@ -498,14 +498,14 @@ describe("PG18 schema ownership characterization", () => {
       }
 
       const before = await businessSequenceState(url);
-      expect(before.patient_number_seq).toBeLessThan(123);
+      expect(before.patient_number_seq).toBeLessThan(7123);
       expect(before.invoice_number_seq).toBeLessThan(456);
       expect(before.receipt_number_seq).toBeLessThan(789);
       expect(before.voucher_number_seq).toBeLessThan(321);
 
       await initializeGeneratedRuntimeSchema(validateOwnershipHarnessEnvironment(process.env), name, process.env);
       expect(await businessSequenceState(url)).toEqual({
-        patient_number_seq: 123,
+        patient_number_seq: 7123,
         invoice_number_seq: 456,
         receipt_number_seq: 789,
         voucher_number_seq: 321,

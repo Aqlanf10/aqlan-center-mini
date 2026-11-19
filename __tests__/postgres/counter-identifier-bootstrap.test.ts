@@ -50,11 +50,13 @@ it("restarts on arbitrary TEXT identifiers, retains rows and forward-only positi
   await expect(db.ensureSchema()).resolves.toBeUndefined();
   for (const [index, [table, column, sequence]] of counters.entries()) {
     expect((await db.getPool().query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY id`)).rows).toEqual(before[index]);
-    expect((await db.getPool().query(`SELECT last_value::text FROM ${sequence}`)).rows[0].last_value).toBe("500");
+    const sequenceState = (await db.getPool().query(`SELECT last_value::text, is_called FROM ${sequence}`)).rows[0];
+    // Patient files have a 7000 floor; the three financial sequences keep the original characterization.
+    expect(sequenceState).toEqual(index === 0 ? { last_value: "7000", is_called: false } : { last_value: "500", is_called: true });
     const numberSql = [PATIENT_NUMBER_SQL, documentNumberSql("invoice"), documentNumberSql("receipt"), documentNumberSql("voucher")][index];
     const values = (await db.getPool().query(`SELECT ${numberSql} AS n FROM generate_series(1,2)`)).rows.map(row => row.n);
     const prefix = ["P", "INV", "R", "V"][index];
-    expect(values).toEqual([`${prefix}-00501`, `${prefix}-00502`]);
+    expect(values).toEqual(index === 0 ? ["P-07000", "P-07001"] : [`${prefix}-00501`, `${prefix}-00502`]);
     expect((await db.getPool().query(`SELECT 1 FROM ${table} WHERE ${column} = ANY($1::text[])`, [values])).rows).toEqual([]);
   }
 });

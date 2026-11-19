@@ -190,9 +190,8 @@ export const RESET_KEEP_TABLES = [
   "schema_migrations",
 ] as const;
 
-/** ترقيم المستندات وملفات المرضى — يعود إلى ١ مع البداية الجديدة. */
+/** تعود عدّادات المستندات المالية إلى ١. يبقى عدّاد ملفات المرضى حتى لا تُعاد أرقام صدرت سابقًا. */
 export const RESET_SEQUENCES = [
-  "patient_number_seq",
   "invoice_number_seq",
   "receipt_number_seq",
   "voucher_number_seq",

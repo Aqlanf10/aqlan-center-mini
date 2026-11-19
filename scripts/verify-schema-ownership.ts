@@ -299,7 +299,7 @@ async function characterizePopulatedState(
     );
 
     const runtimePatient = await runtimePool.query<{ id: number }>(
-      "INSERT INTO patients (patient_number, full_name) VALUES ('P-000123', 'Synthetic fixture') RETURNING id",
+      "INSERT INTO patients (patient_number, full_name) VALUES ('P-007123', 'Synthetic fixture') RETURNING id",
     );
     const runtimeShift = await runtimePool.query<{ id: number }>(
       "INSERT INTO cashier_shifts (opened_by) VALUES ('fixture') RETURNING id",
@@ -314,7 +314,7 @@ async function characterizePopulatedState(
       [runtimeShift.rows[0]!.id],
     );
     const sequenceTargets = [
-      ["patient_number_seq", 123],
+      ["patient_number_seq", 7123],
       ["invoice_number_seq", 456],
       ["receipt_number_seq", 789],
       ["voucher_number_seq", 321],

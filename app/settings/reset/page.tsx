@@ -96,7 +96,7 @@ export default function ResetPage() {
                 {groups.map((group) => <li key={group.label}>{group.label}: {group.count}</li>)}
               </ul>
             ) : <p className="mt-2 text-xs text-slate-500">جارٍ الحساب…</p>}
-            <p className="mt-2 text-[11px] font-bold text-rose-800">ومعها كل ما يتبعها: بنود الفواتير، الخطط، الوصفات، الإحالات، تتبع المختبر، قائمة الانتظار وطلبات الحجز. والترقيم يعود إلى ١.</p>
+            <p className="mt-2 text-[11px] font-bold text-rose-800">ومعها كل ما يتبعها: بنود الفواتير، الخطط، الوصفات، الإحالات، تتبع المختبر، قائمة الانتظار وطلبات الحجز. تعود عدّادات المستندات المالية إلى ١، وتستمر أرقام ملفات المرضى من عدّادها الحالي.</p>
           </section>
 
           <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4" aria-label="ما يبقى">

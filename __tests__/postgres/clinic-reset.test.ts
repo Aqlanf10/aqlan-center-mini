@@ -4,7 +4,7 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
 
 /**
  * إعادة الضبط على PostgreSQL 18 الحقيقي: كل جدولٍ مصنَّف، والبيانات التجريبية تُمسح،
- * والإعداد يبقى، والترقيم يعود إلى ١، وسجل التدقيق يبقى ويشهد.
+ * والإعداد يبقى، وعدّادات المستندات المالية تعود إلى ١، وعدّاد ملفات المرضى وسجل التدقيق يبقيان.
  */
 
 assertRealPostgresUrl();
@@ -38,7 +38,7 @@ describe("clinic reset", () => {
     expect([...wipe].filter((table) => !tables.includes(table))).toEqual([]);
   });
 
-  it("wipes demo data, keeps setup and the audit trail, restarts numbering, and returns the files to delete", async () => {
+  it("wipes demo data, keeps setup/audit and the patient counter, restarts financial numbering, and returns files to delete", async () => {
     // الإعداد
     await q(`INSERT INTO parties (name, kind) VALUES ('د. التجربة', 'doctor'), ('مختبر التجربة', 'lab')`);
     await q(`INSERT INTO users (username, display_name, password_hash, role) VALUES ('owner-reset', 'المالك', 'x', 'admin')`);
@@ -66,6 +66,12 @@ describe("clinic reset", () => {
       `INSERT INTO patient_documents (patient_id, kind, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
        VALUES ($1, 'xray', 'بانوراما', 'image/jpeg', 10, 'abc', 'ab/abcdef.jpg', 't')`, [patient.id]);
     await q(`SELECT nextval('invoice_number_seq'), nextval('receipt_number_seq'), nextval('voucher_number_seq')`);
+    // Model an issued number above the floor whose old patient row no longer exists.
+    await q(`SELECT setval('patient_number_seq', 900000, true)`);
+    const sequenceState = () => q<{ last_value: string; is_called: boolean }>(`SELECT last_value::text, is_called FROM patient_number_seq`);
+    const patientCounterBefore = await sequenceState();
+    expect(patientCounterBefore).toEqual([{ last_value: "900000", is_called: true }]);
+
 
     const preview = await clinicResetPreview();
     expect(preview.patients).toBe(1);
@@ -83,7 +89,8 @@ describe("clinic reset", () => {
     for (const table of RESET_WIPE_TABLES) expect(await count(table), table).toBe(0);
     for (const [table, n] of Object.entries(keptBefore)) expect(await count(table), table).toBe(n);
 
-    for (const sequence of ["patient_number_seq", "invoice_number_seq", "receipt_number_seq", "voucher_number_seq"]) {
+    expect(await sequenceState()).toEqual(patientCounterBefore);
+    for (const sequence of ["invoice_number_seq", "receipt_number_seq", "voucher_number_seq"]) {
       expect(Number((await q<{ v: string }>(`SELECT nextval('${sequence}')::text AS v`))[0].v), sequence).toBe(1);
     }
     const next = await createPatient({
@@ -91,6 +98,7 @@ describe("clinic reset", () => {
       address: null, medicalAlert: null, note: null,
     });
     expect(next.id).toBe(1);
+    expect(next.patientNumber).toBe("P-900001");
 
     const audit = await q<{ action: string; details: Record<string, unknown> }>(`SELECT action, details FROM audit_log ORDER BY id`);
     expect(audit.map((row) => row.action)).toEqual(["patient.create", "system.reset"]);

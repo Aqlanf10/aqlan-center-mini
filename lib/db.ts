@@ -1537,12 +1537,14 @@ export function ensureSchema(): Promise<void> {
       -- المواءمة مع ما هو موجود، **إلى الأمام فقط**: GREATEST مع قيمة العدّاد
       -- الحالية تمنع إرجاعه إلى الخلف عند إقلاع لاحق — وإرجاعه يعني إصدار رقم
       -- مستعمل، وهو ما يُفشل الإدراج بدل أن يُصلحه.
-      -- Keep an unconsumed next value intact, and do not rewrite a sequence that
-      -- is already ahead. Historical identifier projection is intentionally unchanged.
-      SELECT setval('patient_number_seq', existing.max_number, true)
+      -- Apply the owner-approved floor only to new patient numbers. Preserve
+      -- pending P-07000 and never lower the counter or change an existing file.
+      -- A historical projected maximum at or above the floor is already used.
+      SELECT setval('patient_number_seq', GREATEST(existing.max_number, 7000), existing.max_number >= 7000)
       FROM (SELECT COALESCE(MAX(${counterIdentifierBigintSql("patient_number")}), 0) AS max_number FROM patients) existing,
            patient_number_seq current_number
-      WHERE existing.max_number > current_number.last_value
+      WHERE current_number.last_value < 7000
+         OR existing.max_number > current_number.last_value
          OR (existing.max_number = current_number.last_value AND NOT current_number.is_called);
       SELECT setval('invoice_number_seq', GREATEST(
         (SELECT last_value FROM invoice_number_seq),
