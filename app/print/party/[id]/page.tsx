@@ -8,6 +8,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { canViewMoney } from "@/lib/roles";
+import { restrictedRouteAllowed } from "@/lib/role-routes";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,8 @@ export default async function PartyStatementPrintPage({ params }: { params: Prom
   const { id: rawId } = await params;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
+  // Reuse the route gate with freshly revalidated permissions before any data reads.
+  if (!restrictedRouteAllowed(session.role, `/print/party/${id}`, "GET", session.financeAccess)) notFound();
 
   const [party, statement, settings] = await Promise.all([
     getParty(id), partyStatement(id), getSettingsSafe(),

@@ -209,6 +209,7 @@ export function restrictedRouteAllowed(role: string | null | undefined, pathname
       || pathname === "/finance/reports" || pathname === "/finance/accounting"
       || pathname === "/api/accounting" || pathname === "/api/finance/report")) return false;
     if (!access.viewSuppliers && (pathname.startsWith("/finance/parties") || pathname === "/finance/lab-accounting"
+      || matches("/print/party/[id]", pathname)
       || pathname === "/api/parties" || pathname === "/api/payables" || pathname === "/api/finance/lab-accounting")) return false;
     if (!access.viewCommissions && (pathname === "/finance/commissions" || pathname === "/api/finance/commissions"
       || /^\/print\/commission-statement\/\d+$/.test(pathname))) return false;
