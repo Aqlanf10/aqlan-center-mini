@@ -47,6 +47,7 @@ export type SettingKey =
   | "ortho.full_photo_set_interval_months"
   | "ortho.photo_stage_requirements"
   | "ortho.photo_print_layout"
+  | "ortho.photo_checklist"
   | "display.privacy_mode"
   | "display.voice_uri"
   | "display.voice_rate"
@@ -155,6 +156,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "ortho.photo_stage_requirements": "",
   // OP-3: empty = default print rows (extraoral, intraoral by patient side, occlusal, overjet).
   "ortho.photo_print_layout": "",
+  // OP-4: clinic-authored capture checklist, one item per line; empty = no card.
+  "ortho.photo_checklist": "",
   // عشرون ميغابايت تكفي أشعةً بانورامية بجودةٍ عالية، وتردّ ملفًّا رُفع بالخطأ
   // — مقطعَ فيديو مثلًا — قبل أن يملأ القرص.
   "documents.max_megabytes": "20",
@@ -278,6 +281,7 @@ export const PUBLIC_SETTING_KEYS: SettingKey[] = [
   // (OP-1) سياسة تصوير تشغيلية للتقويم — أسماء مناظر وعدد أشهر، لا بيانات مرضى.
   "ortho.full_photo_set_interval_months",
   "ortho.photo_stage_requirements",
+  "ortho.photo_checklist",
 ];
 
 export function withDefaults(stored: Partial<Record<string, string>>): SettingsMap {

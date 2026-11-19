@@ -13,7 +13,7 @@ import { isKnownZone } from "./clinicZone";
 import { DOCUMENT_PREFIX_SETTING } from "./document-numbers";
 import { parseSpecialtyTemplates } from "./specialty-templates";
 import { parseBalanceWarning } from "./chair-readiness";
-import { parsePhotoPrintLayout, parsePhotoStageRequirements } from "./ortho-photos";
+import { parsePhotoPrintLayout, parsePhotoStageRequirements, photoChecklistProblem } from "./ortho-photos";
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 export const CLINIC_HOURS_KEYS = ["clinic.day_start", "clinic.day_end", "clinic.shift2_start", "clinic.shift2_end"] as const;
@@ -64,6 +64,12 @@ export function validateTypedSetting(key: string, raw: string): string | null {
     const parsed = parsePhotoStageRequirements(value);
     return parsed.ok ? null : `${definition.label}: ${parsed.message}`;
   }
+  /* (OP-4) تذكير ثبات التصوير: بندٌ في كل سطر، والفارغ مقبول (= لا بطاقة). */
+  if (key === "ortho.photo_checklist") {
+    const problem = photoChecklistProblem(raw);
+    return problem ? `${definition.label}: ${problem}` : null;
+  }
+
   /* (OP-3) ترتيب صفحة طباعة الصور. */
   if (key === "ortho.photo_print_layout") {
     const parsed = parsePhotoPrintLayout(value);

@@ -21,7 +21,7 @@ import {
   type OrthoPhase, type RetainerType, type SlotSize,
 } from "@/lib/ortho";
 import {
-  PHOTO_STAGE_LABEL, PHOTO_VIEW_LABEL, buildComparison, fullPhotoSetCheck, photoSetIntervalMonths, photoStageRequirements, savedFullPhotoSetHistory,
+  PHOTO_STAGE_LABEL, PHOTO_VIEW_LABEL, buildComparison, fullPhotoSetCheck, parsePhotoChecklist, photoSetIntervalMonths, photoStageRequirements, savedFullPhotoSetHistory,
   suggestPhotoStage, type PhotoStage, type PhotoView, type StagePhoto,
 } from "@/lib/ortho-photos";
 import {
@@ -36,6 +36,7 @@ import { OrthoTreatmentStrategy, type StrategyLifetime } from "./OrthoTreatmentS
 import { makeAssessmentOwnerV2, type AssessmentOwnerV2 } from "@/lib/ortho-assessment-owner-v2";
 import { WebCephRecordsGrid } from "./WebCephRecordsGrid";
 import { OrthoPhotoCompletenessPanel } from "./OrthoPhotoCompleteness";
+import { PhotoChecklistCard } from "./OrthoPhotoChecklist";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import {
   LEGACY_FINANCIAL_HINT, LEGACY_FINANCIAL_LABEL, LEGACY_FINANCIAL_MODES, monthsBefore, checkOrthoSessionDraft,
@@ -1498,6 +1499,7 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   );
   const photoRequirements = photoStageRequirements(useSetting("ortho.photo_stage_requirements"));
   const photoIntervalMonths = photoSetIntervalMonths(useSetting("ortho.full_photo_set_interval_months"));
+  const photoChecklist = parsePhotoChecklist(useSetting("ortho.photo_checklist"));
   const cameraInput = useRef<HTMLInputElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
 
@@ -1703,6 +1705,8 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
             {fullSet.missingViews.length > 0 ? ` — ناقص: ${fullSet.missingViews.map((view) => PHOTO_VIEW_LABEL[view]).join("، ")}` : ""}
           </p>
         ) : null}
+        {/* OP-4: تذكير ثبات التصوير بجانب إشعار المجموعة الكاملة فقط — نص المركز، مطوي، بلا حقل. */}
+        {fullSet?.required ? <PhotoChecklistCard items={photoChecklist} /> : null}
         <div className="flex flex-wrap gap-2">
           <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) cameraInput.current?.click(); }}
             className="min-w-[10rem] flex-1 rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white hover:bg-navy-900">

@@ -222,6 +222,30 @@ export function photoPrintLayout(raw: string | null | undefined): PhotoView[][] 
   return parsed.ok ? parsed.value : DEFAULT_PHOTO_PRINT_LAYOUT;
 }
 
+/* ─────────────────────── OP-4: تذكير ثبات التصوير ─────────────────────── */
+
+/** حدود نص قائمة التحقق: بندٌ في كل سطر. النص يكتبه المركز، والافتراضي فارغ = لا بطاقة. */
+export const PHOTO_CHECKLIST_LIMITS = { items: 15, chars: 160 } as const;
+
+/** بندٌ في كل سطر؛ الفواصل داخل البند مسموحة. يُحذف الفارغ والمكرر، ويُقصّ ما زاد على الحدود. */
+export function parsePhotoChecklist(raw: string | null | undefined): string[] {
+  const items: string[] = [];
+  for (const line of (raw ?? "").split(/\r?\n/)) {
+    const item = line.trim().slice(0, PHOTO_CHECKLIST_LIMITS.chars);
+    if (item && !items.includes(item)) items.push(item);
+    if (items.length >= PHOTO_CHECKLIST_LIMITS.items) break;
+  }
+  return items;
+}
+
+/** تحقق الحفظ: لا يُقصّ شيءٌ صامتًا هنا — ما زاد يُرفض برسالة. */
+export function photoChecklistProblem(raw: string): string | null {
+  const lines = raw.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  if (lines.length > PHOTO_CHECKLIST_LIMITS.items) return `الحد ${PHOTO_CHECKLIST_LIMITS.items} بندًا.`;
+  if (lines.some(line => line.length > PHOTO_CHECKLIST_LIMITS.chars)) return `البند الواحد لا يزيد على ${PHOTO_CHECKLIST_LIMITS.chars} حرفًا.`;
+  return null;
+}
+
 /* ─────────────────────────── اقتراح الدور ─────────────────────────── */
 
 export interface StageSuggestionInput {
