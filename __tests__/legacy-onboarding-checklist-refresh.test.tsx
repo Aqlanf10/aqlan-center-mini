@@ -74,7 +74,8 @@ type Element = ReactElement<Record<string, unknown>>;
 type Case = ComponentProps<typeof AdjustmentForm>["caseRow"];
 type Component = (props: Record<string, unknown>) => ReactNode;
 const INCLUDED = "الشدّة اليوم مشمولة بالاتفاق — بلا فاتورة مستقلة.";
-const REVIEW = "شمول الشدّة ضمن الاتفاق غير محدد؛ راجع نطاق المتابعات دون فاتورة بديلة.";
+// Governance candidate: main's classification — no funding evidence is a pending outside-contract decision.
+const REVIEW = "الشدّة اليوم تحتاج قرار فوترة (خارج العقد أو تُفوتر كل جلسة).";
 const CHECKLIST_LABEL = "تهيئة الحالة السابقة";
 const PACKAGE_LABEL = "اتفاق التقويم";
 const response = (body: unknown, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body });

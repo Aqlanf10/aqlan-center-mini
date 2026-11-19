@@ -3,8 +3,8 @@ import { checkOrthoSessionDraft, resolveOrthoWire } from '../lib/ortho-baseline'
 
 const draft = { caseId: 3, done: 'Reviewed; no change documented', nextWeeks: 4 };
 describe('orthodontic session input fidelity', () => {
-  it.each([undefined, null, '', '   '])('rejects undocumented new work: %s', done => {
-    expect(checkOrthoSessionDraft({ ...draft, done }).ok).toBe(false);
+  it.each([undefined, null, '', '   '])('keeps the narrative optional, as on main: %s', done => {
+    expect(checkOrthoSessionDraft({ ...draft, done })).toMatchObject({ ok: true, value: { done: null } });
   });
   it('allows explicit documented no-change review without inventing wires', () => {
     expect(checkOrthoSessionDraft(draft)).toMatchObject({ ok: true, value: { done: draft.done, upperWire: null, lowerWire: null } });

@@ -28,10 +28,13 @@ function client(existing = false) {
   }) };
 }
 describe('new ortho transaction write integrity', () => {
-  it.each([{ done: ' ' }, { nextWeeks: 0 }, { nextWeeks: 1.5 }, { upperWireAction: 'remove', upperWire: 'conflict' }])('refuses invalid new insert %j', async patch => {
+  it.each([{ nextWeeks: 0 }, { nextWeeks: 1.5 }, { upperWireAction: 'remove', upperWire: 'conflict' }])('refuses invalid new insert %j', async patch => {
     const db = client();
     expect(await write(db, { ...draft, ...patch })).toEqual({ ok: false, reason: 'invalid_session' });
     expect(db.query.mock.calls.some(([sql]) => /^\s*(INSERT|UPDATE)\b/.test(sql))).toBe(false);
+  });
+  it('accepts a blank narrative, as on main (owner: daily steps unchanged)', async () => {
+    expect(await write(client(), { ...draft, done: ' ' })).toMatchObject({ ok: true, created: true });
   });
   it('retains both legacy blank wire values in adjustment and current case', async () => {
     const db = client();

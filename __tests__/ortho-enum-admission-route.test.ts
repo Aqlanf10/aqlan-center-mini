@@ -242,9 +242,9 @@ describe("writer outcomes stay unchanged", () => {
 
 
 describe("POST adjustment input integrity", () => {
-  it.each(["", "   ", undefined])("rejects undocumented work %s", async done => {
-    expect((await call("POST", { done, nextWeeks: 4 })).status).toBe(400);
-    noWriters();
+  it.each(["", "   ", undefined])("accepts an undocumented session %s, as on main (narrative optional)", async done => {
+    expect((await call("POST", { done, nextWeeks: 4 })).status).toBe(201);
+    expect(recordAdjustment).toHaveBeenCalledWith(expect.objectContaining({ done: null }));
   });
   it("preserves explicit wire removal and legacy empty no-change", async () => {
     expect((await call("POST", { done: "Documented removal", upperWireAction: "remove", upperWire: "", lowerWire: "" })).status).toBe(201);
