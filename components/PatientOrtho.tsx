@@ -695,6 +695,11 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       <span className="rounded-full bg-navy-100 px-2.5 py-0.5 text-[11px] font-bold text-navy-900">
                         {PHASE_LABEL[row.phase]}
                       </span>
+                      {/* OC-1: بطاقة العلاج المطبوعة — رابط فقط، بلا مال ولا ملاحظات خاصة */}
+                      <a href={`/print/ortho-card/${row.id}`} target="_blank" rel="noopener" data-testid="ortho-treatment-card-link"
+                        className="rounded-full border border-sky-200 bg-white px-2.5 py-0.5 text-[11px] font-bold text-sky-800 hover:bg-sky-50">
+                        طباعة بطاقة العلاج
+                      </a>
                     </div>
                   </div>
 

@@ -60,7 +60,7 @@ function flagsOf(cell: WireCell): string[] {
   return flags;
 }
 
-function WireCellView({ cell }: { cell: WireCell }) {
+export function WireCellView({ cell }: { cell: WireCell }) {
   switch (cell.kind) {
     case "first":
     case "change":
@@ -87,7 +87,7 @@ function WireCellView({ cell }: { cell: WireCell }) {
   }
 }
 
-function ElasticCellView({ cell }: { cell: ElasticCell }) {
+export function ElasticCellView({ cell }: { cell: ElasticCell }) {
   if (cell.kind === "same") return <span className="text-slate-400">بلا تغيير</span>;
   return (
     <span className="flex flex-wrap items-center gap-1.5">
