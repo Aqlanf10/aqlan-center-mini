@@ -2,7 +2,6 @@ import { cookies, headers } from "next/headers";
 import { SESSION_COOKIE, readSessionToken, sessionCredentialVersion, carryLegacySessionEvidence, readSignedSessionEnvelope, hasCanonicalSessionMarker, type SessionPayload } from "./auth";
 import { sessionPermissionVersion } from "./auth";
 import { financeAccessFor } from "./finance-permissions";
-import type { VerifiedDurableSession } from "./staff-durable-session";
 import { findUserByUsername, findLegacyUserByUsernameReadOnlySnapshot, type StaffUser, type DbClient } from "./db";
 
 async function currentSession(payload: SessionPayload | null, client?: DbClient): Promise<SessionPayload | null> {
@@ -105,24 +104,4 @@ export async function revalidateSessionInTransaction(
 export async function revalidateLegacySessionReadOnlySnapshot(payload: SessionPayload, client: DbClient): Promise<SessionPayload | null> {
   if (!payload?.credentialVersion) return null;
   return currentSessionForUser(payload, await findLegacyUserByUsernameReadOnlySnapshot(payload.username, client));
-}
-
-// Unmounted managed-numbering contract. A durable handle proves signed
-// transport only; it is not a staff or numbering operation admission.
-export type BoundRequestSession = VerifiedDurableSession;
-
-export async function readBoundRequestSession(): Promise<BoundRequestSession | null> {
-  const { selectRequestStaffEnvelope } = await import("./staff-session-admission");
-  const selected = await selectRequestStaffEnvelope();
-  return selected.kind === "canonical" ? selected.handle : null;
-}
-
-export async function revalidateBoundRequestSession(
-  _proof: BoundRequestSession, _client: DbClient,
-): Promise<{ payload: SessionPayload; sessionBinding: string } | null> {
-  // The standalone numbering adapter requires a legacy-shaped SessionPayload.
-  // Never convert a durable canonical handle to that shape or fall back to a
-  // signed legacy admin. A future canonical writer must prove the owner's
-  // subject/enrollment under its lifecycle fence on the shared transaction.
-  return null;
 }

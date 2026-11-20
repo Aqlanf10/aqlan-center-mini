@@ -1,7 +1,7 @@
 import 'server-only';
 import type { PoolClient } from 'pg';
 import type { NumberingOwnerSession } from './patient-numbering-command';
-import { revalidateBoundRequestSession, type BoundRequestSession } from './session';
+import { revalidateBoundRequestSession, type BoundRequestSession } from './patient-numbering-request-session';
 import { resolveStaffCapabilities, type TrustedOwnerContext } from './staff-capabilities';
 import { classifyStaffPermissionEnvelope } from './staff-permission-envelope';
 

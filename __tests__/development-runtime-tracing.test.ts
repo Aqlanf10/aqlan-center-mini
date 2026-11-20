@@ -13,6 +13,8 @@ const picomatch = require("next/dist/compiled/picomatch") as (
 ) => (value: string) => boolean;
 const root = fileURLToPath(new URL("../", import.meta.url));
 const options = { dot: true, contains: true };
+const syntheticNumberingDirectories = ["__tests__/fixtures/numbering-browser", "__tests__/numbering-browser"];
+const syntheticNumberingConfig = "vitest.config.numbering-browser.mts";
 const expectedExcludes = [
   "./vendor/braces/**/*",
   "./vendor/braces-3.0.3-local.tgz",
@@ -29,6 +31,8 @@ const expectedExcludes = [
   "./lib/braces-exception-pins.mjs",
   "./lib/scoped-braces-exception.mjs",
   "./.dependency-audit/**/*",
+  ...syntheticNumberingDirectories.map((directory) => `./${directory}/**/*`),
+  `./${syntheticNumberingConfig}`,
 ];
 const exclusions = nextConfig.outputFileTracingExcludes ?? {};
 const routeMatchers = new Map<string, (file: string) => boolean>();
@@ -91,7 +95,10 @@ describe("temporary development-only runtime tracing boundary", () => {
 
   it("matches no real project source outside the explicitly approved development assets", () => {
     const approvedFiles = new Set(expectedExcludes.filter((glob) => !glob.includes("*")).map((file) => file.slice(2)));
-    const approvedDirectories = ["vendor/braces/", "scripts/dependency-review/", "scripts/dependency-security/", ".dependency-audit/"];
+    const approvedDirectories = [
+      "vendor/braces/", "scripts/dependency-review/", "scripts/dependency-security/", ".dependency-audit/",
+      ...syntheticNumberingDirectories.map((directory) => `${directory}/`),
+    ];
     // Dependencies and generated build outputs are separately checked by the
     // runtime-artifact verifier. Inventory all actual project sources here.
     const generatedRoots = new Set(["node_modules", ".git", ".next", ".preflight"]);
@@ -105,14 +112,24 @@ describe("temporary development-only runtime tracing boundary", () => {
     }
   });
 
-  it("excludes all current review assets and generated proof from every server-route trace", () => {
+  it("excludes every review artifact and the synthetic numbering harness from server-route traces", () => {
+    const numberingAssets = syntheticNumberingDirectories.flatMap(files);
+    expect(numberingAssets).toEqual(expect.arrayContaining([
+      "__tests__/fixtures/numbering-browser/client.tsx",
+      "__tests__/fixtures/numbering-browser/server.ts",
+      "__tests__/numbering-browser/owner-numbering-integration.test.ts",
+    ]));
     const assets = [
+      ...numberingAssets,
       ...files("vendor/braces"), ...files("scripts/dependency-review"), ...files("scripts/dependency-security"),
       ...expectedExcludes.filter((glob) => !glob.includes("*")),
       ".dependency-audit/exception-proof.json", ".dependency-audit/runtime-proof.json",
       ".dependency-audit/full-attempt-1.json", ".dependency-audit/.nested/production-attempt-1.process.json",
     ];
-    for (const route of ["/", "/api/backup/full", "/api/settings/backup", "/api/settings/backup/restore", "/patients/[id]"]) {
+    for (const route of [
+      "/", "/api/backup/full", "/api/settings/backup", "/api/settings/backup/restore",
+      "/api/settings/patient-numbering", "/patients/[id]",
+    ]) {
       for (const file of assets) expect(excluded(route, file), `${route}: ${file}`).toBe(true);
     }
   });
@@ -130,6 +147,9 @@ describe("temporary development-only runtime tracing boundary", () => {
       "vendor/runtime/index.js", "vendor/upstream/runtime.tgz", "vendor/braces-runtime/index.js",
       "scripts/dependency-runtime/index.js", "scripts/verify-braces-runtime-production.mjs",
       "lib/scoped-braces-runtime.mjs", "lib/runtime-braces-exception-pins.mjs",
+      "__tests__/fixtures/numbering-browser-neighbor/server.ts",
+      "__tests__/numbering-browser-neighbor/example.test.ts",
+      "vitest.config.numbering-browser-neighbor.mts",
     ];
     for (const file of retained) expect(excluded("/api/backup/full", file), file).toBe(false);
   });
@@ -137,13 +157,18 @@ describe("temporary development-only runtime tracing boundary", () => {
   it("does not let runtime app, component or library imports depend on excluded development tooling", () => {
     expect(runtimeSources.length).toBeGreaterThan(600);
     const violations: string[] = [];
+    const extensions = [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"];
     for (const file of runtimeSources) {
       for (const specifier of importedModules(file)) {
         const target = specifier.startsWith("@/") ? specifier.slice(2)
           : specifier.startsWith(".") ? path.relative(root, path.resolve(root, path.dirname(file), specifier))
           : `node_modules/${specifier}`;
-        // Extensionless imports resolve to the same reviewed module too.
-        for (const candidate of [target, `${target}.mjs`, `${target}/index.mjs`]) {
+        // Check the extensionless and index forms for JS development modules
+        // and for the TS/TSX synthetic server and client fixture.
+        const candidates = [target, ...extensions.flatMap((extension) => [
+          `${target}${extension}`, `${target}/index${extension}`,
+        ])];
+        for (const candidate of candidates) {
           if (excluded("/api/backup/full", candidate)) violations.push(`${file} imports ${specifier} → ${candidate}`);
         }
       }

@@ -1,6 +1,6 @@
 import "server-only";
 import type { Pool, PoolClient } from "pg";
-import type { BoundRequestSession } from "./session";
+import type { BoundRequestSession } from "./patient-numbering-request-session";
 import { boundOwnerRelationship, type TrustedOwnerContext } from "./staff-capabilities";
 import type { NumberingDispositionDependencies, NumberingEnrollment } from "./patient-numbering-disposition";
 import { createNumberingOwnerSessionProvider } from "./patient-numbering-owner-session";

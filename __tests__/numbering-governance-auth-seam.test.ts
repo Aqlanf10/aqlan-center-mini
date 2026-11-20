@@ -2,7 +2,8 @@ import { createHmac, randomBytes } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createSessionToken, legacySessionEvidence, signDurableSessionClaims } from "../lib/auth";
 import type { DbClient } from "../lib/db";
-import { readBoundRequestSession, readSessionPayload, revalidateBoundRequestSession, type BoundRequestSession } from "../lib/session";
+import { readSessionPayload } from "../lib/session";
+import { readBoundRequestSession, revalidateBoundRequestSession, type BoundRequestSession } from "../lib/patient-numbering-request-session";
 import { STAFF_AUTHORIZATION_POLICY_VERSION } from "../lib/staff-capability-catalogue";
 import { boundOwnerRelationship, ownerContextFromTrustedBinding, type TrustedOwnerContext } from "../lib/staff-capabilities";
 
