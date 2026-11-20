@@ -199,6 +199,31 @@ jobs:
             if (Math.floor(Number(r.rows[0].server_version_num)/10000) !== 18) throw new Error('PostgreSQL 18 required');
           } finally { await c.end(); }
           NODE
+      - name: Install and verify PostgreSQL 18 backup clients
+        shell: bash
+        run: |
+          # Use the signed upstream repository; install clients, not a second server.
+          # https://www.postgresql.org/download/linux/ubuntu/
+          . /etc/os-release
+          test "$ID" = "ubuntu"
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          curl --fail --silent --show-error --location --proto '=https' \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc --output "$key"
+          fingerprint="$(gpg --batch --show-keys --with-colons "$key" | awk -F: '$1 == "pub" { primary = 1; next } primary && $1 == "fpr" { print $10; primary = 0 }')"
+          test "$fingerprint" = B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8
+          sudo install -m 0644 "$key" /usr/share/keyrings/aqlan-pgdg.asc
+          printf 'Types: deb\nURIs: https://apt.postgresql.org/pub/repos/apt\nSuites: %s-pgdg\nComponents: main\nSigned-By: /usr/share/keyrings/aqlan-pgdg.asc\n' \
+            "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/aqlan-pgdg.sources >/dev/null
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-client-18
+          bin=/usr/lib/postgresql/18/bin
+          for tool in pg_dump pg_restore; do
+            version="$("$bin/$tool" --version)"
+            printf '%s\n' "$version"
+            [[ "$version" =~ PostgreSQL\)\ 18\. ]]
+          done
+          echo "NUMBERING_PG_BIN=$bin" >> "$GITHUB_ENV"
       - name: PostgreSQL integration tests
         env:
           # Explicit fixture reset opt-in for this disposable service database only.

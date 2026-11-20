@@ -9,6 +9,7 @@ import { openBackupTimestampFixture } from './_backup-timestamp-fixture';
 import { fullBackupBlocks } from '../../lib/fullBackup';
 import { stagedRestore } from '../../lib/restore/staging';
 import { parseTarBytes } from '../../lib/restore/archive';
+import { patientNumberSequenceMarker } from '../../lib/restore/patient-number-sequence.mjs';
 import { loadMigrationFiles, migrate } from '../../lib/migrations';
 import { tarGzBytes } from '../helpers/backup-tar';
 
@@ -70,8 +71,16 @@ it('refuses a truncated archive before creating any target table', async () => {
 it('rolls back every restored data row on a late SQL failure, keeping append-only triggers and migration records intact', async () => {
   const parsed = parseTarBytes(gunzipSync(archive));
   const sql = Buffer.from(parsed.entries.get('database.sql')!.data).toString('utf8');
-  expect(sql).toContain('COMMIT;');
-  const faultySql = Buffer.from(sql.replace(/COMMIT;\s*$/, 'SELECT 1 / 0;\nCOMMIT;\n'));
+  const commitLine = sql.lastIndexOf('\nCOMMIT;');
+  expect(commitLine).toBeGreaterThan(0);
+  expect(sql.slice(commitLine + 1).trim()).toBe('COMMIT;');
+  // Keep any final P marker immediately before COMMIT so the archive is
+  // admitted and the synthetic fault actually runs after all restored rows.
+  const priorLine = sql.lastIndexOf('\n', commitLine - 1) + 1;
+  const faultAt = sql.startsWith(`${patientNumberSequenceMarker} `, priorLine)
+    ? priorLine
+    : commitLine + 1;
+  const faultySql = Buffer.from(`${sql.slice(0, faultAt)}SELECT 1 / 0;\n${sql.slice(faultAt)}`);
   const manifest = JSON.parse(Buffer.from(parsed.entries.get('manifest.json')!.data).toString('utf8'));
   manifest.databaseSha256 = createHash('sha256').update(faultySql).digest('hex');
   manifest.databaseBytes = faultySql.length;

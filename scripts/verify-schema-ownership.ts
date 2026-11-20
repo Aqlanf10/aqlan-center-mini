@@ -298,8 +298,10 @@ async function characterizePopulatedState(
       [patient.rows[0]!.id],
     );
 
+    // This database has already initialized: P-07000 is pending. Use
+    // imported history above the floor so the next boot must reconcile it.
     const runtimePatient = await runtimePool.query<{ id: number }>(
-      "INSERT INTO patients (patient_number, full_name) VALUES ('P-000123', 'Synthetic fixture') RETURNING id",
+      "INSERT INTO patients (patient_number, full_name) VALUES ('P-007123', 'Synthetic fixture') RETURNING id",
     );
     const runtimeShift = await runtimePool.query<{ id: number }>(
       "INSERT INTO cashier_shifts (opened_by) VALUES ('fixture') RETURNING id",
@@ -314,21 +316,21 @@ async function characterizePopulatedState(
       [runtimeShift.rows[0]!.id],
     );
     const sequenceTargets = [
-      ["patient_number_seq", 123],
-      ["invoice_number_seq", 456],
-      ["receipt_number_seq", 789],
-      ["voucher_number_seq", 321],
+      ["patient_number_seq", "7000", false, "7123"],
+      ["invoice_number_seq", "1", true, "456"],
+      ["receipt_number_seq", "1", true, "789"],
+      ["voucher_number_seq", "1", true, "321"],
     ] as const;
-    const before = await Promise.all(sequenceTargets.map(async ([name, targetValue]) => {
-      const result = await runtimePool.query<{ last_value: string }>(`SELECT last_value::text FROM ${name}`);
-      return Number(result.rows[0]?.last_value ?? 0) < targetValue;
+    const before = await Promise.all(sequenceTargets.map(async ([name, last, called]) => {
+      const result = await runtimePool.query<{ last_value: string; is_called: boolean }>(`SELECT last_value::text, is_called FROM ${name}`);
+      return result.rows[0]?.last_value === last && result.rows[0]?.is_called === called;
     }));
     await runtimePool.end();
     await initializeGeneratedRuntimeSchema(target, names.runtime, environment);
     const sequenceVerify = new Pool({ connectionString: databaseUrl(target.testUrl, names.runtime), ssl: false });
-    const after = await Promise.all(sequenceTargets.map(async ([name, targetValue]) => {
-      const result = await sequenceVerify.query<{ last_value: string }>(`SELECT last_value::text FROM ${name}`);
-      return Number(result.rows[0]?.last_value ?? 0) === targetValue;
+    const after = await Promise.all(sequenceTargets.map(async ([name, , , targetValue]) => {
+      const result = await sequenceVerify.query<{ last_value: string; is_called: boolean }>(`SELECT last_value::text, is_called FROM ${name}`);
+      return result.rows[0]?.last_value === targetValue && result.rows[0]?.is_called === true;
     }));
 
     const coldPatient = await sequenceVerify.query<{ id: number }>(
@@ -378,7 +380,7 @@ async function characterizePopulatedState(
       {
         finding: "business-number-sequence-state",
         status: before.every(Boolean) && after.every(Boolean) ? "PROVEN_BEHAVIOR" : "UNRESOLVED_FINDING",
-        note: "All four business sequences lagged imported prefixed identifiers before runtime initialization and synchronized afterward.",
+        note: "The pending P-07000 floor was not consumed before restart. All four business sequences then synchronized to their imported identifiers, including P-07123 above the floor.",
       },
       {
         finding: "waiting-list-obsolete-uniqueness-ordering",

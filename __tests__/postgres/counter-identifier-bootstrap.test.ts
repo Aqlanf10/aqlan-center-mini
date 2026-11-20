@@ -50,7 +50,12 @@ it("restarts on arbitrary TEXT identifiers, retains rows and forward-only positi
   await expect(db.ensureSchema()).resolves.toBeUndefined();
   for (const [index, [table, column, sequence]] of counters.entries()) {
     expect((await db.getPool().query(`SELECT to_jsonb(t) AS row FROM ${table} t ORDER BY id`)).rows).toEqual(before[index]);
-    expect((await db.getPool().query(`SELECT last_value::text FROM ${sequence}`)).rows[0].last_value).toBe("500");
+    // A cold start raises P to the reserved floor without consuming it.
+    // The other three counters must still retain the exact pre-restart state.
+    const state = await db.getPool().query(`SELECT last_value::text, is_called FROM ${sequence}`);
+    expect(state.rows).toEqual([index === 0
+      ? { last_value: "7000", is_called: false }
+      : { last_value: "500", is_called: true }]);
     const numberSql = [PATIENT_NUMBER_SQL, documentNumberSql("invoice"), documentNumberSql("receipt"), documentNumberSql("voucher")][index];
     const values = (await db.getPool().query(`SELECT ${numberSql} AS n FROM generate_series(1,2)`)).rows.map(row => row.n);
     const prefix = ["P", "INV", "R", "V"][index];

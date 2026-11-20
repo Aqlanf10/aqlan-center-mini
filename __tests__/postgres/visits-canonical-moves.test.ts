@@ -37,6 +37,9 @@ const setting = (key: string, value: string) => fx.pool.query("INSERT INTO setti
 beforeAll(async () => {
   fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner");
   mine = (await fx.pool.query<{ id: number }>("INSERT INTO patients(patient_number,full_name,phone,primary_doctor_id) VALUES('SYN-M-1','SYN Moves 1','0500000000',$1) RETURNING id", [fx.parties.doctor!])).rows[0].id;
+  // This suite exercises independent chairs 1–7; the default capacity
+  // would reject the race, readiness, and audit scenarios before their assertions.
+  await setting("clinic.chairs", "7");
   await setting("ops.require_clearance_before_call", "false");
 }, 180_000);
 afterAll(async () => { await fx?.close(); });
@@ -126,8 +129,11 @@ describe("chairs, gate and atomicity", () => {
     const id = await visit("SYN audit refused", null, null);
     await fx.pool.query("ALTER TABLE audit_log ADD CONSTRAINT syn_move_audit_refuses CHECK (actor <> 'SYN-M-RECEPTION') NOT VALID");
     try {
-      await expect(move("reception", id, { action: "call", chair: 7 })).rejects.toThrow();
+      await expect(move("reception", id, { action: "call", chair: 7 })).rejects.toMatchObject({
+        code: "23514", constraint: "syn_move_audit_refuses",
+      });
       expect(await state(id)).toMatchObject({ status: "waiting", chair: null });
+      expect(await audits(id)).toEqual([]);
     } finally { await fx.pool.query("ALTER TABLE audit_log DROP CONSTRAINT syn_move_audit_refuses"); }
   });
 });

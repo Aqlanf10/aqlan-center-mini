@@ -230,7 +230,9 @@ async function migrateThrough(url: string, count: number): Promise<void> {
   }
 }
 
-async function businessSequenceState(url: string): Promise<Record<string, number>> {
+type BusinessSequenceState = { last_value: string; is_called: boolean };
+
+async function businessSequenceState(url: string): Promise<Record<string, BusinessSequenceState>> {
   const client = new Client({ connectionString: url, ssl: false });
   await client.connect();
   try {
@@ -240,12 +242,13 @@ async function businessSequenceState(url: string): Promise<Record<string, number
       "receipt_number_seq",
       "voucher_number_seq",
     ];
-    const state: Record<string, number> = {};
+    const state: Record<string, BusinessSequenceState> = {};
     for (const name of names) {
-      const { rows } = await client.query<{ last_value: string }>(
-        "SELECT last_value::text FROM " + name,
+      const { rows } = await client.query<BusinessSequenceState>(
+        "SELECT last_value::text, is_called FROM " + name,
       );
-      state[name] = Number(rows[0]?.last_value ?? 0);
+      expect(rows).toHaveLength(1);
+      state[name] = rows[0]!;
     }
     return state;
   } finally {
@@ -471,7 +474,7 @@ describe("PG18 schema ownership characterization", () => {
     }
   }, 120_000);
 
-  it("proves all four business-number sequences lag imported prefixed rows until runtime initialization synchronizes them", async () => {
+  it("reserves the patient floor and synchronizes the three document counters on runtime initialization", async () => {
     const name = "aqlan_schema_ownership_sequences";
     const url = await createIsolatedDatabase(name);
     try {
@@ -504,17 +507,21 @@ describe("PG18 schema ownership characterization", () => {
       }
 
       const before = await businessSequenceState(url);
-      expect(before.patient_number_seq).toBeLessThan(123);
-      expect(before.invoice_number_seq).toBeLessThan(456);
-      expect(before.receipt_number_seq).toBeLessThan(789);
-      expect(before.voucher_number_seq).toBeLessThan(321);
+      // Migration-only bootstrap has seeded raw (1, called) for each
+      // counter without reconciling the historical rows added afterward.
+      expect(before).toEqual({
+        patient_number_seq: { last_value: "1", is_called: true },
+        invoice_number_seq: { last_value: "1", is_called: true },
+        receipt_number_seq: { last_value: "1", is_called: true },
+        voucher_number_seq: { last_value: "1", is_called: true },
+      });
 
       await initializeGeneratedRuntimeSchema(validateOwnershipHarnessEnvironment(process.env), name, process.env);
       expect(await businessSequenceState(url)).toEqual({
-        patient_number_seq: 123,
-        invoice_number_seq: 456,
-        receipt_number_seq: 789,
-        voucher_number_seq: 321,
+        patient_number_seq: { last_value: "7000", is_called: false },
+        invoice_number_seq: { last_value: "456", is_called: true },
+        receipt_number_seq: { last_value: "789", is_called: true },
+        voucher_number_seq: { last_value: "321", is_called: true },
       });
     } finally {
       await dropIsolatedDatabase(name);
