@@ -338,7 +338,7 @@ it.runIf(process.env.NUMBERING_V2_OWNED_PHYSICAL_WITNESS === "1")(
   async () => {
     const bin = process.env.NUMBERING_PG_BIN;
     if (!bin) throw new Error("NUMBERING_PG_BIN required for physical checkpoint witness");
-    const toolsEnv = { PATH: process.env.PATH, PGCONNECT_TIMEOUT: "5" };
+    const toolsEnv = { PATH: process.env.PATH, PGCONNECT_TIMEOUT: "5", NODE_ENV: "test" as const };
     const command = (tool: string, args: string[], input?: Buffer) => {
       const result = spawnSync(join(bin, tool), args, { input, env: toolsEnv, maxBuffer: 8 * 1024 * 1024, timeout: 30_000 });
       if (result.status !== 0) throw new Error(tool + " failed in owned fixture: " + (result.stderr?.toString() ?? result.error?.message));
