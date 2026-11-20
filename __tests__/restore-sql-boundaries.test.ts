@@ -29,7 +29,7 @@ describe('writer backup SQL boundaries', () => {
       + `-- INSERT INTO schema_migrations ('decoy');\n`
       + `INSERT INTO example ("semi;""colon", "note") VALUES (1, 'INSERT INTO schema_migrations');\n`;
     const sql = `BEGIN;${body}COMMIT;\n-- trailing comment`;
-    expect(prepareBackupSql(sql)).toEqual({ sql, dataSql: body, skippedMigrationRecordLines: 0, sqlRowsStatementLines: 1 });
+    expect(prepareBackupSql(sql)).toEqual({ sql, dataSql: body, skippedMigrationRecordLines: 0, sqlRowsStatementLines: 1, patientNumberSequence: null });
   });
 
   it('does not silently discard unknown application tables with migration-like names', () => {

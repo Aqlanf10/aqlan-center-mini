@@ -1,6 +1,8 @@
 import { createGunzip } from "node:zlib";
-import { createReadStream, createWriteStream } from "node:fs";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { constants, createReadStream, createWriteStream } from "node:fs";
+import { createHash } from "node:crypto";
+import { Transform } from "node:stream";
+import { mkdtemp, open, readFile, rm, type FileHandle } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -25,19 +27,47 @@ export interface ParsedArchive {
   truncated: boolean;
 }
 
-export async function readTarGzEntries(gzipPath: string): Promise<ParsedArchive> {
+export interface ExpectedCompressedArchive {
+  readonly bytes: number;
+  readonly sha256: string;
+}
+
+export async function readTarGzEntries(gzipPath: string, expected?: ExpectedCompressedArchive): Promise<ParsedArchive> {
+  if (expected && (!Number.isSafeInteger(expected.bytes) || expected.bytes <= 0 || !/^[a-f0-9]{64}$/.test(expected.sha256))) {
+    throw new Error("Invalid stored archive size or digest.");
+  }
   const stage = await mkdtemp(path.join(tmpdir(), "aqlan-restore-"));
+  let opened: FileHandle | undefined;
   try {
     const tarPath = path.join(stage, "archive.tar");
-    await pipeline(
-      createReadStream(gzipPath),
-      createGunzip(),
-      createWriteStream(tarPath),
-    );
+    if (expected) {
+      // Check the object we will actually read, not a separately resolved path.
+      // Nonblocking/no-follow are used on platforms that expose these flags.
+      opened = await open(gzipPath, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0));
+      const stat = await opened.stat();
+      if (!stat.isFile() || stat.size !== expected.bytes) throw new Error("Stored archive size or file type mismatch.");
+      const hash = createHash("sha256");
+      let compressedBytes = 0;
+      const meter = new Transform({ transform(chunk: Buffer, _encoding, done) {
+        compressedBytes += chunk.length;
+        if (compressedBytes > expected.bytes) return done(new Error("Archive exceeded its stored compressed size."));
+        hash.update(chunk);
+        done(null, chunk);
+      } });
+      // Hash the exact compressed bytes which produce this private tar. There
+      // is no second compressed copy and no later reopening of gzipPath.
+      await pipeline(opened.createReadStream({ autoClose: false }), meter, createGunzip(), createWriteStream(tarPath, { flags: "wx", mode: 0o600 }));
+      if (compressedBytes !== expected.bytes || hash.digest("hex") !== expected.sha256) {
+        throw new Error("Stored archive compressed bytes or digest mismatch.");
+      }
+    } else {
+      await pipeline(createReadStream(gzipPath), createGunzip(), createWriteStream(tarPath));
+    }
     const bytes = await readFile(tarPath);
     return parseTarBytes(bytes);
   } finally {
-    await rm(stage, { recursive: true, force: true });
+    try { await opened?.close(); }
+    finally { await rm(stage, { recursive: true, force: true }); }
   }
 }
 

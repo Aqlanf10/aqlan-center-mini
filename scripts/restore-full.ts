@@ -8,7 +8,7 @@
  *  ٢) أي فشل تحقق ⇒ **لا استعادة قاعدة أصلًا** (لم يعد اللمس يسبق التحقق).
  *  ٣) الهدف يجب أن يكون فارغًا (رفض غير الفارغ افتراضيًا).
  *  ٤) المستندات تُستعاد إلى دليل staging معزول — لا إلى دليل الإنتاج مباشرة.
- *  ٥) بعد كل شيء: READY FOR CUTOVER مع الخطوات موثَّقة لا منفَّذة.
+ *  ٥) يُبلّغ اكتمال الاختبار المعزول ولا يعتمد التحويل أو استئناف الترقيم.
  *
  * الاستعمال:
  *   DATABASE_URL=postgres://…(هدف فارغ) DOCUMENTS_DIR=…(staging) \
@@ -16,6 +16,7 @@
  */
 import path from "node:path";
 import { validatedRestoreFullTarget } from "./security/restore-full-target-guard.mjs";
+import { numberingCutoverMessage } from "../lib/restore/cutover-readiness";
 
 async function main(): Promise<number> {
   const archivePath = process.argv[2];
@@ -90,12 +91,8 @@ async function main(): Promise<number> {
   console.log(`✔ مستندات: ${result.documentsRestored} مستعادًا و${result.documentsVerified} متحققًا منه بعد الكتابة`);
   console.log(`✔ تحقق الهدف: فحص حرج=${result.verification.criticalProbeOk ? "سليم" : "فشل"}، جداول=${result.verification.tablesCount}`);
 
-  if (result.readyForCutover) {
-    console.log("\n═".repeat(60));
-    console.log("READY FOR CUTOVER — التبديل إلى الإنتاج قرار بشري، خطواته:");
-    for (const step of result.cutoverSteps) console.log(`  ${step}`);
-    console.log("═".repeat(60));
-  }
+  console.log("✔ اكتملت الاستعادة المعزولة فقط.");
+  console.log(`⚠ ${numberingCutoverMessage(result.cutoverBlocker)}`);
   return 0;
 }
 

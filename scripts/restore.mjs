@@ -3,6 +3,7 @@ import "./load-env.mjs";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
 import { prepareBackupSql } from "../lib/restore/sql.mjs";
+import { restorePatientNumberSequence } from "../lib/restore/patient-number-sequence.mjs";
 import { assertSafeLegacyRestoreTarget } from "./security/synthetic-restore-target-guard.mjs";
 
 /**
@@ -39,9 +40,9 @@ try {
   process.exit(2);
 }
 
-let sql;
+let prepared;
 try {
-  sql = prepareBackupSql(readFileSync(file, "utf8")).sql;
+  prepared = prepareBackupSql(readFileSync(file, "utf8"));
 } catch (error) {
   console.error(`الملف ناقص أو غير مدعوم: ${error.message}`);
   process.exit(1);
@@ -52,7 +53,18 @@ try {
   await client.connect();
   // Match the backup writer's quote escaping even on a differently configured server.
   await client.query("SET standard_conforming_strings = on");
-  await client.query(sql);
+  await client.query("BEGIN");
+  try {
+    await client.query(prepared.dataSql);
+    const sequence = await restorePatientNumberSequence(client, prepared.patientNumberSequence);
+    await client.query("COMMIT");
+    console.warn(sequence === "not-recorded"
+      ? "النسخة لا تسجّل عدّاد ملفات المرضى؛ تحقق مستقلاً قبل استئناف إصدار الأرقام."
+      : "استُعيد العدّاد المحفوظ. لا تستأنف إصدار الأرقام دون تحقق مستقل من الأرقام الأحدث.");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  }
   const { rows } = await client.query(
     `SELECT COUNT(*)::int AS tables FROM information_schema.tables
       WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`,

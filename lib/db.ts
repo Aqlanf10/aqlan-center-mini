@@ -116,8 +116,9 @@ import {
   type LegacyPatientRef, type LegacyPlan, type LegacySession, type LegacyTreatment,
 } from "./legacy-import";
 import {
-  DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, PATIENT_NUMBER_SQL, documentKindOfSetting, documentNumberSql,
+  DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
 } from "./document-numbers";
+import { patientNumberingInsertValue } from "./patient-numbering-insert-scope";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import { hasManualCashLine, ManualCashEntryConflictError } from "./manual-cash-entry";
@@ -144,7 +145,10 @@ import {
 import { costNow, issuedCostMinor, movementCostsAtIndexes, type CostedMovement } from "./inventoryCost";
 import { quantityAtoms, QUANTITY_SCALE } from "./inventory-domain/quantities";
 import { proportionalCostMinor } from "./inventory-domain/treatment-cost";
-import { hashPassword } from "./auth";
+import { hashPassword, sessionCredentialVersion, verifyPassword, type SessionPayload } from "./auth";
+import { STAFF_ACCOUNT_PROTECTION, StaffAccountWriteError,
+  checkStaffWriteProtection, protectStaffAccountWrite, type StaffAccountProtection, type StaffAccountWriteContext,
+} from "./staff-account-mutation";
 import { seedDefaultServices } from "./services-seed";
 import { seedDefaultLabServices } from "./lab-services-seed";
 import {
@@ -2936,11 +2940,12 @@ async function resolveVisitPatientDetailed(
   }
   if (!patientId) {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    const numbering = await patientNumberingInsertValue(client, 3);
     const { rows } = await client.query(
       `INSERT INTO patients (patient_number, full_name, phone)
-       VALUES (${PATIENT_NUMBER_SQL}, $1, $2)
+       VALUES (${numbering.sql}, $1, $2)
        RETURNING id`,
-      [visit.patient_name, phone],
+      [visit.patient_name, phone, ...numbering.values],
     );
     patientId = rows[0].id as number;
     created = true;
@@ -3611,11 +3616,12 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
   await ensureSchema();
   const { rows } = await withTransaction(getPool(), async (client) => {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    const numbering = await patientNumberingInsertValue(client, 15);
     return client.query<PatientRow>(
     `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                            birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
      VALUES (
-       ${PATIENT_NUMBER_SQL},
+       ${numbering.sql},
        $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
        $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
      RETURNING ${PATIENT_COLUMNS}`,
@@ -3633,7 +3639,7 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
       normalizePatientPhone(input.guardianPhone ?? null),
       input.nationalId ?? null,
       input.referralSource ?? null,
-      input.referredBy ?? null,
+      input.referredBy ?? null, ...numbering.values,
     ],
     );
   });
@@ -3695,11 +3701,12 @@ export async function commitPatientImport(input: {
     let balances = 0;
     for (const row of toCreate) {
       const patient = row.patient!;
+      const numbering = await patientNumberingInsertValue(client, 15);
       const inserted = await client.query<{ id: number; patient_number: string }>(
         `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                                birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
          VALUES (
-           ${PATIENT_NUMBER_SQL},
+           ${numbering.sql},
            $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
            $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
          RETURNING id, patient_number`,
@@ -3707,7 +3714,7 @@ export async function commitPatientImport(input: {
           patient.fullName, normalizePatientPhone(patient.phone), normalizePatientPhone(patient.altPhone),
           patient.gender, patient.birthYear, patient.address, patient.medicalAlert, patient.note,
           patient.birthDate ?? null, patient.guardianName ?? null, normalizePatientPhone(patient.guardianPhone ?? null),
-          patient.nationalId ?? null, patient.referralSource ?? null, patient.referredBy ?? null,
+          patient.nationalId ?? null, patient.referralSource ?? null, patient.referredBy ?? null, ...numbering.values,
         ],
       );
       const id = inserted.rows[0].id;
@@ -5164,13 +5171,14 @@ export async function confirmBookingRequest(
   let patientId = existing[0]?.id;
   if (!patientId) {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    const numbering = await patientNumberingInsertValue(client, 3);
     const { rows: created } = await client.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name, phone)
        VALUES (
-         ${PATIENT_NUMBER_SQL},
+         ${numbering.sql},
          $1, $2)
        RETURNING id`,
-      [request.full_name, request.phone],
+      [request.full_name, request.phone, ...numbering.values],
     );
     patientId = created[0].id;
   }
@@ -11270,7 +11278,8 @@ async function recordCommissionChange(
 
 /**
  * معاملة تغيير عمولة: تقفل الجهات، تلتقط خط الأساس قبل الكتابة، تنفّذ الكتابة
- * الحيّة، ثم تسجّل اللقطة الجديدة — كلها أو لا شيء. والتدقيق بعد الالتزام.
+ * الحيّة، ثم تسجّل اللقطة الجديدة — كلها أو لا شيء. افتراضيًا التدقيق بعد الالتزام؛
+ * كتّاب حسابات الطاقم يطلبون التدقيق الإلزامي في نفس المعاملة.
  */
 async function withDoctorCommissionChange<T>(
   ctx: CommissionChangeContext,
@@ -11278,6 +11287,7 @@ async function withDoctorCommissionChange<T>(
   partiesOf: (client: DbClient) => Promise<Array<number | null | undefined>>,
   mutate: (client: DbClient) => Promise<T>,
   partiesAfter?: (client: DbClient, result: T) => Promise<Array<number | null | undefined>>,
+  atomicStaffAudit?: { beforeCommit: () => void },
 ): Promise<{ result: T; changes: CommissionChange[] }> {
   const outcome = await withTransaction(getPool(), async (client) => {
     const initial = [...new Set((await partiesOf(client)).filter((id): id is number => typeof id === "number" && id > 0))]
@@ -11300,10 +11310,20 @@ async function withDoctorCommissionChange<T>(
       const change = await recordCommissionChange(client, partyId, source, ctx);
       if (change) changes.push(change);
     }
+    if (atomicStaffAudit) {
+      for (const change of changes) await insertAuditRow(client, commissionChangeAudit(change, ctx));
+      atomicStaffAudit.beforeCommit();
+    }
     return { result, changes };
   });
-  for (const change of outcome.changes) {
-    await recordAudit({
+  if (!atomicStaffAudit) {
+    for (const change of outcome.changes) await recordAudit(commissionChangeAudit(change, ctx));
+  }
+  return outcome;
+}
+
+function commissionChangeAudit(change: CommissionChange, ctx: CommissionChangeContext): AuditInput {
+  return {
       action: "doctor.commission.update",
       entity: "party",
       entityId: change.partyId,
@@ -11321,9 +11341,7 @@ async function withDoctorCommissionChange<T>(
       },
       actor: ctx.actor,
       actorRole: ctx.actorRole ?? null,
-    });
-  }
-  return outcome;
+    };
 }
 
 function describeCommissionSnapshot(value: CommissionSnapshotValue | null): string {
@@ -15309,26 +15327,26 @@ export async function listUsers(): Promise<StaffAccount[]> {
 export async function linkUserDoctor(
   userId: number, partyId: number | null,
   ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT,
+  authority?: StaffAccountWriteContext,
 ): Promise<StaffAccount | null> {
+  if (partyId !== null && (!Number.isSafeInteger(partyId) || partyId <= 0)) throw new StaffAccountWriteError("invalid-doctor-link");
   await ensureSchema();
-  if (partyId !== null) {
-    const { rows: doctor } = await getPool().query<{ id: number; name: string }>(
-      `SELECT id, name FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active LIMIT 1`,
-      [partyId],
-    );
-    if (!doctor[0]) return null;
-  }
   /* (P0-1) ربط/فكّ ربط حسابٍ يحمل إعدادًا متقدّمًا يغيّر سياسة الجهتين — من الآن:
      القديمة تفقده والجديدة تكسبه، ولا يمسّ ذلك ما قُبض قبل الربط. */
   const { result: rows } = await withDoctorCommissionChange(
     ctx, "advanced",
     async (client) => {
-      const { rows: current } = await client.query<{ party_id: number | null }>(
-        `SELECT party_id FROM users WHERE id = $1 FOR UPDATE`, [userId],
-      );
-      return [current[0]?.party_id ?? null, partyId];
+      const { revalidateSessionInTransaction } = await import("./session");
+      const current = await protectStaffAccountWrite(client, userId, authority, revalidateSessionInTransaction);
+      return current ? [current.party_id, partyId] : [];
     },
-    async (client) => (await client.query<{
+    async (client) => {
+      if (partyId !== null) {
+        // Existing wrapper holds the affected party locks before eligibility check.
+        const doctor = await client.query(`SELECT id FROM parties WHERE id=$1 AND kind='doctor' AND is_active FOR SHARE`, [partyId]);
+        if (!doctor.rows[0]) throw new StaffAccountWriteError("invalid-doctor-link");
+      }
+      const { rows } = await client.query<{
       id: number; username: string; display_name: string;
       role: string; is_active: boolean; created_at: Date;
       party_id: number | null; party_name: string | null;
@@ -15336,21 +15354,28 @@ export async function linkUserDoctor(
     `UPDATE users SET party_id = $2 WHERE id = $1
      RETURNING id, username, display_name, role, is_active, created_at, party_id`,
     [userId, partyId],
-    )).rows,
+      );
+      if (rows[0]) await insertAuditRow(client, { action: "user.update", entity: "user", entityId: userId,
+        entityLabel: rows[0].username, details: { fields: ["clinician-link"] }, actor: ctx.actor, actorRole: ctx.actorRole });
+      // Resolve the final display projection before commit. A failed read may
+      // not make a committed mutation appear unsaved to the caller.
+      if (rows[0]) {
+        const { rows: partyRows } = rows[0].party_id
+          ? await client.query<{ name: string }>("SELECT name FROM parties WHERE id=$1", [rows[0].party_id])
+          : { rows: [] };
+        rows[0].party_name = partyRows[0]?.name ?? null;
+      }
+      return rows;
+    }, undefined, { beforeCommit: () => {
+      if (authority && authority.session.expiresAt <= Date.now()) throw new StaffAccountWriteError("staff-authority-stale");
+    } },
   );
   if (!rows[0]) return null;
-  let partyName: string | null = null;
-  if (rows[0].party_id) {
-    const { rows: nameRow } = await getPool().query<{ name: string }>(
-      `SELECT name FROM parties WHERE id = $1`, [rows[0].party_id],
-    );
-    partyName = nameRow[0]?.name ?? null;
-  }
   return {
     id: rows[0].id, username: rows[0].username, displayName: rows[0].display_name,
     role: rows[0].role, isActive: rows[0].is_active,
     createdAt: rows[0].created_at.toISOString(),
-    partyId: rows[0].party_id ?? null, partyName,
+    partyId: rows[0].party_id ?? null, partyName: rows[0].party_name,
   };
 }
 
@@ -15503,19 +15528,28 @@ export async function updateUser(id: number, input: {
   permissions?: DoctorPermissions; commissionConfig?: DoctorCommissionConfig;
   /** (P0-1) إزالة الإعداد المتقدّم: يعود الطبيب إلى نسبة جهته — من الآن. */
   clearCommissionConfig?: boolean;
-}, ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT): Promise<StaffAccount | null> {
+}, ctx: CommissionChangeContext = SYSTEM_COMMISSION_CONTEXT, authority?: StaffAccountWriteContext): Promise<StaffAccount | null> {
   await ensureSchema();
   const touchesCommission = input.commissionConfig !== undefined || input.clearCommissionConfig === true;
+  let previousCommission: DoctorCommissionConfig | null = null;
   const { result: rows } = await withDoctorCommissionChange(
     ctx, "advanced",
     async (client) => {
-      if (!touchesCommission) return [];
-      const { rows: owner } = await client.query<{ party_id: number | null }>(
-        `SELECT party_id FROM users WHERE id = $1 FOR UPDATE`, [id],
-      );
-      return [owner[0]?.party_id ?? null];
+      const { revalidateSessionInTransaction } = await import("./session");
+      const target = await protectStaffAccountWrite(client, id, authority, revalidateSessionInTransaction);
+      const droppingAdmin = input.isActive === false || (input.role !== undefined && input.role !== "admin");
+      if (target?.role === "admin" && target.is_active && droppingAdmin) {
+        const { rows } = await client.query<{ c: number }>("SELECT count(*)::int AS c FROM users WHERE role='admin' AND is_active");
+        if (!rows[0] || rows[0].c <= 1) throw new StaffAccountWriteError("last-active-admin");
+      }
+      if (touchesCommission && target && target.party_id === null) {
+        const before = await client.query<{ commission_config: string | null }>("SELECT commission_config FROM users WHERE id=$1", [id]);
+        previousCommission = normalizeStoredConfig(before.rows[0]?.commission_config);
+      }
+      return touchesCommission ? [target?.party_id ?? null] : [];
     },
-    async (client) => (await client.query<{
+    async (client) => {
+      const { rows } = await client.query<{
     id: number; username: string; display_name: string;
     role: string; is_active: boolean; created_at: Date;
     party_id: number | null; party_name: string | null;
@@ -15541,16 +15575,35 @@ export async function updateUser(id: number, input: {
       input.commissionConfig ? JSON.stringify(input.commissionConfig) : null,
       input.clearCommissionConfig === true,
     ],
-    )).rows,
+      );
+      if (rows[0]) await insertAuditRow(client, { action: "user.update", entity: "user", entityId: id,
+        entityLabel: rows[0].username, details: { fields: Object.keys(input).filter(key=>input[key as keyof typeof input] !== undefined) },
+        actor: ctx.actor, actorRole: ctx.actorRole });
+      if (rows[0] && input.permissions) await insertAuditRow(client, {
+        action: rows[0].role === "cashier" || rows[0].role === "accountant" ? "user.finance-permissions.update" : "doctor.permissions.update",
+        entity: "user", entityId: id, entityLabel: rows[0].username,
+        details: { المستخدم: rows[0].display_name, الصلاحيات: "تعديل تفصيلي" }, actor: ctx.actor, actorRole: ctx.actorRole,
+      });
+      if (rows[0] && touchesCommission && rows[0].party_id === null) await insertAuditRow(client, {
+        action: "doctor.commission.update", entity: "user", entityId: id, entityLabel: rows[0].username,
+        details: { الطبيب: rows[0].display_name, قبل_القيمة: previousCommission,
+          بعد_القيمة: normalizeStoredConfig(rows[0].commission_config), السبب: ctx.reason ?? null },
+        actor: ctx.actor, actorRole: ctx.actorRole,
+      });
+      // Resolve the final display projection before commit. A failed read may
+      // not make a committed mutation appear unsaved to the caller.
+      if (rows[0]) {
+        const { rows: partyRows } = rows[0].party_id
+          ? await client.query<{ name: string }>("SELECT name FROM parties WHERE id=$1", [rows[0].party_id])
+          : { rows: [] };
+        rows[0].party_name = partyRows[0]?.name ?? null;
+      }
+      return rows;
+    }, undefined, { beforeCommit: () => {
+      if (authority && authority.session.expiresAt <= Date.now()) throw new StaffAccountWriteError("staff-authority-stale");
+    } },
   );
   if (!rows[0]) return null;
-  let partyName: string | null = null;
-  if (rows[0].party_id) {
-    const { rows: nameRow } = await getPool().query<{ name: string }>(
-      `SELECT name FROM parties WHERE id = $1`, [rows[0].party_id],
-    );
-    partyName = nameRow[0]?.name ?? null;
-  }
   return {
     id: rows[0].id,
     username: rows[0].username,
@@ -15559,12 +15612,44 @@ export async function updateUser(id: number, input: {
     isActive: rows[0].is_active,
     createdAt: rows[0].created_at.toISOString(),
     partyId: rows[0].party_id ?? null,
-    partyName,
+    partyName: rows[0].party_name,
     specialty: rows[0].specialty ?? null,
     branch: rows[0].branch ?? null,
     permissions: parseDoctorPermissions(rows[0].permissions, rows[0].role),
     commissionConfig: parseDoctorCommissionConfig(rows[0].commission_config),
   };
+}
+
+/** Self-password is a separate authenticated action, including for the owner.
+ * Verify the current password under the final user lock, perform one write and
+ * mandatory audit, and return reissuance claims only after successful commit. */
+export async function changeOwnStaffPassword(
+  session: SessionPayload, currentPassword: string, nextPassword: string,
+  protection: StaffAccountProtection = STAFF_ACCOUNT_PROTECTION,
+): Promise<{ ok: false; reason: "stale-session" | "wrong-password" | "invalid-password" }
+  | { ok: true; user: Pick<StaffUser,"id"|"username"|"role"|"partyId"|"permissions">; credentialVersion: string }> {
+  if (!Number.isSafeInteger(session.userId) || session.userId <= 0) return { ok:false, reason:"stale-session" };
+  if (!currentPassword || nextPassword.length < 8 || nextPassword.length > 200 || currentPassword === nextPassword) return { ok:false, reason:"invalid-password" };
+  await ensureSchema();
+  return withTransaction(getPool(), async client => {
+    // This lane never changes active/admin count; no global staff-write fence.
+    await checkStaffWriteProtection(client, session.userId, protection, true, true);
+    const locked = await client.query<UserRow>("SELECT * FROM users WHERE id=$1 FOR UPDATE", [session.userId]);
+    const user = locked.rows[0];
+    const { revalidateSessionInTransaction } = await import("./session");
+    if (!user || !await revalidateSessionInTransaction(session, client)) return { ok:false, reason:"stale-session" };
+    if (!await verifyPassword(currentPassword, user.password_hash)) return { ok:false, reason:"wrong-password" };
+    const nextHash = await hashPassword(nextPassword);
+    if (session.expiresAt <= Date.now()) return { ok:false, reason:"stale-session" };
+    const changed = await client.query<UserRow>("UPDATE users SET password_hash=$2 WHERE id=$1 RETURNING *", [session.userId, nextHash]);
+    if (!changed.rows[0]) throw new Error("Locked account update unavailable");
+    const updated = toUser(changed.rows[0]);
+    await insertAuditRow(client, { action:"user.update", entity:"user", entityId:updated.id, entityLabel:updated.username,
+      details:{ التغيير:"غيّر كلمة مروره بنفسه" }, actor:updated.username, actorRole:updated.role });
+    if (session.expiresAt <= Date.now()) throw new StaffAccountWriteError("staff-authority-stale");
+    return { ok:true, user:{ id:updated.id, username:updated.username, role:updated.role,
+      partyId:updated.partyId, permissions:updated.permissions }, credentialVersion:sessionCredentialVersion(nextHash) };
+  });
 }
 
 /**
@@ -16255,6 +16340,7 @@ export async function isPeriodLocked(date: string): Promise<boolean> {
 // ─── النسخة الاحتياطية الكاملة ───────────────────────────────────────────────
 
 import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets } from "./backup";
+import { patientNumberSequenceBackupLine } from "./restore/patient-number-sequence.mjs";
 
 /**
  * يبني ملف النسخة الاحتياطية سطرًا سطرًا.
@@ -16410,6 +16496,21 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
+  // Standalone allocator state is not derivable from surviving patient rows.
+  // Sequences are not MVCC: read near the end. A newer observed value can
+  // conservatively leave a gap; an archive does not prove cutover freshness.
+  const { rows: [sequence] } = await pool.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_catalog.pg_sequence
+        WHERE seqrelid = pg_catalog.to_regclass('public.patient_number_seq')
+     ) AS present`,
+  );
+  if (sequence?.present === true) {
+    const { rows: [state] } = await pool.query(
+      "SELECT last_value::text, is_called FROM public.patient_number_seq",
+    );
+    yield patientNumberSequenceBackupLine(state?.last_value, state?.is_called);
+  }
   yield `COMMIT;\n`;
 }
 

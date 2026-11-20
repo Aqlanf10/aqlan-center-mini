@@ -2,13 +2,14 @@ import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { consumeStaffLoginAttempt, findUserByUsername, recordAudit, updateUser } from "@/lib/db";
+import { changeOwnStaffPassword, consumeStaffLoginAttempt } from "@/lib/db";
 import {
-  SESSION_COOKIE, SESSION_DURATION_MS, createSessionToken, hashPassword,
-  sessionCredentialVersion, sessionPermissionVersion, verifyPassword,
+  SESSION_COOKIE, SESSION_DURATION_MS, createSessionToken,
+  sessionPermissionVersion,
 } from "@/lib/auth";
 import { staffSessionCookieSecure } from "@/lib/sessionCookie";
 import { requireSession } from "@/lib/session";
+import { StaffAccountWriteError } from "@/lib/staff-account-mutation";
 
 export const dynamic = "force-dynamic";
 
@@ -62,24 +63,13 @@ export async function POST(request: Request) {
       });
     }
 
-    const user = await findUserByUsername(session.username);
-    if (!user || user.id !== session.userId) {
+    const changed = await changeOwnStaffPassword(session, currentPassword, newPassword);
+    if (!changed.ok) {
+      if (changed.reason === "wrong-password") return NextResponse.json({ message: "كلمة المرور الحالية غير صحيحة." }, { status: 403 });
+      if (changed.reason === "invalid-password") return NextResponse.json({ message: "كلمة المرور الجديدة غير صالحة." }, { status: 400 });
       return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
     }
-    if (!(await verifyPassword(currentPassword, user.passwordHash))) {
-      return NextResponse.json({ message: "كلمة المرور الحالية غير صحيحة." }, { status: 403 });
-    }
-
-    const passwordHash = await hashPassword(newPassword);
-    const updated = await updateUser(user.id, { passwordHash });
-    if (!updated) {
-      return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
-    }
-    await recordAudit({
-      action: "user.update", entity: "user", entityId: user.id, entityLabel: user.username,
-      details: { التغيير: "غيّر كلمة مروره بنفسه" },
-      actor: session.username, actorRole: session.role,
-    }).catch(() => {});
+    const updated = changed.user;
 
     const token = createSessionToken({
       userId: updated.id,
@@ -87,7 +77,7 @@ export async function POST(request: Request) {
       role: updated.role,
       expiresAt: Date.now() + SESSION_DURATION_MS,
       partyId: updated.partyId,
-      credentialVersion: sessionCredentialVersion(passwordHash),
+      credentialVersion: changed.credentialVersion,
       // Match login issuance, using the current permissions returned by the update.
       ...(updated.role === "cashier" || updated.role === "accountant" ? {
         financeAccess: updated.permissions?.financeAccess,
@@ -103,7 +93,11 @@ export async function POST(request: Request) {
       maxAge: Math.floor(SESSION_DURATION_MS / 1000),
     });
     return response;
-  } catch {
-    return NextResponse.json({ message: "تعذّر تغيير كلمة المرور. أعد المحاولة." }, { status: 500 });
+  } catch (error) {
+    if (error instanceof StaffAccountWriteError && error.reason === "staff-authority-stale") {
+      return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+    }
+    const status = error instanceof StaffAccountWriteError && error.reason === "owner-protection-unverified" ? 503 : 500;
+    return NextResponse.json({ message: "تعذّر تغيير كلمة المرور. أعد المحاولة." }, { status });
   }
 }

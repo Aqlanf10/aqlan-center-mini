@@ -219,7 +219,7 @@ describe("candidate periodontal archive compatibility on fresh owned PostgreSQL"
     expect(vi.mocked(loadMigrationFiles)).toHaveBeenCalledExactlyOnceWith();
     expect(restored.migrationsApplied).toEqual(candidateFiles.map((file) => file.version));
     expect(restored.verification).toMatchObject({ criticalProbeOk: true, migrationConsistent: true });
-    expect(restored).toMatchObject({ documentsRestored: 1, documentsVerified: 1, readyForCutover: true });
+    expect(restored).toMatchObject({ documentsRestored: 1, documentsVerified: 1, readyForCutover: false, cutoverBlocker: "numbering-freshness-unverified" });
     expect(await readFile(path.join(stagingDir, DOCUMENT_KEY))).toEqual(documentBytes);
     expect((await pool().query("SELECT last_value::int,is_called FROM periodontal_records_id_seq")).rows)
       .toEqual([{ last_value: Math.max(...sourceState.records.map((row) => row.id)), is_called: true }]);

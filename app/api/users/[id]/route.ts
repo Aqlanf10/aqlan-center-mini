@@ -1,14 +1,25 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { countActiveAdmins, linkUserDoctor, listUsers, recordAudit, updateUser } from "@/lib/db";
+import { linkUserDoctor, updateUser } from "@/lib/db";
 import { hashPassword } from "@/lib/auth";
 import { isAdmin, isRole } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
+import { StaffAccountWriteError } from "@/lib/staff-account-mutation";
 import type { DoctorPermissions, DoctorCommissionConfig } from "@/lib/doctor-permissions";
 import { validateDoctorCommissionConfigInput } from "@/lib/doctor-permissions";
 
 export const dynamic = "force-dynamic";
+
+function staffWriteFailure(error: unknown) {
+  if (error instanceof StaffAccountWriteError) {
+    if (error.reason === "invalid-doctor-link") return NextResponse.json({ message: "الجهة ليست طبيبًا فاعلًا." }, { status: 404 });
+    if (error.reason === "last-active-admin") return NextResponse.json({ message: "لا يمكن إيقاف آخر مدير أو تغيير دوره. عيّن مديرًا آخر أولًا." }, { status: 409 });
+    if (error.reason === "owner-protection-unverified") return NextResponse.json({ message: "تعذّر التحقق من صلاحية تعديل الحساب." }, { status: 503 });
+    return NextResponse.json({ message: "تعديل الحساب غير مسموح." }, { status: 403 });
+  }
+  return NextResponse.json({ message: "تعذّر حفظ التعديل." }, { status: 500 });
+}
 
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -21,7 +32,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   const { id: rawId } = await context.params;
   const id = Number(rawId);
-  if (!Number.isInteger(id) || id <= 0) {
+  if (!Number.isSafeInteger(id) || id <= 0) {
     return NextResponse.json({ message: "رقم المستخدم غير صالح." }, { status: 400 });
   }
 
@@ -36,24 +47,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
    * لهم. والفكّ (null) يعيده إلى السلوك القديم — يرى الكل — حتى يُربط من جديد.
    */
   if (source.action === "link_doctor") {
-    const rawParty = Number(source.partyId);
-    const partyId = Number.isInteger(rawParty) && rawParty > 0 ? rawParty : null;
-    const updated = await linkUserDoctor(id, partyId, {
-      actor: session.username, actorRole: session.role, reason: "ربط حساب الطبيب بجهته",
-    });
-    if (!updated) {
-      return NextResponse.json(
-        { message: "الجهة ليست طبيبًا فاعلًا، أو المستخدم غير موجود." },
-        { status: 404 },
-      );
+    const partyId = source.partyId;
+    if ((partyId !== null && (typeof partyId !== "number" || !Number.isSafeInteger(partyId) || partyId <= 0))
+      || Object.keys(source).some(key => key !== "action" && key !== "partyId")) {
+      return NextResponse.json({ message: "ربط الحساب يحتاج رقم طبيب صالحًا أو فكًّا صريحًا." }, { status: 400 });
     }
-    await recordAudit({
-      action: "user.update", entity: "user", entityId: id,
-      entityLabel: updated.username,
-      details: { الربط: partyId ? `طبيب رقم ${partyId}` : "فكّ الربط" },
-      actor: session.username, actorRole: session.role,
-    });
-    return NextResponse.json(updated);
+    try {
+      const updated = await linkUserDoctor(id, partyId, {
+        actor: session.username, actorRole: session.role, reason: "ربط حساب الطبيب بجهته",
+      }, { session });
+      return updated ? NextResponse.json(updated) : NextResponse.json({ message: "المستخدم غير موجود." }, { status: 404 });
+    } catch (error) { return staffWriteFailure(error); }
   }
 
   const patch: {
@@ -105,60 +109,11 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
 
   try {
-    // آخر مدير فاعل لا يُوقَف ولا يُنزَّل دوره: عيادة بلا مدير لا يستطيع أحد فيها
-    // فتح الإعدادات ولا إعادة تعيين مدير — لأن ذلك نفسه يحتاج مديرًا.
-    const droppingAdmin = patch.isActive === false || (patch.role !== undefined && patch.role !== "admin");
-    if (droppingAdmin) {
-      const users = await listUsers();
-      const target = users.find((user) => user.id === id);
-      if (target?.role === "admin" && target.isActive && (await countActiveAdmins()) <= 1) {
-        return NextResponse.json(
-          { message: "لا يمكن إيقاف آخر مدير أو تغيير دوره. عيّن مديرًا آخر أولًا." },
-          { status: 409 },
-        );
-      }
-    }
-
-    const previous = patch.commissionConfig || patch.clearCommissionConfig
-      ? (await listUsers()).find((user) => user.id === id) ?? null
-      : null;
     const updated = await updateUser(id, patch, {
       actor: session.username, actorRole: session.role, reason: commissionReason,
-    });
+    }, { session });
     if (!updated) return NextResponse.json({ message: "المستخدم غير موجود." }, { status: 404 });
 
-    /* تعديل الصلاحيات أو العمولة يُدوَّن بتدقيقٍ خاص به (صلاحيات الوكيل المساعد):
-       من فتح المالية المخفية لطبيبٍ أو غيّر نسبته يترك أثرًا باسمه وتاريخه. */
-    if (patch.permissions) {
-      await recordAudit({
-        action: updated.role === "cashier" || updated.role === "accountant"
-          ? "user.finance-permissions.update" : "doctor.permissions.update", entity: "user", entityId: id,
-        entityLabel: updated.username,
-        details: updated.role === "cashier" || updated.role === "accountant"
-          ? { المستخدم: updated.displayName, الصلاحيات: "تعديل تفصيلي" }
-          : { الطبيب: updated.displayName, الصلاحيات: "تعديل تفصيلي" },
-        actor: session.username, actorRole: session.role,
-      }).catch(() => {});
-    }
-    /* (P0-1) حسابٌ مربوط بجهة طبيب: التغيير المالي دُوِّن داخل updateUser على
-       الجهة (قبل/بعد/السريان). حسابٌ بلا جهة لا أثر مالي له بعد — يُدوَّن هنا على
-       المستخدم بقيمته قبل وبعد، فيُعرف ما سيسري إن رُبط. */
-    if ((patch.commissionConfig || patch.clearCommissionConfig) && !updated.partyId) {
-      await recordAudit({
-        action: "doctor.commission.update", entity: "user", entityId: id,
-        entityLabel: updated.username,
-        details: {
-          الطبيب: updated.displayName,
-          قبل_القيمة: previous?.commissionConfig ?? null,
-          بعد_القيمة: patch.clearCommissionConfig ? null : patch.commissionConfig,
-          ملاحظة: "حسابٌ بلا جهة طبيب — لا أثر على العمولات حتى يُربط، ويسري من لحظة الربط",
-          السبب: commissionReason,
-        },
-        actor: session.username, actorRole: session.role,
-      }).catch(() => {});
-    }
     return NextResponse.json(updated);
-  } catch {
-    return NextResponse.json({ message: "تعذّر حفظ التعديل." }, { status: 500 });
-  }
+  } catch (error) { return staffWriteFailure(error); }
 }

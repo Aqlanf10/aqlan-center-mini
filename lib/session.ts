@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { SESSION_COOKIE, readSessionToken, sessionCredentialVersion, type SessionPayload } from "./auth";
 import { sessionPermissionVersion } from "./auth";
@@ -37,11 +38,12 @@ async function currentSession(payload: SessionPayload | null, client?: DbClient)
  * دور/credential version) يجري بعدها بـSELECT قرائي مباشر بلا ensureSchema —
  * فلا يصل مسار النسخ أبدًا إلى أي DDL ضمني.
  */
-export async function readSessionPayload(): Promise<SessionPayload | null> {
+async function readSignedRequestSession(): Promise<{ payload: SessionPayload; token: string } | null> {
   try {
     const store = await cookies();
-    const cookieSession = readSessionToken(store.get(SESSION_COOKIE)?.value);
-    if (cookieSession) return cookieSession;
+    const token = store.get(SESSION_COOKIE)?.value;
+    const payload = readSessionToken(token);
+    if (payload && token) return { payload, token };
   } catch {
     // تجاهل أخطاء قراءة الكوكيز
   }
@@ -51,14 +53,50 @@ export async function readSessionPayload(): Promise<SessionPayload | null> {
     const authHeader = headerList.get("authorization");
     if (authHeader && authHeader.startsWith("Bearer ")) {
       const token = authHeader.slice(7).trim();
-      const session = readSessionToken(token);
-      if (session) return session;
+      const payload = readSessionToken(token);
+      if (payload) return { payload, token };
     }
   } catch {
     // تجاهل الأخطاء عند استدعاء headers خارج سياق الطلب
   }
 
   return null;
+}
+
+export async function readSessionPayload(): Promise<SessionPayload | null> {
+  return (await readSignedRequestSession())?.payload ?? null;
+}
+
+// Process-private proof: signed request admission is required; copying JSON or
+// passing a client-supplied SessionPayload cannot mint this handle.
+declare const boundRequestSessionBrand: unique symbol;
+export interface BoundRequestSession { readonly [boundRequestSessionBrand]: true }
+const boundRequestSessions = new WeakMap<BoundRequestSession, { payload: SessionPayload; sessionBinding: string }>();
+
+/** Explicit opt-in for the unmounted owner lane. Existing session semantics are
+ * unchanged. The digest binds the exact accepted signed credential, not a login
+ * grant, a new signing key, or separately revocable server session ID. */
+export async function readBoundRequestSession(): Promise<BoundRequestSession | null> {
+  const signed = await readSignedRequestSession();
+  if (!signed || signed.token.length > 8192 || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(signed.token)) return null;
+  const { payload, token } = signed;
+  if (!Number.isSafeInteger(payload.userId) || payload.userId <= 0 || !Number.isSafeInteger(payload.expiresAt)
+    || payload.expiresAt <= Date.now() || typeof payload.username !== "string" || !payload.username
+    || typeof payload.credentialVersion !== "string" || !payload.credentialVersion) return null;
+  const proof = Object.freeze({}) as BoundRequestSession;
+  const sessionBinding = `staff-session-v1:${createHash("sha256").update("staff-session-v1\0").update(token).digest("hex")}`;
+  boundRequestSessions.set(proof, { payload: Object.freeze({ ...payload }), sessionBinding });
+  return proof;
+}
+
+/** Accept only the exact request proof and reuse canonical locked revalidation. */
+export async function revalidateBoundRequestSession(
+  proof: BoundRequestSession, client: DbClient,
+): Promise<{ payload: SessionPayload; sessionBinding: string } | null> {
+  const admitted = boundRequestSessions.get(proof);
+  if (!admitted || admitted.payload.expiresAt <= Date.now()) return null;
+  const payload = await revalidateSessionInTransaction(admitted.payload, client);
+  return payload && payload.expiresAt > Date.now() ? { payload, sessionBinding: admitted.sessionBinding } : null;
 }
 
 export async function requireSession(client?: DbClient): Promise<SessionPayload | null> {

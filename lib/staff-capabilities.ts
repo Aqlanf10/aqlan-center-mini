@@ -39,6 +39,13 @@ export function ownerContextFromTrustedBinding(binding: Readonly<OwnerBinding>):
   return context;
 }
 
+/** Account-mutation perimeter query only. Never admits or enrolls an owner. */
+export function boundOwnerRelationship(context: TrustedOwnerContext | null, targetId: number): 'owner' | 'other' | null {
+  if (!context || !validId(targetId)) return null;
+  const binding = ownerBindings.get(context);
+  return !binding ? null : binding.ownerUserId === targetId ? 'owner' : 'other';
+}
+
 export interface StaffAccessInput {
   readonly subject: StaffSubject;
   readonly permissionDocument: unknown;
@@ -195,5 +202,49 @@ export function validateStaffMaintenance(actor: ResolvedStaffAccess, target: Res
   if (target.isOwner || actorState.owner?.ownerUserId === target.userId) return refused("protected-owner");
   if (!hasStaffCapability(actor, `staff.${operation}`)) return refused("maintenance-denied");
   if (!withinDelegableAuthority(actor, targetState.document)) return refused("outside-delegable-authority");
+  return { ok: true };
+}
+
+/** INACTIVE account-control preflight. No routes call it. Not a transaction grant.
+ * Fresh actor/target rows and the binding must be locked and revalidated by the
+ * future writer. Owner self-service/recovery is intentionally a separate workflow.
+ */
+export function validateStaffAccountControl(input: {
+  actor: ResolvedStaffAccess; target: ResolvedStaffAccess;
+  expectedActorFingerprint: string; expectedTargetFingerprint: string;
+  operations: readonly unknown[];
+}): StaffChangeDecision {
+  const actor = accessStates.get(input.actor), target = accessStates.get(input.target);
+  if (!actor || !target) return refused("invalid-access");
+  const binding = validateStaffMutationOwnerContext(actor, target);
+  if (!binding.ok) return binding;
+  if (staffAuthorizationFingerprint(input.actor) !== input.expectedActorFingerprint
+    || staffAuthorizationFingerprint(input.target) !== input.expectedTargetFingerprint) return refused("stale-authority");
+  // Validate the whole patch BEFORE accepting any field, including bulk commands.
+  const allowed = new Set(["credentials.reset", "username.change", "role.change", "clinician-link.change", "account.disable", "permissions.change"]);
+  if (!Array.isArray(input.operations) || input.operations.length === 0
+    || input.operations.some(operation => typeof operation !== "string" || !allowed.has(operation))) return refused("unknown-account-operation");
+  if (input.target.isOwner || actor.owner?.ownerUserId === input.target.userId) return refused("protected-owner");
+  if (input.actor.userId === input.target.userId) return refused("self-account-control");
+  // No legacy admin or editable grant can authorize account-control operations.
+  if (!input.actor.isOwner) return refused("owner-required");
+  // Permission document validation and field/domain validation remain additional gates.
+  return { ok: true };
+}
+
+/** Preflight every member before any mutation; never partial-success a mixed batch. */
+export function validateStaffAccountControlBatch(
+  commands: readonly Parameters<typeof validateStaffAccountControl>[0][],
+): StaffChangeDecision {
+  if (!Array.isArray(commands) || commands.length === 0 || commands.length > 100) return refused("invalid-account-batch");
+  const actorFingerprint = staffAuthorizationFingerprint(commands[0].actor);
+  const targets = new Set<number>();
+  for (const command of commands) {
+    if (!actorFingerprint || staffAuthorizationFingerprint(command.actor) !== actorFingerprint) return refused("mixed-batch-authority");
+    if (command.target.userId === null || targets.has(command.target.userId)) return refused("duplicate-or-invalid-target");
+    targets.add(command.target.userId);
+    const result = validateStaffAccountControl(command);
+    if (!result.ok) return result;
+  }
   return { ok: true };
 }

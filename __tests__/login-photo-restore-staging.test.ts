@@ -20,7 +20,7 @@ vi.mock("../lib/migrations", () => ({
 vi.mock("../lib/restore/client-config", () => ({ restoreClientConfigFor: () => ({}) }));
 vi.mock("../lib/restore/archive", () => ({ readTarGzEntries: async () => ({}) }));
 vi.mock("../lib/restore/validate", () => ({ validateBackupArchive: () => ({ ok: true, sql: Buffer.from("SELECT 1;"), documents: [] }) }));
-vi.mock("../lib/restore/sql.mjs", () => ({ prepareBackupSql: () => ({ dataSql: "SELECT 1;", skippedMigrationRecordLines: 0, sqlRowsStatementLines: 1 }) }));
+vi.mock("../lib/restore/sql.mjs", () => ({ prepareBackupSql: () => ({ dataSql: "SELECT 1;", skippedMigrationRecordLines: 0, sqlRowsStatementLines: 1, patientNumberSequence: null }) }));
 vi.mock("../lib/files", () => ({ putFile: vi.fn(), readFileByKey: vi.fn() }));
 
 beforeEach(() => { state.raw = ""; state.calls.length = 0; vi.clearAllMocks(); });
@@ -29,7 +29,7 @@ it("rejects restored photo metadata before commit or any staged filesystem write
   state.raw = JSON.stringify({ key: "foreign-patient.png" });
   const result = await stagedRestore(options);
   expect(result.ok).toBe(false);
-  expect(result.readyForCutover).toBe(false);
+  expect(result).toMatchObject({ readyForCutover: false, patientNumberSequence: "unverified", cutoverBlocker: null });
   expect(result.errors.join(" ")).toContain("صورة الدخول");
   expect(state.calls).toContain("BEGIN");
   expect(state.calls).toContain("ROLLBACK");
@@ -41,7 +41,9 @@ it("rejects restored photo metadata before commit or any staged filesystem write
 it("keeps legacy backups with no photo setting compatible", async () => {
   const result = await stagedRestore(options);
   expect(result.ok).toBe(true);
-  expect(result.readyForCutover).toBe(true);
+  expect(result).toMatchObject({
+    readyForCutover: false, patientNumberSequence: "not-recorded", cutoverBlocker: "numbering-history-not-recorded",
+  });
   expect(state.calls).toContain("COMMIT");
   expect(state.calls).not.toContain("ROLLBACK");
   expect(state.mkdir).toHaveBeenCalledOnce();

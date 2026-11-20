@@ -9,7 +9,16 @@ vi.mock("next/headers", () => ({
   headers: async () => ({ get: mocks.header }),
 }));
 vi.mock("@/lib/db", () => ({
-  findUserByUsername: mocks.user, updateUser: mocks.update, recordAudit: mocks.audit,
+  findUserByUsername: mocks.user, recordAudit: mocks.audit,
+  changeOwnStaffPassword: async (session: { userId: number }, current: string, next: string) => {
+    if (user.id !== session.userId || !user.isActive) return { ok: false, reason: 'stale-session' };
+    if (!await verifyPassword(current, user.passwordHash)) return { ok: false, reason: 'wrong-password' };
+    const nextHash = await hashPassword(next);
+    const saved = await mocks.update(user.id, { passwordHash: nextHash });
+    if (!saved) return { ok: false, reason: 'stale-session' };
+    await mocks.audit({ action: 'user.update', entityId: user.id, actor: user.username, actorRole: saved.role });
+    return { ok: true, user: saved, credentialVersion: sessionCredentialVersion(nextHash) };
+  },
   consumeStaffLoginAttempt: mocks.limit, consumeLoginAttempt: mocks.sharedLimit,
   clearAccountLoginAttempts: mocks.clearLimits,
 }));

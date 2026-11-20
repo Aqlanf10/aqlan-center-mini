@@ -1,14 +1,17 @@
-import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { Client } from "pg";
+import type { VerifiedArchive } from "../backupVolume";
 import { loadMigrationFiles, migrate, migrationStatus } from "../migrations";
 import { parseDatabaseHost } from "../db-tls";
 import { restoreClientConfigFor } from "./client-config";
 import { readTarGzEntries } from "./archive";
-import { validateBackupArchive, type ValidationOk } from "./validate";
+import { validateBackupArchive } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
+import { restorePatientNumberSequence } from "./patient-number-sequence.mjs";
 import { loginPhotoRestoreProblem } from "./login-photo";
+import { numberingCutoverHold, type RestoreCutoverBlocker, type RestoreNumberingEvidence } from "./cutover-readiness";
 
 /**
  * الاستعادة بإعداد Staging/Cutover (P1.15) — لا حالة نصف مستعادة أبدًا.
@@ -20,7 +23,7 @@ import { loginPhotoRestoreProblem } from "./login-photo";
  *   → استعد القاعدة إلى هدف معزول (ليس إنتاجًا)
  *   → استعد المستندات إلى دليل staging (ليس دليل الإنتاج)
  *   → تحقق من الاثنين تحققًا مستقلًا
- *   → أنتج حالة READY FOR CUTOVER مع خطوات التبديل موثَّقة.
+ *   → أبلِغ نجاح الاستعادة المعزولة، دون اعتماد التحويل أو استئناف الترقيم.
  *
  * التبديل الفعلي (إيقاف التطبيق → تبديل القاعدة → نقل دليل staging إلى
  * DOCUMENTS_DIR → إقلاع → تحقق) **لا يُنفَّذ في P1** — موثَّق فقط في
@@ -45,7 +48,9 @@ export interface StagedRestoreResult {
   migrationsApplied: string[];
   sqlRowsStatementLines: number;
   skippedMigrationRecordLines: number;
-  readyForCutover: boolean;
+  readyForCutover: false;
+  cutoverBlocker: RestoreCutoverBlocker | null;
+  patientNumberSequence: RestoreNumberingEvidence;
   verification: {
     criticalProbeOk: boolean;
     migrationConsistent: boolean;
@@ -124,7 +129,26 @@ async function nonDeferrableCyclicForeignKeys(client: Client): Promise<ForeignKe
  * تنفيذ الاستعادة المعزولة كاملة. كل خطوة تفشل توقف ما بعدها — والهدف
  * المعزول يمكن التخلي عنه بأمان في أي لحظة (هذا جوهر العزل).
  */
-export async function stagedRestore(options: StagedRestoreOptions): Promise<StagedRestoreResult> {
+export function stagedRestore(options: StagedRestoreOptions): Promise<StagedRestoreResult> {
+  return restoreStaged(options);
+}
+
+/** Internal admin-drill entry point. The guarded caller supplies the existing
+ * verified history receipt, then resets its dedicated target only after we
+ * have privately captured and validated the exact replay bytes. No unchecked
+ * prepared-data input, validation opt-out, or occupied-target override. */
+export function stagedRestoreForVerifiedDrill(
+  options: Omit<StagedRestoreOptions, "allowNonEmptyTarget">,
+  expected: Readonly<VerifiedArchive>,
+  beforeReplay: () => Promise<void>,
+): Promise<StagedRestoreResult> {
+  return restoreStaged({ ...options, allowNonEmptyTarget: false }, { expected: { ...expected }, beforeReplay });
+}
+
+async function restoreStaged(
+  options: StagedRestoreOptions,
+  admission?: { expected: Readonly<VerifiedArchive>; beforeReplay: () => Promise<void> },
+): Promise<StagedRestoreResult> {
   const result: StagedRestoreResult = {
     ok: false,
     targetIdentity: parseDatabaseHost(options.targetUrl),
@@ -135,6 +159,8 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     sqlRowsStatementLines: 0,
     skippedMigrationRecordLines: 0,
     readyForCutover: false,
+    cutoverBlocker: null,
+    patientNumberSequence: "unverified",
     verification: { criticalProbeOk: false, migrationConsistent: false, tablesCount: 0 },
     cutoverSteps: [],
     errors: [],
@@ -143,7 +169,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
   // ── الخطوة ١: قراءة الأرشيف كاملًا وتحقيقه — قبل أي لمس للهدف.
   let archive;
   try {
-    archive = await readTarGzEntries(options.archivePath);
+    archive = await readTarGzEntries(options.archivePath, admission?.expected);
   } catch (error) {
     result.errors.push(`تعذّرت قراءة الأرشيف — الملف تالف أو مقطوع أو ليس gzip سليمًا: ${error instanceof Error ? error.message : String(error)}`);
     return result;
@@ -155,6 +181,26 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     return result; // لا استعادة قاعدة أصلًا (P1.12)
   }
 
+  if (admission && (validated.sqlSha256 !== admission.expected.databaseSha256 || validated.documents.length !== admission.expected.documents)) {
+    const reason = "Stored archive SQL digest or document count mismatch.";
+    result.validationErrors.push(reason);
+    result.errors.push(reason);
+    return result;
+  }
+
+  let prepared: ReturnType<typeof prepareBackupSql>;
+  try {
+    prepared = prepareBackupSql(Buffer.from(validated.sql).toString("utf8"));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    result.validationErrors.push(reason);
+    result.errors.push(reason);
+    return result;
+  }
+
+  // Nothing below reads the archive pathname. A reset may run arbitrary I/O
+  // against the dedicated target, but it cannot replace our prepared payload.
+  if (admission) await admission.beforeReplay();
   const client = new Client(restoreClientConfigFor(options.targetUrl));
   try {
     await client.connect();
@@ -178,11 +224,9 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
       const migrationRun = await migrate(migrationPool, { apply: true, files: migrationFiles });
       result.migrationsApplied = migrationRun.appliedVersions;
 
-    // ── الخطوة ٤: بيانات SQL — مع استبعاد صفوف تسجيل الهجرات نفسها:
-    // حالة الهجرات في الهدف تُعرَّف بما طبَّقته الخطوة ٣ (الملفات الحالية)، لا
-    // بلقطة النسخة — فتُستعاد نسخة قديمة على كود أحدث فتظل حالة المخطط صحيحة.
-    const sqlText = Buffer.from(validated.sql).toString("utf8");
-      const prepared = prepareBackupSql(sqlText);
+      // ── الخطوة ٤: بيانات SQL — مع استبعاد صفوف تسجيل الهجرات نفسها:
+      // حالة الهجرات في الهدف تُعرَّف بما طبَّقته الخطوة ٣ (الملفات الحالية)، لا
+      // بلقطة النسخة — فتُستعاد نسخة قديمة على كود أحدث فتظل حالة المخطط صحيحة.
       result.skippedMigrationRecordLines = prepared.skippedMigrationRecordLines;
       result.sqlRowsStatementLines = prepared.sqlRowsStatementLines;
       const dataSql = prepared.dataSql;
@@ -214,7 +258,9 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
         );
         const photoProblem = loginPhotoRestoreProblem(photoSettings[0]?.value ?? "", validated.documents);
         if (photoProblem) throw new Error(photoProblem);
+        const patientNumberSequence = await restorePatientNumberSequence(client, prepared.patientNumberSequence);
         await client.query("COMMIT");
+        result.patientNumberSequence = patientNumberSequence;
       } catch (error) {
         await client.query("ROLLBACK").catch(() => {});
         throw error;
@@ -259,24 +305,9 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     }
 
     result.ok = true;
-    result.readyForCutover = true;
-    result.cutoverSteps = cutoverStepsFor(options, result);
+    result.cutoverBlocker = numberingCutoverHold(result.patientNumberSequence).cutoverBlocker;
     return result;
   } finally {
     await client.end().catch(() => {});
   }
-}
-
-/** خطوات التبديل موثَّقة لا منفَّذة (P1.15: لا Production Cutover في هذه المرحلة). */
-function cutoverStepsFor(options: StagedRestoreOptions, result: StagedRestoreResult): string[] {
-  return [
-    "⚠️ هذه الخطوات توثيقٌ للتبديل فقط — لا تُنفَّذ آليًا، والقرار تشغيلي بعد مراجعة مستقلة.",
-    `١) أوقف تطبيق الإنتاج (Railway: إيقاف الخدمة) حتى لا تُكتب بيانات جديدة أثناء التبديل.`,
-    `٢) خذ نسخة احتياطية من قاعدة الإنتاج الحالية قبل أي تبديل (خطة رجوع).`,
-    `٣) استبدل قاعدة الإنتاج بالهدف المعزول المُستعاد: ${result.targetIdentity ? `${result.targetIdentity.database} على ${result.targetIdentity.host}:${result.targetIdentity.port}` : "(هدف غير معروف)"}.`,
-    `٤) انقل محتوى دليل staging ${options.stagingDir} إلى DOCUMENTS_DIR النهائي (rsync/ mv مع إبقاء التصاريح).`,
-    `٥) أعد تشغيل التطبيق وشغّل npm run db:status — يجب أن يظهر consistent.`,
-    `٦) تحقق بصريًا: عدد المرضى، آخر الدفعات، عينة أشعة تُفتح من ملفاتها.`,
-    `٧) وثّق التبديل في سجل الحوادث مع SHA الأرشيف وطابع الزمن ومن أذن به.`,
-  ];
 }
