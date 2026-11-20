@@ -20,6 +20,17 @@ const {parseTarBytes}=await import("../../lib/restore/archive");
 const {validateBackupArchive}=await import("../../lib/restore/validate");
 const {prepareBackupSql}=await import("../../lib/restore/sql.mjs");
 const {stagedRestore}=await import("../../lib/restore/staging");
+const {restorePatientNumberSequence}=await import("../../lib/restore/patient-number-sequence.mjs");
+async function replayNumberedSql(target:Pool, payload:string) {
+ const prepared=prepareBackupSql(payload,{inspectHistorical0079:true,rejectUnsupportedHistoricalSchema:true});
+ const client=await target.connect();
+ try{
+  await client.query("BEGIN");
+  await client.query(prepared.dataSql);
+  expect(await restorePatientNumberSequence(client,prepared.patientNumberSequence)).toBe("reconciled");
+  await client.query("COMMIT");
+ }catch(error){await client.query("ROLLBACK");throw error;}finally{client.release();}
+}
 let session:SessionPayload;
 beforeAll(async()=>{
  await dropPublicSchema(process.env.DATABASE_URL!);await db.ensureSchema();
@@ -73,7 +84,7 @@ it("official SQL and full-archive payload replay preserves identity, retired ali
    await target.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public");
    await migrate(target,{apply:true,files:await loadMigrationFiles()});
    expect(payload.indexOf("-- patients (")).toBeLessThan(payload.indexOf("-- retired_patient_numbers ("));
-   await target.query(prepareBackupSql(payload).sql);
+   await replayNumberedSql(target,payload);
    for(const table of tables)expect((await target.query(`SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) AS data FROM ${table} t`)).rows[0].data,table).toEqual(snapshots.get(table));
    expect((await target.query("SELECT last_value::text,is_called FROM patient_number_seq")).rows[0]).toEqual({last_value:"9000",is_called:true});
    expect((await target.query("SELECT aqlan_allocate_patient_number() AS number")).rows[0].number).toBe("P-09001");
@@ -85,14 +96,13 @@ it("official SQL and full-archive payload replay preserves identity, retired ali
   for(const sameOwner of [false,true]){
    await target.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public");
    await migrate(target,{apply:true,files:await loadMigrationFiles()});
-   const replay=sql.replace(/COMMIT;\s*$/,`INSERT INTO retired_patient_numbers(patient_number,patient_id) VALUES('P-00000123',${Number(current.id)+(sameOwner?0:1000)});\nCOMMIT;\n`);
+   const replay=sql.replace(/-- aqlan-patient-number-sequence-v1 [^\n]+/,`INSERT INTO retired_patient_numbers(patient_number,patient_id) VALUES('P-00000123',${Number(current.id)+(sameOwner?0:1000)});\n$&`);
    expect(replay).not.toBe(sql);
    if(sameOwner){
-    await target.query(prepareBackupSql(replay).sql);
+    await replayNumberedSql(target,replay);
     expect((await target.query("SELECT patient_id::text FROM retired_patient_numbers WHERE patient_number='P-00000123'")).rows).toEqual([{patient_id:String(current.id)}]);
    }else{
-    await expect(target.query(prepareBackupSql(replay).sql)).rejects.toMatchObject({code:"23505"});
-    await target.query("ROLLBACK");
+    await expect(replayNumberedSql(target,replay)).rejects.toMatchObject({code:"23505"});
     expect((await target.query("SELECT count(*)::int AS n FROM patients")).rows[0].n).toBe(0);
     expect((await target.query("SELECT count(*)::int AS n FROM retired_patient_numbers")).rows[0].n).toBe(0);
    }
@@ -100,7 +110,7 @@ it("official SQL and full-archive payload replay preserves identity, retired ali
   // Exercise the official staged full-archive path, not merely its SQL parser.
   await target.query("DROP SCHEMA public CASCADE; CREATE SCHEMA public");
   const restored=await stagedRestore({archivePath:join(directory,"synthetic.tar.gz"),targetUrl:url.toString(),stagingDir:join(directory,"documents")});
-  expect(restored).toMatchObject({ok:true,errors:[],validationErrors:[],readyForCutover:true});
+  expect(restored).toMatchObject({ok:true,errors:[],validationErrors:[],readyForCutover:false,patientNumberSequence:"reconciled",cutoverBlocker:"numbering-freshness-unverified"});
   expect(restored.migrationsApplied).toContain("0080");
   for(const table of tables)expect((await target.query(`SELECT jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text) AS data FROM ${table} t`)).rows[0].data,table).toEqual(snapshots.get(table));
   expect((await target.query("SELECT last_value::text,is_called FROM patient_number_seq")).rows[0]).toEqual({last_value:"9000",is_called:true});

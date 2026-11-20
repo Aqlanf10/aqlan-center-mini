@@ -39,6 +39,13 @@ export function ownerContextFromTrustedBinding(binding: Readonly<OwnerBinding>):
   return context;
 }
 
+/** Read-only relation on a trusted binding; neither enrolls nor admits an owner. */
+export function boundOwnerRelationship(context: TrustedOwnerContext | null, targetId: number): "owner" | "other" | null {
+  if (!context || !validId(targetId)) return null;
+  const binding = ownerBindings.get(context);
+  return !binding ? null : binding.ownerUserId === targetId ? "owner" : "other";
+}
+
 export interface StaffAccessInput {
   readonly subject: StaffSubject;
   readonly permissionDocument: unknown;

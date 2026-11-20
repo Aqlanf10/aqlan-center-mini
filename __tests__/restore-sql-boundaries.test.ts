@@ -29,7 +29,7 @@ describe('writer backup SQL boundaries', () => {
       + `-- INSERT INTO schema_migrations ('decoy');\n`
       + `INSERT INTO example ("semi;""colon", "note") VALUES (1, 'INSERT INTO schema_migrations');\n`;
     const sql = `BEGIN;${body}COMMIT;\n-- trailing comment`;
-    expect(prepareBackupSql(sql)).toEqual({ sql, dataSql: body, skippedMigrationRecordLines: 0, sqlRowsStatementLines: 1 });
+    expect(prepareBackupSql(sql)).toEqual({ sql, dataSql: body, skippedMigrationRecordLines: 0, sqlRowsStatementLines: 1, patientNumberSequence: null });
   });
 
   it('does not silently discard unknown application tables with migration-like names', () => {
@@ -60,7 +60,7 @@ describe('writer backup SQL boundaries', () => {
 
   it('retains canonical READ COMMITTED framing while isolating only data statements', () => {
     const sql = "BEGIN;\nINSERT INTO example (id) VALUES (1);\nCOMMIT;";
-    expect(prepareBackupSql(sql)).toEqual({ sql, dataSql: "\nINSERT INTO example (id) VALUES (1);\n", skippedMigrationRecordLines: 0, sqlRowsStatementLines: 1 });
+    expect(prepareBackupSql(sql)).toEqual({ sql, dataSql: "\nINSERT INTO example (id) VALUES (1);\n", skippedMigrationRecordLines: 0, sqlRowsStatementLines: 1, patientNumberSequence: null });
   });
 
   it.each([
@@ -79,4 +79,15 @@ describe('writer backup SQL boundaries', () => {
   ])('rejects incomplete or unsupported writer framing without returning altered SQL: %s', (sql) => {
     expect(() => prepareBackupSql(sql)).toThrow();
   });
+});
+
+it("converts exact old writer P evidence to data instead of passing executable setval", async () => {
+  const { patientNumberSequenceRestoreSql } = await import("../lib/patient-numbering-backup");
+  const archived = patientNumberSequenceRestoreSql("9000", false);
+  const payload = `BEGIN;\nINSERT INTO patients VALUES ('synthetic');\n${archived}\nCOMMIT;\n`;
+  const prepared = prepareBackupSql(payload);
+  expect(prepared.patientNumberSequence).toEqual({ lastValue: "9000", isCalled: false });
+  expect(prepared.dataSql).toContain("INSERT INTO patients VALUES ('synthetic');");
+  expect(prepared.dataSql).not.toContain(archived);
+  expect(prepared.sql).not.toContain(archived);
 });

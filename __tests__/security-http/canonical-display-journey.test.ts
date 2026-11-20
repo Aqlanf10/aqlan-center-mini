@@ -171,6 +171,36 @@ it("browser: delayed Arabic voices, different-device fallback, pauses and settin
   } finally { await context.close(); }
 });
 
+it("browser still displays historical A after B is suppressed, but only renewed timestamps speak", async () => {
+  const context = await journey.browser.newContext();
+  const tick = (n: number) => new Date(Date.UTC(2026, 10, 20, 10, 30) + n).toISOString();
+  const call = (name: string, n: number, chair: number) => ({ at: tick(n), name, speechName: name, chair });
+  try {
+    const page = await context.newPage();
+    await mockSpeech(page);
+    const actual = await (await journey.api("/api/display", "")).json();
+    const a = call("أحمد", 200, 1), b = call("سارة", 400, 2);
+    let feed = { ...actual, now: tick(100), called: [] };
+    await page.route("**/api/display", route => route.fulfill({ json: feed }));
+    await page.goto(`${journey.baseUrl}/display`);
+    await page.getByText(actual.welcomeText, { exact: true }).waitFor();
+    await page.getByRole("button", { name: "تشغيل صوت النداء" }).click();
+    feed = { ...feed, now: tick(300), called: [a] }; await refresh(page);
+    await expect.poll(async () => (await heard(page)).length).toBe(2);
+    feed = { ...feed, now: tick(500), called: [b] }; await refresh(page);
+    await expect.poll(async () => (await heard(page)).length).toBe(4);
+    feed = { ...feed, now: tick(600), called: [] }; await refresh(page);
+    await page.getByTestId("current-call").waitFor({ state: "detached" });
+    feed = { ...feed, now: tick(700), called: [a] }; await refresh(page);
+    await page.getByTestId("current-call").getByText("أحمد", { exact: true }).waitFor();
+    expect((await heard(page)).length).toBe(4);
+    feed = { ...feed, now: tick(900), called: [call("أحمد", 800, 1)] }; await refresh(page);
+    await expect.poll(async () => (await heard(page)).length).toBe(6);
+    expect((await heard(page)).map(row => row.text))
+      .toEqual(["أحمد", "يرجى التوجه إلى غرفة العلاج رقم ١", "سارة", "يرجى التوجه إلى غرفة العلاج رقم ٢", "أحمد", "يرجى التوجه إلى غرفة العلاج رقم ١"]);
+  } finally { await context.close(); }
+});
+
 it("browser: public HTML/DOM/network remain minimal, stale rich payloads are rejected, and synthetic screenshot preserves the identity", async () => {
   const context = await journey.browser.newContext({ viewport: { width: 1440, height: 900 }, locale: "ar" });
   try {
@@ -241,6 +271,9 @@ it("browser hides stale notice authority after grant revocation on refresh", asy
 });
 
 it("call management retains own scope while the public screen reveals only the resulting current call", async () => {
+  // This journey checks the first-initial projection independently of earlier tests.
+  const operator = await journey.login("operator");
+  expect((await central(operator.cookie, { "display.privacy_mode": "first_initial" })).status).toBe(200);
   const login = await journey.login("caller");
   const party = (await journey.db.query("SELECT party_id FROM users WHERE id=$1", [journey.ids.caller])).rows[0].party_id;
   const own = (await journey.db.query("INSERT INTO visits(patient_name,doctor_id,status,chair,called_at) VALUES('منادى سري',$1,'called',2,NOW()) RETURNING id", [party])).rows[0].id;
@@ -253,6 +286,38 @@ it("call management retains own scope while the public screen reveals only the r
   expect(body.called).toHaveLength(1); expect(body.called[0]).toMatchObject({ name: "منادى س.", speechName: "منادى" });
   expect(JSON.stringify(body)).not.toContain("ممنوع");
   expect((await journey.db.query("SELECT count(*)::int AS n FROM audit_log WHERE entity='visit' AND entity_id=$1", [String(outside)])).rows[0].n).toBe(0);
+});
+
+it("refuses out-of-contract chair writes and retains editorial output for an invalid historical newest call", async () => {
+  const login = await journey.login("caller");
+  const party = (await journey.db.query("SELECT party_id FROM users WHERE id=$1", [journey.ids.caller])).rows[0].party_id;
+  const { rows: [{ id }] } = await journey.db.query(
+    "INSERT INTO visits(patient_name,doctor_id,status,cleared_at) VALUES('غرفة اصطناعية',$1,'waiting',now()) RETURNING id", [party]);
+  const { rows: [{ id: announcement }] } = await journey.db.query(
+    "INSERT INTO display_announcements(title,body) VALUES('إعلان غرفة اصطناعي','نص عام') RETURNING id");
+  try {
+    for (const [action, chair] of [["call", 3], ["call", 21], ["seat", 3], ["seat", 21]]) {
+      const response = await journey.api(`/api/visits/${id}`, login.cookie, { method: "PATCH", body: JSON.stringify({ action, chair }) });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toHaveProperty("code", "invalid_visit_input");
+    }
+    expect((await journey.db.query("SELECT status,chair,called_at FROM visits WHERE id=$1", [id])).rows)
+      .toEqual([{ status: "waiting", chair: null, called_at: null }]);
+    expect((await journey.db.query("SELECT COUNT(*)::int AS n FROM audit_log WHERE entity='visit' AND entity_id=$1", [String(id)])).rows)
+      .toEqual([{ n: 0 }]);
+    await journey.db.query("UPDATE visits SET status='called',chair=21,called_at=now()+interval '1 second' WHERE id=$1", [id]);
+    const feed = await (await journey.api("/api/display", "")).json();
+    expect(feed.called).toEqual([]);
+    expect(feed.announcements).toContainEqual({ title: "إعلان غرفة اصطناعي", body: "نص عام" });
+    const recall = await journey.api(`/api/visits/${id}`, login.cookie, { method: "PATCH", body: JSON.stringify({ action: "call_again" }) });
+    expect(recall.status).toBe(409);
+    const repair = await journey.api(`/api/visits/${id}`, login.cookie, { method: "PATCH", body: JSON.stringify({ action: "return" }) });
+    expect(repair.status).toBe(200);
+    expect(await repair.json()).toMatchObject({ status: "waiting", chair: null });
+  } finally {
+    await journey.db.query("DELETE FROM visits WHERE id=$1", [id]);
+    await journey.db.query("DELETE FROM display_announcements WHERE id=$1", [announcement]);
+  }
 });
 
 it("permission revision invalidates old sessions; canonical cookies never fall back to legacy management", async () => {

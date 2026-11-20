@@ -187,7 +187,7 @@ afterAll(async () => {
 });
 
 describe("تدريب الاستعادة الكامل (قاعدة معزولة + دليل مستندات معزول)", () => {
-  it("الاستعادة تنجح وتنتج READY FOR CUTOVER", async () => {
+  it("الاستعادة المعزولة تنجح دون اعتماد التحويل", async () => {
     const { stagedRestore } = await import("../../lib/restore/staging");
     const result = await stagedRestore({
       archivePath, targetUrl, stagingDir,
@@ -195,12 +195,14 @@ describe("تدريب الاستعادة الكامل (قاعدة معزولة + 
     expect(result.validationErrors).toEqual([]);
     if (!result.ok) console.error("STAGED RESTORE ERRORS:", JSON.stringify(result.errors, null, 2));
     expect(result.ok).toBe(true);
-    expect(result.readyForCutover).toBe(true);
+    expect(result).toMatchObject({
+      readyForCutover: false, cutoverBlocker: "numbering-freshness-unverified",
+    });
     expect(result.documentsRestored).toBe(1);
     expect(result.documentsVerified).toBe(1);
     expect(result.verification.criticalProbeOk).toBe(true);
     expect(result.verification.migrationConsistent).toBe(true);
-    expect(result.cutoverSteps.length).toBeGreaterThan(3);
+    expect(result.cutoverSteps).toEqual([]);
   });
 
   it("عدد المرضى والمواعيد والفواتير مطابق للمصدر", async () => {

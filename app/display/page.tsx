@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Logo } from "@/components/Icon";
 import { InstallApp } from "@/components/InstallApp";
+import { createDisplayCallFreshness } from "@/lib/display-call-freshness";
 import { parsePublicDisplayFeed } from "@/lib/display-feed";
 import { createDisplaySpeaker, displayVoiceStatus, selectDisplayVoice } from "@/lib/display-speech";
 import type { PublicDisplayFeed } from "@/lib/waiting-room";
@@ -27,7 +28,7 @@ export default function DisplayScreen() {
   const soundRef = useRef(false);
   const speakerRef = useRef<ReturnType<typeof createDisplaySpeaker> | null>(null);
   const feedRef = useRef<PublicDisplayFeed | null>(null);
-  const lastCallRef = useRef<string | null>(null);
+  const callFreshness = useRef(createDisplayCallFreshness());
   const baselineRef = useRef(true);
   const flashRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const wakeRef = useRef<{ release: () => Promise<void> } | null>(null);
@@ -97,17 +98,21 @@ export default function DisplayScreen() {
         const next = parsePublicDisplayFeed(await response.json());
         if (disposed || controller.signal.aborted) return;
         const call = next.called[0], previous = feedRef.current;
-        const key = call ? `${call.at ?? ""}|${call.chair ?? ""}` : null;
-        const speechChanged = previous && (previous.voice !== next.voice || JSON.stringify(previous.speech) !== JSON.stringify(next.speech) || previous.called[0]?.speechName !== call?.speechName);
-        if (speechChanged || !call) speakerRef.current?.cancel();
-        if (!baselineRef.current && key && key !== lastCallRef.current && call) {
+        const priorCall = previous?.called[0];
+        const targetChanged = priorCall?.at !== call?.at || priorCall?.chair !== call?.chair || priorCall?.speechName !== call?.speechName;
+        const speechChanged = previous && (previous.voice !== next.voice || JSON.stringify(previous.speech) !== JSON.stringify(next.speech));
+        if (targetChanged || speechChanged || !call) speakerRef.current?.cancel();
+        const fresh = callFreshness.current.observe(next.now, call ?? null, baselineRef.current);
+        if (fresh && call) {
           clearTimeout(flashRef.current); setFlash(true); flashRef.current = setTimeout(() => setFlash(false), 30_000);
           chime();
           if (soundRef.current && next.voice) speakerRef.current?.speak(call.speechName, call.chair, next.speech);
+        } else if (targetChanged) {
+          clearTimeout(flashRef.current); setFlash(false);
         }
-        // First connection/reconnection establishes a baseline, never replays a missed call.
+        // Initial connection/reconnection and ordinary empty feeds advance
+        // coverage without announcing an older row if it later becomes visible.
         baselineRef.current = false;
-        if (key) lastCallRef.current = key;
         feedRef.current = next; setFeed(next); setStale(false); updateVoiceStatus();
       } catch { if (!disposed) clear(); }
       finally { clearTimeout(timeout); if (active === controller) active = null; }

@@ -3,6 +3,7 @@ import "./load-env.mjs";
 import { readFileSync } from "node:fs";
 import { Client } from "pg";
 import { isCanonicalSourceSql, prepareBackupSql } from "../lib/restore/sql.mjs";
+import { restorePatientNumberSequence } from "../lib/restore/patient-number-sequence.mjs";
 import { finalizeRestoredStaffIdentityInTransaction } from "../lib/staff-authority-lifecycle.mjs";
 import { assertSafeLegacyRestoreTarget } from "./security/synthetic-restore-target-guard.mjs";
 
@@ -40,7 +41,7 @@ try {
   process.exit(2);
 }
 
-let sql;
+let prepared;
 try {
   const text = readFileSync(file, "utf8");
   // Restore protocol R1: a canonical source needs the staged restore and its hold.
@@ -48,11 +49,10 @@ try {
     console.error("هذه نسخة من قاعدة بهوية موحّدة. استعادتها تمر بالاستعادة المرحلية مع حجز الاستعادة، لا بهذا الأمر.");
     process.exit(2);
   }
-  const prepared = prepareBackupSql(text, { inspectHistorical0079: true });
+  prepared = prepareBackupSql(text, { inspectHistorical0079: true, rejectUnsupportedHistoricalSchema: true });
   if (prepared.historical0079) {
     throw new Error("Historical 0079 backup requires full archive restore to preserve its registry and timestamp.");
   }
-  sql = prepared.dataSql;
 } catch (error) {
   console.error(`الملف ناقص أو غير مدعوم: ${error.message}`);
   process.exit(1);
@@ -64,9 +64,13 @@ try {
   // Match the backup writer's quote escaping even on a differently configured server.
   await client.query("SET standard_conforming_strings = on");
   await client.query("BEGIN");
-  await client.query(sql);
+  await client.query(prepared.dataSql);
   await finalizeRestoredStaffIdentityInTransaction(client);
+  const sequence = await restorePatientNumberSequence(client, prepared.patientNumberSequence);
   await client.query("COMMIT");
+  console.warn(sequence === "not-recorded"
+    ? "النسخة لا تسجّل عدّاد ملفات المرضى؛ تحقق مستقلاً قبل استئناف إصدار الأرقام."
+    : "استُعيد العدّاد المحفوظ. لا تستأنف إصدار الأرقام دون تحقق مستقل من الأرقام الأحدث.");
   const { rows } = await client.query(
     `SELECT COUNT(*)::int AS tables FROM information_schema.tables
       WHERE table_schema = 'public' AND table_type = 'BASE TABLE'`,

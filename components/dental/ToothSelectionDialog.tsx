@@ -179,7 +179,7 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
               <div className="mb-1 flex justify-between text-[10px] font-bold text-slate-400">
                 <span>يمين المريض</span><span>يسار المريض</span>
               </div>
-              <Odontogram chart={chart} selected={teeth} onPick={pick} showPrimary={showPrimary} chartKnown={chartState === "ready"} touch />
+              <Odontogram chart={chart} selected={teeth} onPick={pick} showPrimary={showPrimary} chartKnown={chartState === "ready"} touch labelVisibleNumber={purpose === "invoice"} />
             </div>
           </div>
 
@@ -208,7 +208,8 @@ export function ToothSelectionDialog({ patientId, mode, serviceName, initial, on
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-3">
-          <p className="min-w-0 flex-1 basis-full text-xs font-bold text-navy-900 sm:basis-auto" data-testid="tooth-dialog-summary">
+          <p className="min-w-0 flex-1 basis-full text-xs font-bold text-navy-900 sm:basis-auto" data-testid="tooth-dialog-summary"
+            aria-live={purpose === "invoice" && mode === "tooth_surfaces" ? "polite" : undefined}>
             {summary}
           </p>
           {teeth.length > 0 ? (

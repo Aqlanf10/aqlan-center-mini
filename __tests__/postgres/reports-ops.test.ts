@@ -54,6 +54,7 @@ async function signedFilling(patientId: number): Promise<{ visitId: number; invo
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  await getPool().query("INSERT INTO settings(key,value) VALUES ('clinic.chairs',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", ["9"]);
   await openShift({ openedBy: "cashier", opening: { YER: 0, SAR: 0, USD: 0 } });
   const doctor = async (name: string) => (await q<{ id: number }>(
     `INSERT INTO parties (kind, name, commission_percent) VALUES ('doctor', $1, 30) RETURNING id`, [name]))[0].id;

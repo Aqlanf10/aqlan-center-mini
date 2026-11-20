@@ -10,15 +10,28 @@ import { authedMutation, harness } from "./_server";
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let visitId = 0;
+let priorChairSetting: { value: string; updated_at: Date } | undefined;
+let configuredFixtureChair = false;
 
 beforeAll(async () => {
   h = await harness();
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
+  ({ rows: [priorChairSetting] } = await db.query<{ value: string; updated_at: Date }>("SELECT value,updated_at FROM settings WHERE key='clinic.chairs'"));
+  await db.query("INSERT INTO settings(key,value) VALUES ('clinic.chairs','9') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
+  configuredFixtureChair = true;
   ({ rows: [{ id: visitId }] } = await db.query<{ id: number }>(
     `INSERT INTO visits (patient_name, status, arrived_at) VALUES ('مريض الطابور', 'waiting', NOW()) RETURNING id`));
 }, 120_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  try {
+    if (configuredFixtureChair) {
+      if (priorChairSetting) {
+        await db.query("UPDATE settings SET value=$1,updated_at=$2 WHERE key='clinic.chairs'", [priorChairSetting.value, priorChairSetting.updated_at]);
+      } else await db.query("DELETE FROM settings WHERE key='clinic.chairs'");
+    }
+  } finally { await db?.end(); }
+});
 
 describe("(LIVE-3) PATCH /api/visits/[id] records the session user", () => {
   it("call, seat and finish carry the signed-in user and role; a spoofed actor in the body is ignored", async () => {

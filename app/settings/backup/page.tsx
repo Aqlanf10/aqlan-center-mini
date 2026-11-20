@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
+import { numberingCutoverMessage, type RestoreCutoverBlocker } from "@/lib/restore/cutover-readiness";
 
 interface BackupRecord {
   backupId: string;
@@ -19,13 +20,13 @@ interface RestoreDrillSummary {
   backupId: string;
   requestedAt: string;
   completedAt: string | null;
-  status: "running" | "ready" | "failed";
+  status: "running" | "restored" | "ready" | "failed";
   targetEnvironment: "staging" | "test";
   archiveSha256: string;
   documentsVerified: number;
   tablesCount: number;
   durationMs: number | null;
-  readyForCutover: boolean;
+  cutoverBlocker?: RestoreCutoverBlocker | null;
   errorCode: string | null;
 }
 
@@ -86,6 +87,7 @@ export default function BackupRecoveryPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [cutoverNotice, setCutoverNotice] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<BackupRecord | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [restoreTarget, setRestoreTarget] = useState<BackupRecord | null>(null);
@@ -111,6 +113,7 @@ export default function BackupRecoveryPage() {
     setBusy("backup");
     setError(null);
     setSuccess(null);
+    setCutoverNotice(null);
     try {
       const response = await fetch("/api/settings/backup/run", { method: "POST" });
       const payload = await json(response);
@@ -129,6 +132,7 @@ export default function BackupRecoveryPage() {
     setBusy(`delete:${deleteTarget.backupId}`);
     setError(null);
     setSuccess(null);
+    setCutoverNotice(null);
     try {
       const response = await fetch(`/api/settings/backup/archive/${encodeURIComponent(deleteTarget.backupId)}`, {
         method: "DELETE",
@@ -153,6 +157,7 @@ export default function BackupRecoveryPage() {
     setBusy(`restore:${restoreTarget.backupId}`);
     setError(null);
     setSuccess(null);
+    setCutoverNotice(null);
     try {
       const response = await fetch("/api/settings/backup/restore", {
         method: "POST",
@@ -161,7 +166,9 @@ export default function BackupRecoveryPage() {
       });
       const payload = await json(response);
       if (!response.ok) throw new Error(typeof payload.message === "string" ? payload.message : "فشل اختبار الاستعادة.");
-      setSuccess("نجح Restore Drill على الهدف المعزول وأصبحت النسخة READY FOR CUTOVER.");
+      if (payload.ok !== true) throw new Error("نتيجة اختبار الاستعادة غير مؤكدة.");
+      setSuccess("اكتملت الاستعادة على الهدف المعزول.");
+      setCutoverNotice(numberingCutoverMessage(payload.cutoverBlocker));
       setRestoreTarget(null);
       await load();
     } catch (e) {
@@ -184,13 +191,14 @@ export default function BackupRecoveryPage() {
 
       {error ? <div role="alert" className="mb-4 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">{error}</div> : null}
       {success ? <div role="status" className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{success}</div> : null}
+      {cutoverNotice ? <div role="status" className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{cutoverNotice}</div> : null}
 
       <section className="mb-4 rounded-2xl border border-slate-200 bg-white p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-black text-navy-950">التحكم بالطوارئ</h2>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              الاستعادة هنا لا تكتب فوق Production. تُجرَّب النسخة أولًا على قاعدة staging/test مخصصة ثم تعطي READY FOR CUTOVER.
+              الاستعادة هنا لا تكتب فوق Production. نجاح الاختبار على قاعدة staging/test لا يعني جاهزية التحويل.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -230,10 +238,15 @@ export default function BackupRecoveryPage() {
         )}
         {data?.restore.lastDrill ? (
           <div className="mt-3 rounded-xl bg-white/80 p-3 text-xs">
-            <strong>آخر اختبار:</strong> {data.restore.lastDrill.status === "ready" ? "READY FOR CUTOVER" : data.restore.lastDrill.status}
+            <strong>آخر اختبار:</strong> {data.restore.lastDrill.status === "restored" || data.restore.lastDrill.status === "ready"
+              ? "اكتملت الاستعادة المعزولة"
+              : data.restore.lastDrill.status === "running" ? "جارٍ الاختبار" : "فشل الاختبار"}
             {" · "}{data.restore.lastDrill.documentsVerified} مستند متحقق
             {" · "}{data.restore.lastDrill.tablesCount} جدول
             {typeof data.restore.lastDrill.durationMs === "number" ? ` · ${(data.restore.lastDrill.durationMs / 1000).toFixed(1)} ث` : ""}
+            {data.restore.lastDrill.status === "restored" || data.restore.lastDrill.status === "ready" ? (
+              <p className="mt-2 font-semibold text-amber-900">{numberingCutoverMessage(data.restore.lastDrill.cutoverBlocker)}</p>
+            ) : null}
           </div>
         ) : null}
       </section>

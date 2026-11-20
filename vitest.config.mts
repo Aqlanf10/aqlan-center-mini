@@ -23,6 +23,8 @@ export default defineConfig({
       "**/.{idea,git,cache,output,temp}/**",
       "**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build,eslint,prettier}.config.*",
       "__tests__/postgres/**",
+      // Synthetic numbering integration requires its own PostgreSQL/browser config.
+      "__tests__/numbering-browser/**",
       // (P2/S14) اختبارات الأمن HTTP بإعدادها المستقل — تشغّلها
       // npm run test:security-http على تطبيق مبنيّ وقاعدة حقيقية.
       "__tests__/security-http/**",

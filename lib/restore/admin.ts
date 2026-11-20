@@ -9,9 +9,11 @@ import {
   backupStateDir,
   readJsonFile,
   resolveBackupArchivePath,
-  verifyBackupArchiveFile,
 } from "../backupVolume";
-import { stagedRestore } from "./staging";
+import { stagedRestoreForVerifiedDrill } from "./staging";
+import {
+  numberingCutoverHold, type RestoreCutoverBlocker, type RestoreNumberingEvidence,
+} from "./cutover-readiness";
 
 export const RESTORE_DRILL_STATE_FILE = "restore-drill-state.json";
 
@@ -35,13 +37,15 @@ export interface RestoreDrillState {
   requestedAt: string;
   completedAt: string | null;
   requestedBy: string;
-  status: "running" | "ready" | "failed";
+  status: "running" | "restored" | "failed";
   targetEnvironment: "staging" | "test";
   archiveSha256: string;
   documentsVerified: number;
   tablesCount: number;
   durationMs: number | null;
-  readyForCutover: boolean;
+  readyForCutover: false;
+  patientNumberSequence: RestoreNumberingEvidence;
+  cutoverBlocker: RestoreCutoverBlocker | null;
   errorCode: string | null;
 }
 
@@ -87,10 +91,30 @@ export function restoreDrillAvailability(
 }
 
 export async function readRestoreDrillState(backupDir: string): Promise<RestoreDrillState | null> {
-  const read = await readJsonFile<RestoreDrillState>(
+  type RecordedDrill = Omit<RestoreDrillState, "status" | "readyForCutover" | "patientNumberSequence"> & {
+    status: RestoreDrillState["status"] | "ready";
+    readyForCutover?: unknown;
+    patientNumberSequence?: unknown;
+  };
+  const read = await readJsonFile<RecordedDrill>(
     path.join(backupStateDir(backupDir), RESTORE_DRILL_STATE_FILE),
   );
-  return read.ok ? read.data : null;
+  if (!read.ok || !read.data || typeof read.data !== "object") return null;
+  const drill = read.data;
+  if (drill.status === "ready" || drill.status === "restored") {
+    // Historical 'ready' only attested isolated restore. Its true bit is
+    // never authoritative, and historical evidence is not inferred.
+    return {
+      ...drill,
+      status: "restored",
+      ...numberingCutoverHold(drill.status === "ready" ? null : drill.patientNumberSequence),
+    };
+  }
+  if (drill.status !== "failed" && drill.status !== "running") return null;
+  return {
+    ...drill, status: drill.status, readyForCutover: false,
+    patientNumberSequence: "unverified", cutoverBlocker: null,
+  };
 }
 
 async function writeRestoreDrillState(backupDir: string, state: RestoreDrillState): Promise<void> {
@@ -103,8 +127,15 @@ async function resetDedicatedTarget(targetUrl: string): Promise<void> {
   const client = new Client({ connectionString: targetUrl, ssl: sslForConnection(targetUrl) });
   try {
     await client.connect();
-    await client.query("DROP SCHEMA IF EXISTS public CASCADE");
-    await client.query("CREATE SCHEMA public");
+    await client.query("BEGIN");
+    try {
+      await client.query("DROP SCHEMA IF EXISTS public CASCADE");
+      await client.query("CREATE SCHEMA public");
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    }
   } finally {
     await client.end().catch(() => {});
   }
@@ -113,7 +144,9 @@ async function resetDedicatedTarget(targetUrl: string): Promise<void> {
 export type AdminRestoreDrillResult =
   | {
       ok: true;
-      readyForCutover: true;
+      readyForCutover: false;
+      patientNumberSequence: RestoreNumberingEvidence;
+      cutoverBlocker: RestoreCutoverBlocker;
       backupId: string;
       archiveSha256: string;
       documentsVerified: number;
@@ -127,6 +160,7 @@ export type AdminRestoreDrillResult =
         | RestoreDrillUnavailableReason
         | "backup-not-found"
         | "archive-integrity-mismatch"
+        | "canonical-fresh-target-required"
         | "restore-failed";
     };
 
@@ -163,24 +197,6 @@ export async function runAdminRestoreDrill(input: {
   }
 
   const stagingDir = path.join(backupStateDir(input.backupDir), "restore-drill-current");
-  await rm(stagingDir, { recursive: true, force: true });
-  await mkdir(stagingDir, { recursive: true });
-
-  let verified;
-  try {
-    verified = await verifyBackupArchiveFile(archivePath, stagingDir);
-  } catch {
-    return { ok: false, reason: "archive-integrity-mismatch" };
-  }
-  if (
-    verified.sha256 !== record.archiveSha256
-    || verified.bytes !== record.archiveBytes
-    || verified.databaseSha256 !== record.databaseSha256
-    || verified.documents !== record.documentCount
-  ) {
-    return { ok: false, reason: "archive-integrity-mismatch" };
-  }
-
   const startedAt = new Date();
   const running: RestoreDrillState = {
     backupId: input.backupId,
@@ -194,22 +210,30 @@ export async function runAdminRestoreDrill(input: {
     tablesCount: 0,
     durationMs: null,
     readyForCutover: false,
+    patientNumberSequence: "unverified",
+    cutoverBlocker: null,
     errorCode: null,
   };
-  await writeRestoreDrillState(input.backupDir, running);
-
+  let admitted = false;
   try {
     const targetUrl = env.RESTORE_DRILL_DATABASE_URL!.trim();
-    await resetDedicatedTarget(targetUrl);
-    const result = await stagedRestore({
-      archivePath,
-      targetUrl,
-      stagingDir,
-      allowNonEmptyTarget: false,
+    const result = await stagedRestoreForVerifiedDrill({ archivePath, targetUrl, stagingDir }, {
+      sha256: record.archiveSha256,
+      bytes: record.archiveBytes,
+      databaseSha256: record.databaseSha256,
+      documents: record.documentCount,
+    }, async () => {
+      // Invoked only after compressed identity, archive and SQL validation.
+      admitted = true;
+      await writeRestoreDrillState(input.backupDir, running);
+      await rm(stagingDir, { recursive: true, force: true });
+      await mkdir(stagingDir, { recursive: true });
+      await resetDedicatedTarget(targetUrl);
     });
+    if (!admitted) return { ok: false, reason: result.canonicalFreshTargetRequired ? "canonical-fresh-target-required" : "archive-integrity-mismatch" };
     const durationMs = Date.now() - startedAt.getTime();
 
-    if (!result.ok || !result.readyForCutover) {
+    if (!result.ok) {
       await writeRestoreDrillState(input.backupDir, {
         ...running,
         completedAt: new Date().toISOString(),
@@ -222,18 +246,19 @@ export async function runAdminRestoreDrill(input: {
       return { ok: false, reason: "restore-failed" };
     }
 
+    const hold = numberingCutoverHold(result.patientNumberSequence);
     await writeRestoreDrillState(input.backupDir, {
       ...running,
+      ...hold,
       completedAt: new Date().toISOString(),
-      status: "ready",
+      status: "restored",
       documentsVerified: result.documentsVerified,
       tablesCount: result.verification.tablesCount,
       durationMs,
-      readyForCutover: true,
     });
     return {
       ok: true,
-      readyForCutover: true,
+      ...hold,
       backupId: input.backupId,
       archiveSha256: record.archiveSha256,
       documentsVerified: result.documentsVerified,
@@ -242,6 +267,7 @@ export async function runAdminRestoreDrill(input: {
       targetEnvironment: availability.targetEnvironment,
     };
   } catch {
+    if (!admitted) return { ok: false, reason: "archive-integrity-mismatch" };
     const durationMs = Date.now() - startedAt.getTime();
     await writeRestoreDrillState(input.backupDir, {
       ...running,

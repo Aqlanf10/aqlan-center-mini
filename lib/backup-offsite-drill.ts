@@ -4,6 +4,9 @@ import path from "node:path";
 import { decryptArchiveBuffer, encryptionKeyFingerprint } from "./backupEncryption";
 import { S3_BACKUP_PREFIX } from "./backupDestinations";
 import { stagedRestore } from "./restore/staging";
+import {
+  numberingCutoverMessage, type RestoreCutoverBlocker, type RestoreNumberingEvidence,
+} from "./restore/cutover-readiness";
 import { type S3Client, sha256Hex } from "./s3-client";
 
 /**
@@ -39,6 +42,9 @@ export interface DrillReport {
     documentsVerified: number;
     criticalProbeOk: boolean;
     migrationConsistent: boolean;
+    readyForCutover: false;
+    patientNumberSequence: RestoreNumberingEvidence;
+    cutoverBlocker: RestoreCutoverBlocker | null;
   } | null;
   errors: string[];
 }
@@ -156,6 +162,9 @@ export async function runOffsiteRestoreDrill(opts: {
       documentsVerified: restored.documentsVerified,
       criticalProbeOk: restored.verification.criticalProbeOk,
       migrationConsistent: restored.verification.migrationConsistent,
+      readyForCutover: restored.readyForCutover,
+      patientNumberSequence: restored.ok ? restored.patientNumberSequence : "unverified",
+      cutoverBlocker: restored.cutoverBlocker,
     };
     report.errors.push(...restored.validationErrors, ...restored.errors);
     report.ok = restored.ok && restored.validationErrors.length === 0 && restored.verification.criticalProbeOk;
@@ -169,7 +178,7 @@ export async function runOffsiteRestoreDrill(opts: {
 export function drillReportText(report: DrillReport): string {
   const yes = (value: boolean) => (value ? "✔" : "✘");
   return [
-    `تجربة استعادة من النسخة الخارجية — ${report.ok ? "نجحت ✔" : "لم تنجح ✘"}`,
+    `تجربة استعادة من النسخة الخارجية — ${report.ok ? "نجحت ✔ (استعادة معزولة فقط)" : "لم تنجح ✘"}`,
     `الشاهد: ${report.witness} · المنفِّذ: ${report.operator}`,
     `من ${report.startedAt} إلى ${report.finishedAt}`,
     `النسخة: ${report.objectKey ?? "—"} (${report.encryptedBytes} بايت مشفّرة)`,
@@ -179,6 +188,7 @@ export function drillReportText(report: DrillReport): string {
     report.restore
       ? `الاستعادة: ${report.restore.tablesCount} جدولًا، فحص حرج ${yes(report.restore.criticalProbeOk)}، هجرات متسقة ${yes(report.restore.migrationConsistent)}، مستندات ${report.restore.documentsRestored} مستعادة و${report.restore.documentsVerified} متحققًا منها`
       : "الاستعادة: لم تُنفَّذ",
+    ...(report.ok ? [numberingCutoverMessage(report.restore?.cutoverBlocker)] : []),
     ...report.errors.map((error) => `  • ${error}`),
   ].join("\n");
 }

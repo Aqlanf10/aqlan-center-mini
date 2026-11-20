@@ -1,3 +1,4 @@
+import { isClinicChairNumber } from "./clinic-chair-range";
 import type { PublicDisplayFeed } from "./waiting-room";
 /** Defence in depth at the TV: malformed/old rich responses clear the display. */
 export function parsePublicDisplayFeed(value: unknown): PublicDisplayFeed {
@@ -12,7 +13,7 @@ export function parsePublicDisplayFeed(value: unknown): PublicDisplayFeed {
       typeof value.speech.pauseMs !== "number" || !Number.isInteger(value.speech.pauseMs) || value.speech.pauseMs < 0 || value.speech.pauseMs > 1000 ||
       !value.called.every(call => record(call) && keys(call, ["at", "name", "speechName", "chair"]) &&
         (call.at === null || (text(call.at, 40) && Number.isFinite(Date.parse(call.at)))) && text(call.name, 500) && text(call.speechName, 500) &&
-        call.speechName === call.name.trim().split(/\s+/)[0] && (call.chair === null || (Number.isInteger(call.chair) && Number(call.chair) > 0 && Number(call.chair) <= 20))) ||
+        call.speechName === call.name.trim().split(/\s+/)[0] && (call.chair === null || isClinicChairNumber(call.chair))) ||
       !value.announcements.every(item => record(item) && keys(item, ["title", "body"]) && text(item.title, 500) && text(item.body, 2000))) {
     throw new Error("INVALID_PUBLIC_DISPLAY_FEED");
   }

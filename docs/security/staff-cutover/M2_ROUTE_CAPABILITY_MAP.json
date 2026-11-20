@@ -4124,20 +4124,6 @@
   }
  },
  {
-  "route": "/api/patients/[id]/number",
-  "method": "PATCH",
-  "legacyRoles": [
-   "admin"
-  ],
-  "need": [
-   "patients.number.manage"
-  ],
-  "anyOf": [],
-  "scope": "patient",
-  "status": "canonical-done",
-  "note": "M2 slice 78: one admitted patients.number.manage transaction (legacy admin label) inside the patient scope (404 like missing); numbering locks then the patient row FOR UPDATE, the operation re-asserted after the waits; changePatientNumberOn unchanged (stale/same refusals, the old number retired) with patient.number.change in the same transaction."
- },
- {
   "route": "/api/patients/[id]/photo",
   "method": "PUT",
   "legacyRoles": [
@@ -5993,20 +5979,6 @@
  {
   "route": "/api/settings/patient-numbering",
   "method": "GET",
-  "legacyRoles": [
-   "admin"
-  ],
-  "need": [
-   "settings.operational.edit"
-  ],
-  "anyOf": [],
-  "scope": null,
-  "status": "existing",
-  "note": ""
- },
- {
-  "route": "/api/settings/patient-numbering",
-  "method": "PATCH",
   "legacyRoles": [
    "admin"
   ],

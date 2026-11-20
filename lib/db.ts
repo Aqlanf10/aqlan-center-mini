@@ -1,3 +1,4 @@
+import { isClinicChairNumber } from "./clinic-chair-range";
 import { staffIdentitySchemaName } from "./staff-identity-substrate-schema.mjs";
 import { clearAccountLoginLimits, consumeSharedLoginLimits, consumeStaffAccountLimit } from "./login-limit-storage";
 import { STAFF_AUTHORITY_COLUMNS, STAFF_AUTHORITY_RELATIONS, readStaffEntryMode } from "./legacy-staff-schema.mjs";
@@ -133,7 +134,7 @@ import {
   type LegacyPatientRef, type LegacyPlan, type LegacySession, type LegacyTreatment,
 } from "./legacy-import";
 import {
-  DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, PATIENT_NUMBER_SQL, documentKindOfSetting, documentNumberSql,
+  DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
 } from "./document-numbers";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
@@ -1559,10 +1560,14 @@ export function ensureSchema(): Promise<void> {
       -- المواءمة مع ما هو موجود، **إلى الأمام فقط**: GREATEST مع قيمة العدّاد
       -- الحالية تمنع إرجاعه إلى الخلف عند إقلاع لاحق — وإرجاعه يعني إصدار رقم
       -- مستعمل، وهو ما يُفشل الإدراج بدل أن يُصلحه.
-      SELECT setval('patient_number_seq', GREATEST(
-        (SELECT last_value FROM patient_number_seq),
-        (SELECT COALESCE(MAX(${counterIdentifierBigintSql("patient_number")}), 0) FROM patients)
-      ), true);
+      -- Keep the temporary Stage floor pending until actually issued. Active 0080
+      -- still owns allocation, alias validation, and historical retirement.
+      SELECT setval('patient_number_seq', GREATEST(existing.max_number, 7000), existing.max_number >= 7000)
+      FROM (SELECT COALESCE(MAX(${counterIdentifierBigintSql("patient_number")}), 0) AS max_number FROM patients) existing,
+           patient_number_seq current_number
+      WHERE current_number.last_value < 7000
+         OR existing.max_number > current_number.last_value
+         OR (existing.max_number = current_number.last_value AND NOT current_number.is_called);
       SELECT setval('invoice_number_seq', GREATEST(
         (SELECT last_value FROM invoice_number_seq),
         (SELECT COALESCE(MAX(${counterIdentifierBigintSql("invoice_number")}), 0) FROM invoices)
@@ -2797,7 +2802,9 @@ export async function linkVisitToPatientOn(client: DbClient, visitId: number, pa
  *      والنداءُ حجزٌ مقصود — فصار الفحص يشمله، مع استثناء صاحب النداء نفسه.
  */
 export async function seatVisit(id: number, chair: number, actor?: VisitActor): Promise<Visit | null> {
+  if (!isClinicChairNumber(chair)) return null;
   return withChairLock(chair, async (client) => {
+    if (!await configuredVisitChairWith(client, chair)) return null;
     const row = await seatVisitInLock(client, id, chair, actor);
     return row ? toVisit(row) : null;
   });
@@ -3043,11 +3050,12 @@ async function resolveVisitPatientDetailed(
   await admit?.(patientId);
   if (!patientId) {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    const numbering = await patientNumberingInsertValue(client, 3);
     const { rows } = await client.query(
       `INSERT INTO patients (patient_number, full_name, phone)
-       VALUES (${PATIENT_NUMBER_SQL}, $1, $2)
+       VALUES (${numbering.sql}, $1, $2)
        RETURNING id`,
-      [visit.patient_name, phone],
+      [visit.patient_name, phone, ...numbering.values],
     );
     patientId = rows[0].id as number;
     created = true;
@@ -3802,11 +3810,12 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
 /** The patient INSERT on a caller-owned transaction. The caller must already hold
  * PATIENT_CREATE_SHARED_LOCK_SQL in that transaction (import exclusion). */
 export async function createPatientWith(client: Pick<DbClient, "query">, input: PatientInput): Promise<Patient> {
+  const numbering = await patientNumberingInsertValue(client, 15);
   const { rows } = await client.query<PatientRow>(
     `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                            birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
      VALUES (
-       ${PATIENT_NUMBER_SQL},
+       ${numbering.sql},
        $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
        $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
      RETURNING ${PATIENT_COLUMNS}`,
@@ -3824,7 +3833,7 @@ export async function createPatientWith(client: Pick<DbClient, "query">, input: 
       normalizePatientPhone(input.guardianPhone ?? null),
       input.nationalId ?? null,
       input.referralSource ?? null,
-      input.referredBy ?? null,
+      input.referredBy ?? null, ...numbering.values,
     ],
   );
   return toPatient(rows[0]);
@@ -3885,11 +3894,12 @@ export async function commitPatientImport(input: {
     let balances = 0;
     for (const row of toCreate) {
       const patient = row.patient!;
+      const numbering = await patientNumberingInsertValue(client, 15);
       const inserted = await client.query<{ id: number; patient_number: string }>(
         `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                                birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
          VALUES (
-           ${PATIENT_NUMBER_SQL},
+           ${numbering.sql},
            $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
            $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
          RETURNING id, patient_number`,
@@ -3897,7 +3907,7 @@ export async function commitPatientImport(input: {
           patient.fullName, normalizePatientPhone(patient.phone), normalizePatientPhone(patient.altPhone),
           patient.gender, patient.birthYear, patient.address, patient.medicalAlert, patient.note,
           patient.birthDate ?? null, patient.guardianName ?? null, normalizePatientPhone(patient.guardianPhone ?? null),
-          patient.nationalId ?? null, patient.referralSource ?? null, patient.referredBy ?? null,
+          patient.nationalId ?? null, patient.referralSource ?? null, patient.referredBy ?? null, ...numbering.values,
         ],
       );
       const id = inserted.rows[0].id;
@@ -5211,7 +5221,9 @@ export async function returnVisitToWaitingWith(client: DbClient, id: number, act
  * دقيقة يمشي فيها المريض، ولو لم يُحجز الكرسي لنودي عليه مريض آخر في تلك الدقيقة.
  */
 export async function callVisit(id: number, chair: number, actor?: VisitActor): Promise<Visit | null> {
+  if (!isClinicChairNumber(chair)) return null;
   return withChairLock(chair, async (client) => {
+    if (!await configuredVisitChairWith(client, chair)) return null;
     const row = await callVisitInLock(client, id, chair, actor);
     return row ? toVisit(row) : null;
   });
@@ -5254,6 +5266,7 @@ export async function callVisitAgain(id: number, actor?: VisitActor): Promise<Vi
 export async function callVisitAgainWith(client: DbClient, id: number, actor?: VisitActor, admit?: VisitAdmit): Promise<Visit | null> {
   const before = await lockVisitState(client, id);
   await admit?.(id);
+  if (before?.status !== "called" || !await configuredVisitChairWith(client, before.chair)) return null;
   const { rows } = await client.query<VisitRow>(
     `UPDATE visits SET called_at = NOW()
       WHERE id = $1 AND status = 'called' AND chair IS NOT NULL RETURNING *`,
@@ -5462,13 +5475,14 @@ export async function confirmBookingRequest(
   let patientId = existing[0]?.id;
   if (!patientId) {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    const numbering = await patientNumberingInsertValue(client, 3);
     const { rows: created } = await client.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name, phone)
        VALUES (
-         ${PATIENT_NUMBER_SQL},
+         ${numbering.sql},
          $1, $2)
        RETURNING id`,
-      [request.full_name, request.phone],
+      [request.full_name, request.phone, ...numbering.values],
     );
     patientId = created[0].id;
   }
@@ -17366,7 +17380,8 @@ export async function isPeriodLocked(date: string): Promise<boolean> {
 // ─── النسخة الاحتياطية الكاملة ───────────────────────────────────────────────
 
 import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets } from "./backup";
-import { patientNumberSequenceRestoreSql } from "./patient-numbering-backup";
+import { patientNumberSequenceBackupLine } from "./restore/patient-number-sequence.mjs";
+import { patientNumberingInsertValue } from "./patient-numbering-insert-scope";
 
 /**
  * يبني ملف النسخة الاحتياطية سطرًا سطرًا.
@@ -17586,9 +17601,17 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
-  if (tables.includes("patient_numbering_policy")) {
-    const {rows: [patientSequence]} = await pool.query("SELECT last_value::text, is_called FROM patient_number_seq");
-    yield `${patientNumberSequenceRestoreSql(patientSequence?.last_value, patientSequence?.is_called)}\n`;
+  // Sequences are not MVCC. A newer captured counter can leave a gap, but
+  // archive evidence alone never certifies the cutover's current high water.
+  const { rows: [sequence] } = await pool.query(
+    `SELECT EXISTS (
+       SELECT 1 FROM pg_catalog.pg_sequence
+        WHERE seqrelid = pg_catalog.to_regclass('public.patient_number_seq')
+     ) AS present`,
+  );
+  if (sequence?.present === true) {
+    const { rows: [state] } = await pool.query("SELECT last_value::text, is_called FROM public.patient_number_seq");
+    yield patientNumberSequenceBackupLine(state?.last_value, state?.is_called);
   }
   yield `COMMIT;\n`;
 }
@@ -32025,9 +32048,19 @@ export async function clearVisitWith(client: DbClient, id: number, actor: VisitA
   return { ok: true, clearedAt: updated[0].cleared_at.toISOString(), clearedBy: actor.actor, already: false };
 }
 
+/** Shared form of the central writer's existing per-key advisory lock; works
+ * even for the implicit default before there is a settings row. Valid room
+ * moves on different chairs remain concurrent; a central change serializes. */
+async function configuredVisitChairWith(client: DbClient, chair: unknown): Promise<boolean> {
+  if (!isClinicChairNumber(chair)) return false;
+  await client.query("SELECT pg_advisory_xact_lock_shared(hashtext('clinic-setting:' || $1))", ["clinic.chairs"]);
+  const count = chairCount({ "clinic.chairs": await settingInTx(client, "clinic.chairs") });
+  return isClinicChairNumber(chair, count);
+}
+
 export type GatedMoveResult =
   | { ok: true; visit: Visit; warning: string | null; bypassed: boolean }
-  | { ok: false; reason: "conflict" }
+  | { ok: false; reason: "conflict" | "invalid-chair" }
   | { ok: false; reason: "gate"; code: "clearance_required" | "emergency_reason_required"; message: string };
 
 /**
@@ -32041,6 +32074,7 @@ async function gatedVisitMove(
   action: GateAction, id: number, chair: number, actor: VisitActor,
   emergency: { requested: boolean; reason: string | null },
 ): Promise<GatedMoveResult> {
+  if (!isClinicChairNumber(chair)) return { ok: false, reason: "invalid-chair" };
   return withChairLock(chair, (client) => gatedVisitMoveInLock(client, action, id, chair, actor, emergency));
 }
 
@@ -32050,6 +32084,7 @@ export async function gatedVisitMoveWith(
   client: DbClient, action: GateAction, id: number, chair: number, actor: VisitActor,
   emergency: { requested: boolean; reason: string | null }, admit: VisitAdmit,
 ): Promise<GatedMoveResult> {
+  if (!isClinicChairNumber(chair)) return { ok: false, reason: "invalid-chair" };
   await lockChairDay(client, chair);
   return gatedVisitMoveInLock(client, action, id, chair, actor, emergency, admit);
 }
@@ -32063,6 +32098,7 @@ async function gatedVisitMoveInLock(
   );
   await admit?.(id);
   if (!rows[0]) return { ok: false, reason: "conflict" } as const;
+  if (!await configuredVisitChairWith(client, chair)) return { ok: false, reason: "invalid-chair" };
   const decision = clearanceGate({
     cleared: rows[0].cleared_at !== null,
     requireClearance: (await settingInTx(client, "ops.require_clearance_before_call")) === "true",

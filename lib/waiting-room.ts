@@ -9,8 +9,9 @@
  * الملف أصلًا — فلو فتح أحد أدوات المتصفح على التلفاز لم يجد شيئًا يستحق الحفظ.
  */
 
+import { isClinicChairNumber } from "./clinic-chair-range";
+import { chairCount, type SettingsMap } from "./settings";
 import { firstNameOnly, type Visit } from "./flow";
-import type { SettingsMap } from "./settings";
 import { displaySpeechOptions, type DisplaySpeechOptions } from "./display-speech";
 import type { Appointment } from "./schedule";
 
@@ -452,9 +453,14 @@ export function projectWaitingRoomDisplay({ now, calls, settings, announcements 
   now: Date; calls: PublicDisplayCallSource[]; settings: SettingsMap; announcements: Announcement[];
 }): PublicDisplayFeed {
   const privacy: PrivacyMode = settings["display.privacy_mode"] === "first_only" ? "first_only" : "first_initial";
+  // Do not revive a prior call when the latest historic room is invalid.
+  // null is an explicit reception destination, not a corruption fallback.
+  const current = calls[0];
+  const validCurrent = current && (current.chair === null || isClinicChairNumber(current.chair, chairCount(settings)))
+    ? [current] : [];
   return {
     now: now.toISOString(),
-    called: calls.slice(0, 1).map(call => {
+    called: validCurrent.map(call => {
       const name = maskName(call.patientName, privacy);
       return { at: call.calledAt, name, speechName: firstNameOnly(name), chair: call.chair };
     }),

@@ -1,3 +1,4 @@
+import { isClinicChairNumber } from "./clinic-chair-range";
 /** Local-device speech only. No remote synthesis and no foreign-language fallback. */
 export interface DisplaySpeechOptions { voiceURI: string; rate: number; pauseMs: number }
 export const DISPLAY_SPEECH_DEFAULTS: DisplaySpeechOptions = { voiceURI: "", rate: 0.9, pauseMs: 300 };
@@ -30,7 +31,8 @@ export function normalizeArabicCall(text: string): string {
   return text.normalize("NFC").replace(/[\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\u0640]/g, "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
 }
 export function displayCallPhrases(publicName: string, chair: number | null): string[] {
-  const number = chair !== null && Number.isInteger(chair) && chair > 0 ? String(chair).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[Number(d)]!) : null;
+  if (chair !== null && !isClinicChairNumber(chair)) return [];
+  const number = chair !== null ? String(chair).replace(/\d/g, d => "٠١٢٣٤٥٦٧٨٩"[Number(d)]!) : null;
   return [normalizeArabicCall(publicName), number ? `يرجى التوجه إلى غرفة العلاج رقم ${number}` : "يرجى التوجه إلى الاستقبال"].filter(Boolean);
 }
 

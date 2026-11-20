@@ -68,7 +68,17 @@ async function openTeeth(page: Page) {
 }
 async function chooseFillings(page: Page) {
   const dialog = page.getByTestId("tooth-dialog");
-  for (const tooth of teeth) await keyboardActivate(dialog.getByTestId(`odontogram-tooth-${tooth}`));
+  for (const tooth of teeth) {
+    const selection = dialog.getByRole("button", { name: new RegExp("^" + tooth + " — ") });
+    expect(await selection.getAttribute("data-testid")).toBe("odontogram-tooth-" + tooth);
+    await keyboardActivate(selection);
+    expect(await selection.getAttribute("aria-pressed")).toBe("true");
+  }
+  expect(await dialog.getByTestId("tooth-dialog-summary").getAttribute("aria-live")).toBe("polite");
+  expect(await dialog.getByTestId("tooth-dialog-summary").innerText()).toContain("المختارة (" + teeth.length + ")");
+  for (const tooth of teeth) {
+    expect(await dialog.getByRole("button", { name: new RegExp("^" + tooth + " — ") }).getAttribute("aria-pressed")).toBe("true");
+  }
   for (const tooth of teeth) {
     const field = dialog.getByTestId(`tooth-surfaces-${tooth}`);
     for (const surface of surfaces[tooth]) await keyboardActivate(field.getByTestId(`surface-${surface}`));

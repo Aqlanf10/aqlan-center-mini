@@ -153,7 +153,11 @@ describe("P0-3 — النسخ خارج المنصة وتجربة الاستعا�
       checks: { encryptedHashMatches: true, keyFingerprintMatches: true, archiveHashMatches: true },
     });
     expect(report.restore?.criticalProbeOk).toBe(true);
-    expect(drillReportText(report)).toContain("نجحت ✔");
+    expect(drillReportText(report)).toContain("نجحت ✔ (استعادة معزولة فقط)");
+    expect(drillReportText(report)).toContain("التحويل غير جاهز");
+    expect(report.restore).toMatchObject({
+      readyForCutover: false, patientNumberSequence: "reconciled", cutoverBlocker: "numbering-freshness-unverified",
+    });
 
     const restored = new Client({ connectionString: targetUrl, ssl: false });
     await restored.connect();

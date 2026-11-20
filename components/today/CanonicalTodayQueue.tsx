@@ -88,6 +88,11 @@ export function CanonicalTodayQueue() {
   const waiting = waitingRows(visits, now, thresholds);
   const chairs = chairRows(chairCount, visits, now);
   const freeChair = firstFreeChair(chairCount, visits);
+  // Reducing the configured count must not hide active visits on retired chairs.
+  // They do not reserve or become available as one of the current chairs.
+  const retiredChairVisits = visits.filter(visit => visit.chair !== null && visit.chair > chairCount
+    && (visit.status === "called" || visit.status === "in_chair"));
+  const freeChairs = chairs.filter(row => !row.occupant && !row.calledFor).length;
   const [moveMessage, setMoveMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [moving, setMoving] = useState(false);
   /** حركة طابور واحدة: النداء والإجلاس عبر بوابة الجاهزية (سبب طوارئ مكتوب عند المنع). */
@@ -119,7 +124,7 @@ export function CanonicalTodayQueue() {
       {view ? (
         <>
           <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-testid="queue-summary">
-            {([["ينتظرون", summary.waiting], ["على الكرسي", summary.inChair], ["أطول انتظار", `${summary.longestWaitMinutes} د`], ["كراسي فارغة", summary.freeChairs]] as const).map(([label, value]) => (
+            {([["ينتظرون", summary.waiting], ["على الكرسي", summary.inChair], ["أطول انتظار", `${summary.longestWaitMinutes} د`], ["كراسي فارغة", freeChairs]] as const).map(([label, value]) => (
               <div key={label} className="rounded-2xl border border-slate-200 bg-white p-3">
                 <dt className="text-xs font-semibold text-slate-600">{label}</dt>
                 <dd className="text-xl font-black text-navy-900">{value}</dd>
@@ -176,6 +181,27 @@ export function CanonicalTodayQueue() {
               ))}
             </ul>
           </section>
+          {retiredChairVisits.length ? (
+            <section aria-labelledby="retired-chairs-title" className="space-y-2" data-testid="retired-chair-visits">
+              <h2 id="retired-chairs-title" className="text-sm font-bold text-navy-900">زيارات على كراسٍ خارج الإعداد الحالي</h2>
+              <p className="text-xs text-slate-700">هذه الكراسي غير متاحة للنداء أو الإجلاس. تبقى الزيارات هنا حتى تُعاد إلى الانتظار أو تُنهى.</p>
+              <ul className="space-y-2">
+                {retiredChairVisits.map(visit => (
+                  <li key={visit.id} className="rounded-2xl border border-amber-300 bg-amber-50 p-3 text-sm">
+                    <span className="font-bold text-navy-900">{visit.patientName}</span>
+                    <span className="ms-2 text-xs text-slate-700">كرسي {visit.chair} · {visit.status === "called" ? "تم النداء" : "على الكرسي"}</span>
+                    {view.canManage ? (
+                      <div className="mt-2">
+                        {visit.status === "called"
+                          ? actionButton("إعادة إلى الانتظار", () => void move(visit, "return"))
+                          : actionButton("إنهاء الزيارة", () => void move(visit, "finish"))}
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           {canBook && visits.some(visit => visit.status === "done" && visit.patientId) ? <section aria-label="حجز العودة بعد الزيارة" className="space-y-2">
             <h2 className="text-sm font-bold text-navy-900">الجلسة القادمة بعد الزيارة</h2>
             {visits.filter(visit => visit.status === "done" && visit.patientId).map(visit => <div key={visit.id} className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3">

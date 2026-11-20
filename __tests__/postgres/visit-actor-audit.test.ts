@@ -20,6 +20,7 @@ const {
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  await getPool().query("INSERT INTO settings(key,value) VALUES ('clinic.chairs',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", ["5"]);
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
 

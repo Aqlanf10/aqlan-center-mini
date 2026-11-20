@@ -1,3 +1,4 @@
+import { MAX_CLINIC_CHAIRS } from "./clinic-chair-range";
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 import { documentPrefixProblem } from "./document-numbers";
 /**
@@ -298,9 +299,9 @@ export function publicSubset(settings: SettingsMap): Partial<SettingsMap> {
  * قيمة تالفة في الجدول — حرف، أو صفر كرسي — كانت ستُعطّل اللوحة كلها بقسمة على صفر
  * أو بجدول كراسٍ فارغ. الحدّ يجعل أسوأ إعداد خاطئ **قبيحًا** لا **مُعطِّلًا**.
  */
-export function numberSetting(
-  settings: SettingsMap,
-  key: SettingKey,
+export function numberSetting<K extends SettingKey>(
+  settings: Pick<SettingsMap, K>,
+  key: K,
   min: number,
   max: number,
 ): number {
@@ -310,8 +311,8 @@ export function numberSetting(
   return Math.min(max, Math.max(min, parsed));
 }
 
-export function chairCount(settings: SettingsMap): number {
-  return Math.round(numberSetting(settings, "clinic.chairs", 1, 20));
+export function chairCount(settings: Pick<SettingsMap, "clinic.chairs">): number {
+  return Math.round(numberSetting(settings, "clinic.chairs", 1, MAX_CLINIC_CHAIRS));
 }
 
 /**
@@ -340,7 +341,7 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   }
   if (key === "clinic.chairs") {
     const chairs = Number(trimmed);
-    if (!Number.isInteger(chairs) || chairs < 1 || chairs > 20) return "عدد الكراسي بين 1 و20.";
+    if (!Number.isInteger(chairs) || chairs < 1 || chairs > MAX_CLINIC_CHAIRS) return "عدد الكراسي بين 1 و20.";
   }
   if (key === "clinic.day_start" || key === "clinic.day_end") {
     if (!/^\d{2}:\d{2}$/.test(trimmed)) return "الوقت بصيغة 09:00.";

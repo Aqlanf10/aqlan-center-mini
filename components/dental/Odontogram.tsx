@@ -46,7 +46,7 @@ const BUTTON_SIZE: Record<OdontogramSize, string> = {
 const SVG_SIZE: Record<OdontogramSize, string> = { sm: "h-6 w-5", md: "h-8 w-6", touch: "h-9 w-7" };
 const LABEL_SIZE: Record<OdontogramSize, string> = { sm: "text-[9px]", md: "text-[9px]", touch: "text-[11px]" };
 
-export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false, chartKnown = true, system = "fdi", size = "md" }: {
+export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false, chartKnown = true, system = "fdi", size = "md", labelVisibleNumber = false }: {
   teeth: readonly number[];
   chart: ReadonlyMap<number, ToothState>;
   selected: readonly number[];
@@ -56,6 +56,7 @@ export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false
   chartKnown?: boolean;
   system?: NumberingSystem;
   size?: OdontogramSize;
+  labelVisibleNumber?: boolean;
 }) {
   return (
     <DentalArchRow teeth={teeth} renderTooth={(code) => {
@@ -73,7 +74,7 @@ export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false
             onClick={() => onPick(code)}
             disabled={disabled}
             title={`${toothName(code)} (FDI: ${code}, Univ: ${toUniversal(code)})`}
-            aria-label={`${toothName(code)}${chartKnown ? "" : " — الحالة غير متاحة"}`}
+            aria-label={`${labelVisibleNumber ? `${displayLabel} — ` : ""}${toothName(code)}${chartKnown ? "" : " — الحالة غير متاحة"}`}
             data-chart-known={chartKnown}
             aria-pressed={active}
             data-testid={`odontogram-tooth-${code}`}
@@ -109,7 +110,7 @@ export function OdontogramRow({ teeth, chart, selected, onPick, disabled = false
  * الفكّان بترتيب المخطط السريري: الدائم العلوي، (اللبني العلوي والسفلي)، الدائم السفلي — بالفواصل نفسها.
  * `touch` يكبّر الأسنان كلها لهدف لمسٍ مريح؛ وإلا فاللبنية أصغر كما في المخطط السريري.
  */
-export function Odontogram({ chart, selected, onPick, disabled = false, chartKnown = true, system = "fdi", showPrimary = false, touch = false }: {
+export function Odontogram({ chart, selected, onPick, disabled = false, chartKnown = true, system = "fdi", showPrimary = false, touch = false, labelVisibleNumber = false }: {
   chart: ReadonlyMap<number, ToothState>;
   selected: readonly number[];
   onPick: (code: number) => void;
@@ -119,11 +120,12 @@ export function Odontogram({ chart, selected, onPick, disabled = false, chartKno
   system?: NumberingSystem;
   showPrimary?: boolean;
   touch?: boolean;
+  labelVisibleNumber?: boolean;
 }) {
   const permanent: OdontogramSize = touch ? "touch" : "md";
   const primary: OdontogramSize = touch ? "touch" : "sm";
   const row = (teeth: readonly number[], size: OdontogramSize) => (
-    <OdontogramRow teeth={teeth} chart={chart} selected={selected} onPick={onPick} disabled={disabled} chartKnown={chartKnown} system={system} size={size} />
+    <OdontogramRow teeth={teeth} chart={chart} selected={selected} onPick={onPick} disabled={disabled} chartKnown={chartKnown} system={system} size={size} labelVisibleNumber={labelVisibleNumber} />
   );
   return (
     <div className="mx-auto w-fit">

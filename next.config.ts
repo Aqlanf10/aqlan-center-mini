@@ -69,6 +69,10 @@ const nextConfig: NextConfig = {
       "./lib/braces-exception-pins.mjs",
       "./lib/scoped-braces-exception.mjs",
       "./.dependency-audit/**/*",
+      // Local, synthetic numbering harness must never ship with standalone.
+      "./__tests__/fixtures/numbering-browser/**/*",
+      "./__tests__/numbering-browser/**/*",
+      "./vitest.config.numbering-browser.mts",
     ],
   },
 

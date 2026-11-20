@@ -1,3 +1,4 @@
+import { isClinicChairNumber } from "@/lib/clinic-chair-range";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -20,6 +21,9 @@ export const dynamic = "force-dynamic";
 function gatedResponse(result: GatedMoveResult, conflictMessage: string) {
   if (result.ok) {
     return NextResponse.json(result.warning ? { ...result.visit, warning: result.warning } : result.visit);
+  }
+  if (result.reason === "invalid-chair") {
+    return NextResponse.json({ message: "هذا الكرسي خارج النطاق المهيّأ للعيادة." }, { status: 400 });
   }
   if (result.reason === "gate") {
     return NextResponse.json({ message: result.message, code: result.code }, { status: 409 });
@@ -101,7 +105,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     if (action === "call") {
       const chair = Number(source.chair);
-      if (!Number.isInteger(chair) || chair <= 0) {
+      if (!isClinicChairNumber(chair)) {
         return NextResponse.json({ message: "رقم الكرسي غير صالح." }, { status: 400 });
       }
       return gatedResponse(
@@ -125,7 +129,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     if (action === "seat") {
       const chair = Number(source.chair);
-      if (!Number.isInteger(chair) || chair <= 0) {
+      if (!isClinicChairNumber(chair)) {
         return NextResponse.json({ message: "رقم الكرسي غير صالح." }, { status: 400 });
       }
       // فشل الإجلاس يعني أن جهازًا آخر سبقنا إلى الكرسي، أو أن المريض لم يعد منتظرًا.

@@ -15,6 +15,7 @@
  * ولا مفتاح هنا بلا مستهلكٍ فعليّ في الشيفرة، وافتراضيُّ كلِّ مُرحَّلٍ يساوي الثابت
  * الذي حلّ محلَّه — فلا يتغيّر سلوك العيادة يوم النشر.
  */
+import { MAX_CLINIC_CHAIRS } from "./clinic-chair-range";
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 import { SETTING_DEFAULTS, type SettingKey } from "./settings";
 
@@ -187,7 +188,7 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
     sensitivity: "normal", permission: "settings.manage" }),
   def({ key: "clinic.chairs", keywords: ["كراسي", "كرسي", "طاقة", "chairs", "capacity"],
     category: "capacity", label: "عدد الكراسي", type: "INTEGER",
-    defaultValue: SETTING_DEFAULTS["clinic.chairs"], min: 1, max: 50, unit: "كرسي",
+    defaultValue: SETTING_DEFAULTS["clinic.chairs"], min: 1, max: MAX_CLINIC_CHAIRS, unit: "كرسي",
     order: 10, scope: "clinic", sensitivity: "normal", permission: "settings.manage",
     impact: "يحكم الحجز وقائمة الانتظار وشاشة الصالة." }),
 

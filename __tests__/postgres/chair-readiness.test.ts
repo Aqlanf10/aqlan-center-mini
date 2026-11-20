@@ -39,6 +39,7 @@ const nextChair = () => { chairSeq += 1; return chairSeq; };
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
+  await getPool().query("INSERT INTO settings(key,value) VALUES ('clinic.chairs',$1) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", ["20"]);
   await openShift({ openedBy: "cashier", opening: { YER: 0, SAR: 0, USD: 0 } });
   ({ id: doctorId } = (await q<{ id: number }>(
     `INSERT INTO parties (kind, name, commission_percent) VALUES ('doctor', 'د. الكرسي', 30) RETURNING id`))[0]);

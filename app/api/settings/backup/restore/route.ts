@@ -63,7 +63,9 @@ export async function POST(request: Request) {
   if (result.ok) {
     return noStore({
       ok: true,
-      readyForCutover: true,
+      readyForCutover: result.readyForCutover,
+      patientNumberSequence: result.patientNumberSequence,
+      cutoverBlocker: result.cutoverBlocker,
       backupId: result.backupId,
       archiveSha256: result.archiveSha256,
       documentsVerified: result.documentsVerified,
@@ -80,6 +82,7 @@ export async function POST(request: Request) {
     "target-not-dedicated": "هدف الاستعادة غير معلن كقاعدة مخصصة قابلة للمسح.",
     "production-collision": "هدف الاستعادة يطابق قاعدة الإنتاج؛ تم الرفض بنيويًا.",
     "backup-not-found": "النسخة غير موجودة أو لم تعد Verified ومتاحة.",
+    "canonical-fresh-target-required": "هذه النسخة بهوية موحّدة وتحتاج إلى الاستعادة المرحلية الكاملة على هدف جديد فارغ. لم يُمسح هدف التجربة.",
     "archive-integrity-mismatch": "فشل تحقق سلامة الأرشيف؛ لم تُلمس قاعدة الاستعادة.",
     "restore-failed": "فشل Restore Drill على الهدف المعزول. لم تُستعد بيانات فوق Production.",
   };
@@ -90,7 +93,7 @@ export async function POST(request: Request) {
     "target-not-dedicated",
     "production-collision",
   ].includes(result.reason);
-  const status = result.reason === "backup-not-found" ? 404 : unavailable ? 503 : 500;
+  const status = result.reason === "backup-not-found" ? 404 : result.reason === "canonical-fresh-target-required" ? 409 : unavailable ? 503 : 500;
   return noStore({ ok: false, reason: result.reason, message: messages[result.reason] }, status);
 }
 

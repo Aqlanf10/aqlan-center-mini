@@ -2,12 +2,15 @@ import { mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { Client } from "pg";
+import type { VerifiedArchive } from "../backupVolume";
 import { loadMigrationFiles, migrate, migrationStatus } from "../migrations";
 import { parseDatabaseHost } from "../db-tls";
 import { restoreClientConfigFor } from "./client-config";
 import { readTarGzEntries } from "./archive";
 import { validateBackupArchive, type ValidationOk } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
+import { restorePatientNumberSequence } from "./patient-number-sequence.mjs";
+import { numberingCutoverHold, type RestoreCutoverBlocker, type RestoreNumberingEvidence } from "./cutover-readiness";
 import { finalizeRestoredStaffIdentityInTransaction } from "../staff-authority-lifecycle.mjs";
 import { randomUUID } from "node:crypto";
 import { STAFF_AUTHORITY_RELATIONS, staffLifecycleLockKey } from "../legacy-staff-schema.mjs";
@@ -24,7 +27,7 @@ import { loginPhotoRestoreProblem } from "./login-photo";
  *   → استعد القاعدة إلى هدف معزول (ليس إنتاجًا)
  *   → استعد المستندات إلى دليل staging (ليس دليل الإنتاج)
  *   → تحقق من الاثنين تحققًا مستقلًا
- *   → أنتج حالة READY FOR CUTOVER مع خطوات التبديل موثَّقة.
+ *   → أبلِغ نجاح الاستعادة المعزولة، دون اعتماد التحويل أو استئناف الترقيم.
  *
  * التبديل الفعلي (إيقاف التطبيق → تبديل القاعدة → نقل دليل staging إلى
  * DOCUMENTS_DIR → إقلاع → تحقق) **لا يُنفَّذ في P1** — موثَّق فقط في
@@ -51,6 +54,7 @@ export interface StagedRestoreResult {
   ok: boolean;
   /** Canonical source (manifest identity provenance): the target stays held until its own seal. */
   restoreHold: boolean;
+  canonicalFreshTargetRequired?: true;
   targetIdentity: { host: string; port: string; database: string; user: string } | null;
   validationErrors: string[];
   documentsRestored: number;
@@ -58,7 +62,9 @@ export interface StagedRestoreResult {
   migrationsApplied: string[];
   sqlRowsStatementLines: number;
   skippedMigrationRecordLines: number;
-  readyForCutover: boolean;
+  readyForCutover: false;
+  cutoverBlocker: RestoreCutoverBlocker | null;
+  patientNumberSequence: RestoreNumberingEvidence;
   verification: {
     criticalProbeOk: boolean;
     migrationConsistent: boolean;
@@ -137,7 +143,25 @@ async function nonDeferrableCyclicForeignKeys(client: Client): Promise<ForeignKe
  * تنفيذ الاستعادة المعزولة كاملة. كل خطوة تفشل توقف ما بعدها — والهدف
  * المعزول يمكن التخلي عنه بأمان في أي لحظة (هذا جوهر العزل).
  */
-export async function stagedRestore(options: StagedRestoreOptions): Promise<StagedRestoreResult> {
+export function stagedRestore(options: StagedRestoreOptions): Promise<StagedRestoreResult> {
+  return restoreStaged(options);
+}
+
+/** The guarded admin caller supplies independent history metadata. The
+ * callback may prepare only its dedicated target, after the exact captured
+ * bytes and SQL lineage are admitted. The pathname is not reopened. */
+export function stagedRestoreForVerifiedDrill(
+  options: Omit<StagedRestoreOptions, "allowNonEmptyTarget">,
+  expected: Readonly<VerifiedArchive>,
+  beforeReplay: () => Promise<void>,
+): Promise<StagedRestoreResult> {
+  return restoreStaged({ ...options, allowNonEmptyTarget: false }, { expected: { ...expected }, beforeReplay });
+}
+
+async function restoreStaged(
+  options: StagedRestoreOptions,
+  admission?: { expected: Readonly<VerifiedArchive>; beforeReplay: () => Promise<void> },
+): Promise<StagedRestoreResult> {
   const result: StagedRestoreResult = {
     ok: false,
     restoreHold: false,
@@ -149,6 +173,8 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     sqlRowsStatementLines: 0,
     skippedMigrationRecordLines: 0,
     readyForCutover: false,
+    cutoverBlocker: null,
+    patientNumberSequence: "unverified",
     verification: { criticalProbeOk: false, migrationConsistent: false, tablesCount: 0 },
     cutoverSteps: [],
     errors: [],
@@ -157,7 +183,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
   // ── الخطوة ١: قراءة الأرشيف كاملًا وتحقيقه — قبل أي لمس للهدف.
   let archive;
   try {
-    archive = await readTarGzEntries(options.archivePath);
+    archive = await readTarGzEntries(options.archivePath, admission?.expected);
   } catch (error) {
     result.errors.push(`تعذّرت قراءة الأرشيف — الملف تالف أو مقطوع أو ليس gzip سليمًا: ${error instanceof Error ? error.message : String(error)}`);
     return result;
@@ -169,23 +195,40 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     return result; // لا استعادة قاعدة أصلًا (P1.12)
   }
 
+  if (admission && (validated.sqlSha256 !== admission.expected.databaseSha256
+    || validated.documents.length !== admission.expected.documents)) {
+    const problem = "Stored archive SQL digest or document count mismatch.";
+    result.validationErrors.push(problem);
+    result.errors.push(problem);
+    return result;
+  }
+
   // Inspect source history before touching the target. Only the exact original
   // registered 0079 contract authorizes installing its historical schema.
-  let prepared: ReturnType<typeof prepareBackupSql> & { historical0079: { appliedAt: string } | null };
+  let prepared: ReturnType<typeof prepareBackupSql>;
   try {
-    prepared = prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), { inspectHistorical0079: true });
+    prepared = prepareBackupSql(Buffer.from(validated.sql).toString("utf8"), { inspectHistorical0079: true, rejectUnsupportedHistoricalSchema: true });
   } catch (error) {
     result.errors.push(`تعذّر التحقق من سجل هجرات النسخة: ${error instanceof Error ? error.message : String(error)}`);
     return result;
   }
 
+  // R1 must inspect a genuinely fresh target, never one the repeating admin
+  // drill just stripped of its existing authority footprint.
+  const canonicalSource = Boolean(validated.manifest.identityProvenance);
+  if (admission && canonicalSource) {
+    result.canonicalFreshTargetRequired = true;
+    result.errors.push("Canonical restore requires the full staged restore and a fresh target.");
+    return result;
+  }
+  // Invalid or unsupported historical lineage never reaches preparation.
+  if (admission) await admission.beforeReplay();
   const client = new Client(restoreClientConfigFor(options.targetUrl));
   try {
     await client.connect();
 
     // ── الخطوة ٢أ: مصدرٌ موحّد الهوية (بروتوكول الاستعادة R1): الحجز الدائم قبل أي مخطط أو بيانات.
     // الهدف يجب أن يكون فارغًا تمامًا وبلا أي أثر هوية، ولا خيار لتجاوز ذلك هنا.
-    const canonicalSource = Boolean(validated.manifest.identityProvenance);
     if (canonicalSource) {
       const manifestBytes = archive.entries.get("manifest.json")!.data;
       try {
@@ -283,7 +326,9 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
         );
         const photoProblem = loginPhotoRestoreProblem(photoSettings[0]?.value ?? "", validated.documents);
         if (photoProblem) throw new Error(photoProblem);
+        const patientNumberSequence = await restorePatientNumberSequence(client, prepared.patientNumberSequence);
         await client.query("COMMIT");
+        result.patientNumberSequence = patientNumberSequence;
       } catch (error) {
         await client.query("ROLLBACK").catch(() => {});
         throw error;
@@ -328,24 +373,9 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     }
 
     result.ok = true;
-    result.readyForCutover = true;
-    result.cutoverSteps = cutoverStepsFor(options, result);
+    result.cutoverBlocker = numberingCutoverHold(result.patientNumberSequence).cutoverBlocker;
     return result;
   } finally {
     await client.end().catch(() => {});
   }
-}
-
-/** خطوات التبديل موثَّقة لا منفَّذة (P1.15: لا Production Cutover في هذه المرحلة). */
-function cutoverStepsFor(options: StagedRestoreOptions, result: StagedRestoreResult): string[] {
-  return [
-    "⚠️ هذه الخطوات توثيقٌ للتبديل فقط — لا تُنفَّذ آليًا، والقرار تشغيلي بعد مراجعة مستقلة.",
-    `١) أوقف تطبيق الإنتاج (Railway: إيقاف الخدمة) حتى لا تُكتب بيانات جديدة أثناء التبديل.`,
-    `٢) خذ نسخة احتياطية من قاعدة الإنتاج الحالية قبل أي تبديل (خطة رجوع).`,
-    `٣) استبدل قاعدة الإنتاج بالهدف المعزول المُستعاد: ${result.targetIdentity ? `${result.targetIdentity.database} على ${result.targetIdentity.host}:${result.targetIdentity.port}` : "(هدف غير معروف)"}.`,
-    `٤) انقل محتوى دليل staging ${options.stagingDir} إلى DOCUMENTS_DIR النهائي (rsync/ mv مع إبقاء التصاريح).`,
-    `٥) أعد تشغيل التطبيق وشغّل npm run db:status — يجب أن يظهر consistent.`,
-    `٦) تحقق بصريًا: عدد المرضى، آخر الدفعات، عينة أشعة تُفتح من ملفاتها.`,
-    `٧) وثّق التبديل في سجل الحوادث مع SHA الأرشيف وطابع الزمن ومن أذن به.`,
-  ];
 }

@@ -1,3 +1,4 @@
+import { buildInvoiceDisplayGroups, selectionOfDisplayGroup, applyGroupedToothSelection } from "../../components/dental/invoice-display-groups";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -107,6 +108,24 @@ describe("multiple fillings retain independent clinical work and native amounts"
       { tooth: 26, surfaces: "DB", price: 30000, quantity: 1, doctor: otherDoctorId, caseId: null },
       { tooth: 36, surfaces: "L", price: 25000, quantity: 1, doctor: doctorId, caseId: null },
     ]);
+    // Rehydrate only from the stored invoice, not the original editor payload.
+    // Reopening and confirming each displayed group must preserve every child.
+    const reopened = reread!.items.map(item => ({ key: String(item.id), serviceId: String(item.serviceId),
+      doctorId: String(item.doctorId), price: String(item.unitPriceMinor), priceReason: "", quantity: String(item.quantity),
+      toothCode: item.toothCode ?? null, surfaces: item.surfaces ?? "", scope: null, episodeTeeth: null,
+      groupId: null, displayGroupId: "synthetic-reopened-group", caseId: "", description: item.description }));
+    const context = { currency: "YER" as const, modeOf: () => "tooth_surfaces" as const };
+    const groups = buildInvoiceDisplayGroups(reopened, context);
+    let roundTrip = reopened;
+    for (const group of groups) {
+      roundTrip = applyGroupedToothSelection(roundTrip, roundTrip.findIndex(row => row.key === group.key),
+        "tooth_surfaces", selectionOfDisplayGroup(group), () => randomUUID(), { ...context, memberKeys: group.keys });
+    }
+    // Visual grouping may make matching children adjacent; compare canonical identities, not view order.
+    const canonical = (rows: typeof reopened) => rows.map(row => [row.key, row.toothCode, row.surfaces, row.price, row.doctorId, row.quantity])
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+    expect(canonical(roundTrip)).toEqual(canonical(reopened));
+    expect(new Set(roundTrip.map(row => row.toothCode)).size).toBe(3);
     const plans = await db.listPatientPlans(patientId, "2026-10-26");
     expect(plans).toHaveLength(1);
     expect(plans[0]).toMatchObject({ id: saved.planId, totalMinor: 80000, consentAt: null, debtSource: "invoice",
@@ -116,6 +135,18 @@ describe("multiple fillings retain independent clinical work and native amounts"
       .toEqual([[16, "MO", "planned", "billed"], [26, "DB", "planned", "billed"], [36, "L", "planned", "billed"]]);
     expect((await snapshot(patientId)).cases).toEqual([]);
     expect((await snapshot(patientId)).payments).toEqual([]);
+  });
+
+  it("preserves old single-tooth callers with omitted optional surfaces and matching legacy episode", async () => {
+    const patientId = await patient();
+    const input = line(16, "", { episodeTeeth: [16] });
+    delete input.surfaces;
+    const saved = await create(patientId, [input]);
+    if (!saved.ok) throw new Error(saved.reason);
+    const reread = await db.getInvoice(saved.invoice.id);
+    expect(reread?.items).toHaveLength(1);
+    expect(reread?.items[0]).toMatchObject({ toothCode: 16, surfaces: null, quantity: 1, unitPriceMinor: 25000 });
+    expect(reread?.totalMinor).toBe(25000);
   });
 
   it("identical retries preserve all child identities; a second request cannot bill those teeth again", async () => {

@@ -1,3 +1,4 @@
+import { isClinicChairNumber } from "./clinic-chair-range";
 import "server-only";
 import {
   CLINIC_TIME_ZONE, PlannedVisitStartConflict, ActiveVisitExists, addVisitWith, callVisitAgainWith, chairReadinessSettingsWith, clearVisitWith, computeDebtRowsInSnapshot,
@@ -201,7 +202,7 @@ export function parseCanonicalVisitMove(body: unknown): CanonicalVisitMove {
   let chair: number | null = null;
   if (action === "call" || action === "seat") {
     chair = Number(source.chair);
-    if (!Number.isSafeInteger(chair) || chair <= 0 || chair > 100) throw new CanonicalVisitRefusal("invalid_visit_input", 400, "رقم الكرسي غير صالح.");
+    if (!isClinicChairNumber(chair)) throw new CanonicalVisitRefusal("invalid_visit_input", 400, "رقم الكرسي غير صالح.");
   }
   return { action: action as QueueAction, chair, emergency: { requested: source.emergency === true, reason: normalizeEmergencyReason(source.emergencyReason) } };
 }
@@ -233,6 +234,7 @@ export async function commandCanonicalVisitMove(session: VerifiedDurableSession,
       case "seat": {
         const result = await gatedVisitMoveWith(client, move.action, visitId, move.chair!, actor, move.emergency, admit);
         if (result.ok) return { kind: "visit", visit: result.visit, warning: result.warning };
+        if (result.reason === "invalid-chair") throw new CanonicalVisitRefusal("invalid_visit_input", 400, "هذا الكرسي خارج النطاق المهيّأ للعيادة.");
         if (result.reason === "gate") throw new CanonicalVisitRefusal(result.code, 409, result.message);
         return conflict(move.action === "call"
           ? "الكرسي محجوز لمريض آخر أو تغيّرت حالة المريض. حدّثت اللوحة — راجعها."
