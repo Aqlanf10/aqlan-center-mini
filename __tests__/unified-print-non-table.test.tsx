@@ -36,7 +36,7 @@ const settings = { ...SETTING_DEFAULTS, "clinic.name": "مركز عقلان — 
 const patient = { id: 99001, fullName: "مريض صناعي طويل الاسم لفحص الطباعة فقط", patientNumber: "SYNTHETIC-NONTABLE-99001", phone: "000-111222",
   birthYear: 1990, birthDate: "1990-01-01", gender: "male", createdAt: "2030-12-04T10:00:00Z", medicalAlert: "SYNTHETIC-MEDICAL-ALERT-PRIVATE", balanceMinor: 987654321 };
 const prescription = { id: 99002, patientId: patient.id, visitId: 99003, diagnosis: "تشخيص صناعي للاختبار فقط", notes: "ملاحظة وصفة صناعية محفوظة", instructionsLang: "both", status: "active", voidReason: null,
-  createdBy: "طبيب الوصفة المحفوظ صناعي", createdAt: "2031-01-04T10:00:00Z", items: [
+  createdBy: "synthetic-rx-issuer-account", prescribingDoctorName: "طبيب الوصفة المحفوظ صناعي", createdAt: "2031-01-04T22:30:00Z", items: [
     { name: "SYNTHETIC-DRUG-A (NOT FOR USE)", dose: "TEST-DOSE", form: "Synthetic tablets", frequency: "SYNTHETIC FREQUENCY — NOT MEDICAL ADVICE", duration: "SYNTHETIC DURATION", instructions: "تعليمات عربية صناعية لا تستخدم للعلاج", instructionsEn: "Synthetic instructions, not for treatment" },
   ] };
 const appointment = { id: 99004, patientId: patient.id, patientName: patient.fullName, scheduledDate: "2031-02-08", scheduledTime: "09:30", durationMinutes: 45,
@@ -86,11 +86,30 @@ describe("actual non-table print routes retain source semantics (synthetic SSR)"
   it.each(["active", "void"])("saved %s prescription preserves source items, medical alert, language and clinician", async status => {
     const source = { ...prescription, status, voidReason: status === "void" ? "سبب إبطال صناعي محفوظ" : null };
     readers.prescription.mockResolvedValue(source); const before = structuredClone(source);
-    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002", diagnosis: "UNTRUSTED-OVERRIDE", notes: "UNTRUSTED-NOTES", lang: "ar" }) }));
-    for (const text of [patient.medicalAlert, source.diagnosis, source.notes, source.createdBy, ...Object.values(source.items[0])]) expect(html).toContain(text);
+    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002", doctorName: "UNTRUSTED-OVERRIDE", lang: "ar", date: "2040-01-01" }) }));
+    for (const text of [patient.medicalAlert, source.diagnosis, source.notes, source.prescribingDoctorName, ...Object.values(source.items[0])]) expect(html).toContain(text);
     expect(html).not.toContain("UNTRUSTED-OVERRIDE"); expect(html).not.toContain("UNTRUSTED-NOTES"); expect(html).toContain("Signature &amp; Stamp");
+    for (const value of [settings["clinic.name"], settings["clinic.lead_doctor"], settings["clinic.address"], settings["clinic.phone"]]) expect(html).toContain(value);
+    expect(html).toContain('dir="ltr"><div');
+    expect(html).toMatch(/dir="rtl"><span[^>]+>التعليمات:/);
+    expect(html).not.toContain(source.createdBy);
+    expect(html).not.toContain("synthetic-session");
     if (status === "void") expect(html).toContain("VOIDED"); else expect(html).not.toContain("UNAPPROVED DRAFT");
     expect(source).toEqual(before); artifact(`prescription-${status}`, html, "A5");
+  });
+  it("saved Rx renders the clinic-local issued date after midnight in Aden", async () => {
+    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002", date: "2040-01-01" }) }));
+    expect(html).toContain(friendlyDateLong("2031-01-05"));
+    expect(html).not.toContain(friendlyDateLong("2031-01-04"));
+    expect(html).not.toContain(friendlyDateLong("2040-01-01"));
+  });
+  it("a saved Rx with no documented treating name never prints an account or the currently configured clinic doctor as the treating name", async () => {
+    readers.prescription.mockResolvedValue({ ...prescription, prescribingDoctorName: null, doctorPartyId: 9001 });
+    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002" }) }));
+    const signature = html.split('class="sign-row"')[1] ?? "";
+    expect(signature).toContain("اسم الطبيب غير موثق في الوصفة المحفوظة");
+    expect(signature).not.toContain(prescription.createdBy);
+    expect(signature).not.toContain(settings["clinic.lead_doctor"]);
   });
   it("long saved prescription retains all 20 instructions across natural page breaks", async () => {
     const source = { ...prescription, items: Array.from({ length: 20 }, (_, index) => ({ ...prescription.items[0], name: `SYNTHETIC-DRUG-${String(index + 1).padStart(2, "0")} (NOT FOR USE)`, instructions: `تعليمات عربية صناعية طويلة لفحص التفاف النص وترقيم الصفحات فقط، لا تستخدم للعلاج — بند ${index + 1}` })) };
@@ -99,11 +118,10 @@ describe("actual non-table print routes retain source semantics (synthetic SSR)"
     for (const item of source.items) { expect(html).toContain(item.name); expect(html).toContain(item.instructions); }
     expect(source).toEqual(before); artifact("prescription-long-20", html, "A5");
   });
-  it("draft prescription remains explicitly unapproved, with no stored clinician invented", async () => {
+  it("old unsigned Rx query is refused rather than printed", async () => {
     readers.prescription.mockResolvedValue(null);
-    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", items: JSON.stringify(prescription.items), diagnosis: "تشخيص مسودة صناعي", date: "2031-01-04", lang: "en" }) }));
-    expect(html).toContain("UNAPPROVED DRAFT"); expect(html).toContain(prescription.items[0].instructionsEn); expect(html).not.toContain(prescription.items[0].instructions);
-    expect(html).toContain("synthetic-session"); expect(html).not.toContain(prescription.createdBy); artifact("prescription-draft", html, "A5");
+    await expect(PrescriptionPage({ params: params(), searchParams: Promise.resolve({ draft: "1", items: JSON.stringify(prescription.items), diagnosis: "تشخيص مسودة صناعي", lang: "en" }) })).rejects.toThrow();
+    expect(readers.prescription).not.toHaveBeenCalled();
   });
   it("referral preserves reason, FDI, alert, urgency and recorded physician signature block", async () => {
     const before = structuredClone(referral); const html = render(await ReferralPage({ params: params(referral.id) }));

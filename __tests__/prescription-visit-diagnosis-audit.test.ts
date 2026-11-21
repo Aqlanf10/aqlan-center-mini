@@ -21,6 +21,17 @@ vi.mock("react", async (original) => {
     if (!(index in hooks.values)) hooks.values[index] = initial;
     return index;
   };
+  const effect = (effect: () => undefined | (() => void), deps?: readonly unknown[]) => {
+    const index = slot(undefined);
+    const previous = hooks.effects.get(index);
+    if (previous && deps && previous.deps && deps.length === previous.deps.length
+      && deps.every((value, position) => Object.is(value, previous.deps![position]))) return;
+    hooks.pending.push(() => {
+      previous?.cleanup?.();
+      const cleanup = effect();
+      hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
+    });
+  };
   return {
     ...react,
     useState: (initial: unknown) => {
@@ -33,17 +44,7 @@ vi.mock("react", async (original) => {
     },
     useRef: (initial: unknown) => hooks.values[slot({ current: initial })],
     useMemo: (compute: () => unknown) => { slot(undefined); return compute(); },
-    useEffect: (effect: () => undefined | (() => void), deps?: readonly unknown[]) => {
-      const index = slot(undefined);
-      const previous = hooks.effects.get(index);
-      if (previous && deps && previous.deps && deps.length === previous.deps.length
-        && deps.every((value, position) => Object.is(value, previous.deps![position]))) return;
-      hooks.pending.push(() => {
-        previous?.cleanup?.();
-        const cleanup = effect();
-        hooks.effects.set(index, { deps, cleanup: typeof cleanup === "function" ? cleanup : undefined });
-      });
-    },
+    useLayoutEffect: effect, useEffect: effect,
   };
 });
 vi.mock("../components/SettingsProvider", () => ({ useClinicName: () => "Synthetic clinic" }));
@@ -68,15 +69,27 @@ const openMock = vi.fn();
 const closeMock = vi.fn();
 type Props = Parameters<typeof PrescriptionModal>[0];
 let props: Props;
+let formKey: string | null;
+function renderForm() {
+  const child = PrescriptionModal(props);
+  if (formKey !== child.key) {
+    hooks.effects.forEach(effect => effect.cleanup?.());
+    hooks.values = [];
+    hooks.effects.clear();
+    hooks.pending = [];
+    formKey = child.key;
+  }
+  return (child.type as (value: Props) => ReactElement | null)(child.props);
+}
 function render(change: Partial<Props> = {}) {
   props = { ...props, ...change };
-  let tree: ReturnType<typeof PrescriptionModal> = null;
+  let tree: ReactElement | null = null;
   let rounds = 0;
   do {
     if (++rounds > 10) throw new Error("UI did not settle after effects");
     hooks.cursor = 0;
     hooks.changed = false;
-    tree = PrescriptionModal(props);
+    tree = renderForm();
     const pending = hooks.pending.splice(0);
     pending.forEach((effect) => effect());
   } while (hooks.changed);
@@ -104,6 +117,7 @@ const medicinePlaceholder = "Drug name (e.g. Augmentin / Brufen)";
 const notesPlaceholder = "مثال: الامتناع عن المشروبات الساخنة لمدة 24 ساعة، وضع كمادات باردة...";
 
 beforeEach(() => {
+  formKey = null;
   hooks.values = [];
   hooks.cursor = 0;
   hooks.changed = false;
@@ -229,7 +243,7 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     expect(field(notesPlaceholder).props.value).toBe("Synthetic clinician notes");
   });
 
-  it("pins the submitted inherited diagnosis while saving across parent updates and reopening", async () => {
+  it("pins the submitted diagnosis, but close and reopen keep the successful save available without an automatic popup", async () => {
     let completeSave: ((response: unknown) => void) | undefined;
     const pendingSave = new Promise((resolve) => { completeSave = resolve; });
     fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
@@ -251,7 +265,10 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     expect(field(diagnosisPlaceholder).props.value).toBe("Synthetic submitted diagnosis");
     expect(openMock).not.toHaveBeenCalled();
     completeSave!({ status: 201, json: async () => ({ id: 92001 }) });
-    await vi.waitFor(() => expect(openMock).toHaveBeenCalledExactlyOnceWith("/print/prescription/91001?rx=92001", "_blank"));
+    await vi.waitFor(() => expect(render().find(node => node.type === "a" && contents(node).includes("فتح الوصفة المحفوظة")).props.href)
+      .toBe("/print/prescription/91001?rx=92001"));
+    expect(openMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/prescriptions")).toHaveLength(1);
     expect(field(diagnosisPlaceholder).props.value).toBe("Synthetic submitted diagnosis");
   });
 
@@ -301,6 +318,13 @@ describe("prescription draft inherits current visit diagnosis without losing cli
     if (edited) {
       await vi.waitFor(() => expect(contents(render().tree)).toContain("Synthetic diagnosis changed; review again"));
       expect(openMock).not.toHaveBeenCalled();
+      expect(contents(render().tree)).not.toContain(acknowledgement);
+      expect(contents(render().tree)).not.toContain("تحذيرات سلامة دوائية من الخادم");
+      expect(() => click(acknowledgement)).toThrow();
+      expect(writes).toHaveLength(2);
+      click("طباعة الروشتة (A5)");
+      await vi.waitFor(() => expect(writes).toHaveLength(3));
+      expect(writes[2]).not.toHaveProperty("acknowledgedSafetyToken");
     } else {
       await vi.waitFor(() => expect(openMock).toHaveBeenCalledExactlyOnceWith("/print/prescription/91001?rx=92001", "_blank"));
     }
@@ -352,17 +376,15 @@ describe("empty prescription caller fails closed before save or draft navigation
     if (canonical.ok) expect(canonical.value.items.map(item => item.name)).toEqual(["SyntheticDrug"]);
   });
 
-  it("preserves a valid explicit draft fallback after save failure", async () => {
+  it("preserves the valid medicine in an inline nonprinting preview after save failure", async () => {
     render({ isOpen: true });
     click("إضافة دواء جديد");
     change(medicinePlaceholder, "SyntheticDrug");
-    fetchMock.mockResolvedValue({ status: 500, json: async () => ({ message: "Synthetic failure" }) });
+    fetchMock.mockResolvedValue({ status: 500, json: async () => ({ message: "Synthetic unavailable" }) });
     click(printLabel);
-    await vi.waitFor(() => expect(openMock).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(contents(render().find(node => node.props["aria-label"] === "معاينة مسودة غير محفوظة"))).toContain("SyntheticDrug"));
     expect(writes()).toHaveLength(1);
-    const url = new URL(openMock.mock.calls[0][0], "https://synthetic.invalid");
-    expect(url.searchParams.get("draft")).toBe("1");
-    expect(JSON.parse(url.searchParams.get("items")!)[0].name).toBe("SyntheticDrug");
+    expect(openMock).not.toHaveBeenCalled();
   });
 
   it.each(["critical", "acknowledge"])("rejects emptied items from the %s secondary path", async (path) => {
@@ -384,5 +406,170 @@ describe("empty prescription caller fails closed before save or draft navigation
     expect(writes()).toHaveLength(1); // Initial safety evaluation only; no empty POST.
     expect(openMock).not.toHaveBeenCalled();
     expect(contents(render().tree)).toContain(validation);
+  });
+});
+
+
+describe("private preview without print navigation", () => {
+  const previewLabel = "معاينة مسودة غير محفوظة";
+  const preview = () => render().find((node) => node.props["aria-label"] === previewLabel);
+  const withDraft = () => {
+    render({ isOpen: true, defaultDiagnosis: "Synthetic local diagnosis" });
+    click("إضافة دواء جديد");
+    change(medicinePlaceholder, "Synthetic Local Drug");
+    change(notesPlaceholder, "Synthetic local notes");
+  };
+
+  it("private preview is explicit, visible in the composer, and makes no write or popup", () => {
+    withDraft();
+    click(previewLabel);
+    const panel = preview();
+    expect(contents(panel)).toContain("لا تُطبع ولا تُصرف");
+    expect(panel.props.className).toContain("print:hidden");
+    for (const marker of ["Synthetic local diagnosis", "Synthetic Local Drug", "Synthetic local notes"]) expect(contents(panel)).toContain(marker);
+    expect(elements(panel).some(node => node.type === "a" || node.props.href || node.props.action)).toBe(false);
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toEqual([]);
+    expect(openMock).not.toHaveBeenCalled();
+  });
+
+  it.each([[500, null], [201, null], [201, 2147483648], [201, 9007199254740992]] as const)(
+    "private preview after unconfirmed save (%s, %s) makes no second write or navigation", async (status, id) => {
+    const reads = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === "/api/prescriptions") return { status, json: async () => ({ id, message: "Synthetic failure" }) };
+      return reads(url, options);
+    });
+    withDraft();
+    click("طباعة الروشتة (A5)");
+    await vi.waitFor(() => expect(contents(preview())).toContain("Synthetic Local Drug"));
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+    expect(openMock).not.toHaveBeenCalled();
+    expect(contents(render().tree)).toContain("تعذّر تأكيد حفظ الوصفة");
+  });
+
+  it("no linked chart permits an inline draft only; it does not issue", () => {
+    render({ patientId: null });
+    withDraft();
+    click("طباعة الروشتة (A5)");
+    expect(contents(preview())).toContain("Synthetic Local Drug");
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toEqual([]);
+    expect(openMock).not.toHaveBeenCalled();
+  });
+
+  it("critical refusal never opens anything automatically; its explicit draft action stays inline", async () => {
+    const reads = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url === "/api/prescriptions") return { status: 409, json: async () => ({
+        message: "Synthetic blocked fixture", safetyAlerts: [{ id: "synthetic-critical", severity: "critical",
+          medicationName: "Synthetic Local Drug", title: "Synthetic warning", message: "Synthetic refusal" }],
+      }) };
+      return reads(url, options);
+    });
+    withDraft();
+    click("طباعة الروشتة (A5)");
+    await vi.waitFor(() => expect(contents(render().tree)).toContain("Synthetic blocked fixture"));
+    expect(() => preview()).toThrow();
+    expect(openMock).not.toHaveBeenCalled();
+    click("عرض مسودة غير معتمدة (لا تُصرف كوصفة)");
+    expect(contents(preview())).toContain("Synthetic Local Drug");
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+    expect(openMock).not.toHaveBeenCalled();
+  });
+
+  it("the acknowledgement-save fallback stays local and generates no log or navigation", async () => {
+    const reads = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url !== "/api/prescriptions") return reads(url, options);
+      const body = JSON.parse(String(options?.body));
+      return body.acknowledgedSafetyToken
+        ? { status: 500, json: async () => ({}) }
+        : { status: 200, json: async () => ({ requiresAcknowledgement: true, acknowledgementToken: "synthetic-only", safetyWarnings: [] }) };
+    });
+    withDraft();
+    click("طباعة الروشتة (A5)");
+    await vi.waitFor(() => expect(contents(render().tree)).toContain("أقرّ قراءة التحذيرات"));
+    click("أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا");
+    await vi.waitFor(() => expect(contents(preview())).toContain("Synthetic Local Drug"));
+    expect(fetchMock.mock.calls.filter(([, options]) => options?.method === "POST").map(([url]) => url))
+      .toEqual(["/api/prescriptions", "/api/prescriptions"]);
+    expect(openMock).not.toHaveBeenCalled();
+  });
+
+  it("explicit close suppresses popup even before the parent's visibility commit", async () => {
+    const reads = fetchMock.getMockImplementation()!;
+    let finish!: (value: { status: number; json: () => Promise<{ id: number }> }) => void;
+    const pending = new Promise<Parameters<typeof finish>[0]>(resolve => { finish = resolve; });
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) =>
+      url === "/api/prescriptions" ? pending : reads(url, options));
+    withDraft();
+    click("طباعة الروشتة (A5)");
+    click("إلغاء");
+    expect(closeMock).toHaveBeenCalledOnce();
+    finish({ status: 201, json: async () => ({ id: 92001 }) });
+    await vi.waitFor(() => expect(render().find(node => node.type === "a" && contents(node).includes("فتح الوصفة المحفوظة")).props.href)
+      .toBe("/print/prescription/91001?rx=92001"));
+    expect(openMock).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("closing during %s acknowledged save offers a manual saved link only", async (acknowledged) => {
+    const reads = fetchMock.getMockImplementation()!;
+    let finish!: (value: { status: number; json: () => Promise<{ id: number }> }) => void;
+    const pending = new Promise<Parameters<typeof finish>[0]>(resolve => { finish = resolve; });
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url !== "/api/prescriptions") return reads(url, options);
+      if (acknowledged && !JSON.parse(String(options?.body)).acknowledgedSafetyToken) return {
+        status: 200, json: async () => ({ requiresAcknowledgement: true, acknowledgementToken: "synthetic-closing-chart", safetyWarnings: [] }),
+      };
+      return pending;
+    });
+    withDraft();
+    click("طباعة الروشتة (A5)");
+    if (acknowledged) {
+      const label = "أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا";
+      await vi.waitFor(() => expect(contents(render().tree)).toContain(label));
+      click(label);
+    }
+    // Parent-driven close also suppresses automatic printing, without relying
+    // on the composer close button or removing the same chart's draft.
+    render({ isOpen: false });
+    finish({ status: 201, json: async () => ({ id: 92001 }) });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(render().tree).toBeNull();
+    expect(openMock).not.toHaveBeenCalled();
+    render({ isOpen: true });
+    await vi.waitFor(() => expect(render().find(node => node.type === "a" && contents(node).includes("فتح الوصفة المحفوظة")).props.href)
+      .toBe("/print/prescription/91001?rx=92001"));
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/prescriptions")).toHaveLength(acknowledged ? 2 : 1);
+    expect(openMock).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("a different chart clears the draft and cannot receive an old saved popup (after ack: %s)", async (acknowledged) => {
+    const reads = fetchMock.getMockImplementation()!;
+    let finish!: (value: { status: number; json: () => Promise<{ id: number }> }) => void;
+    const pending = new Promise<Parameters<typeof finish>[0]>(resolve => { finish = resolve; });
+    fetchMock.mockImplementation(async (url: string, options?: RequestInit) => {
+      if (url !== "/api/prescriptions") return reads(url, options);
+      if (acknowledged && !JSON.parse(String(options?.body)).acknowledgedSafetyToken) return {
+        status: 200, json: async () => ({ requiresAcknowledgement: true, acknowledgementToken: "synthetic-old-chart", safetyWarnings: [] }),
+      };
+      return pending;
+    });
+    withDraft();
+    click(previewLabel);
+    expect(contents(preview())).toContain("Synthetic Local Drug");
+    click("طباعة الروشتة (A5)");
+    if (acknowledged) {
+      await vi.waitFor(() => expect(contents(render().tree)).toContain("أقرّ قراءة التحذيرات"));
+      click("أقرّ قراءة التحذيرات — حفظ الوصفة وطباعتها رسميًا");
+    }
+    render({ patientId: 91002, patientName: "Synthetic second chart", defaultDiagnosis: "Synthetic separate diagnosis" });
+    finish({ status: 201, json: async () => ({ id: 92001 }) });
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+    expect(openMock).not.toHaveBeenCalled();
+    expect(() => preview()).toThrow();
+    expect(contents(render().tree)).not.toContain("Synthetic local notes");
+    expect(contents(render().tree)).not.toContain("فتح الوصفة المحفوظة");
+    expect(() => field(medicinePlaceholder)).toThrow();
+    expect(field(diagnosisPlaceholder).props.value).toBe("Synthetic separate diagnosis");
   });
 });

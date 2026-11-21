@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useClinicName } from "./SettingsProvider";
 import { Icon } from "./Icon";
 import { toWhatsAppNumber } from "@/lib/reminders";
@@ -67,7 +67,17 @@ interface PrescriptionModalProps {
   defaultDoctorName?: string;
 }
 
-export function PrescriptionModal({
+const MAX_DATABASE_ID = 2147483647;
+const isRecordId = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= MAX_DATABASE_ID;
+const SAVE_NOT_CONFIRMED = "تعذّر تأكيد حفظ الوصفة. المعاينة أدناه محلية فقط وليست وصفة رسمية.";
+
+export function PrescriptionModal(props: PrescriptionModalProps) {
+  // Keep edits across close/reopen for the same file, never across files.
+  return <PrescriptionModalForm key={props.patientId ?? `unlinked:${props.patientName}`} {...props} />;
+}
+
+function PrescriptionModalForm({
   isOpen,
   onClose,
   patientId,
@@ -98,6 +108,24 @@ export function PrescriptionModal({
      نفسه تقلّل النقر — ولا تُفرض. */
   const [preserving, setPreserving] = useState(false);
   const [preserveError, setPreserveError] = useState<string | null>(null);
+  const [draftPreviewOpen, setDraftPreviewOpen] = useState(false);
+  const [savedPrintHref, setSavedPrintHref] = useState<string | null>(null);
+  const mounted = useRef(false);
+  const saveInFlight = useRef(false);
+  const modalOpen = useRef(false);
+  const closeGeneration = useRef(0);
+  const draftPreviewRegion = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  useLayoutEffect(() => {
+    modalOpen.current = isOpen;
+    if (!isOpen) closeGeneration.current += 1;
+  }, [isOpen]);
+  useEffect(() => {
+    if (isOpen && draftPreviewOpen) draftPreviewRegion.current?.focus();
+  }, [isOpen, draftPreviewOpen]);
   /* مراجعة الجولة الثانية (Blocker B) — الخادم هو المرجع: */
   /* عرض تحذيرات الخادم غير الحرجة قبل الحفظ، مع رمز الإقرار المرتبط بالوصفة. */
   const [safetyPreview, setSafetyPreview] = useState<{
@@ -121,7 +149,7 @@ export function PrescriptionModal({
   /* الاقتراحات تُجلب مرة عند الفتح — من وصفاته الفاعلة لا المبطلة، للطبيب
      والمدير وحدهما؛ وغيرهم لا يقترح ولا يصير الفشل صامتًا. */
   useEffect(() => {
-    if (!isOpen || !patientId) return;
+    if (!isOpen || !isRecordId(patientId)) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -189,20 +217,17 @@ export function PrescriptionModal({
     return true;
   };
 
-  const buildPrintUrl = () => {
-    if (!validatePrintableItems()) return null;
-    /* معاينة مسودة معلنة (P0.9): تُطبع بعلامة «مسودة غير معتمدة» وباسم الطبيب
-     * من الجلسة — لا من الرابط. الوثيقة الرسمية وحدها (rx) تُطبع كوصفة صرف. */
-    const params = new URLSearchParams();
-    params.set("draft", "1");
-    if (diagnosis) params.set("diagnosis", diagnosis);
-    if (notes) params.set("notes", notes);
-    params.set("lang", lang);
-    if (items.length > 0) {
-      params.set("items", JSON.stringify(items));
-    }
-    return `/print/prescription/${patientId}?${params.toString()}`;
+  const showDraftPreview = () => {
+    if (!validatePrintableItems()) return;
+    setDraftPreviewOpen(true);
   };
+
+  const showUnconfirmedSave = () => {
+    setPreserveError(SAVE_NOT_CONFIRMED);
+    setDraftPreviewOpen(true);
+  };
+
+  const draftItems = draftPreviewOpen ? sanitizeRxItems(items) : [];
 
   /** إرسال الوصفة إلى الخادم — برمز إقرارٍ إن كان الطبيب أقرّ التحذيرات. */
   const submitToServer = async (acknowledgedSafetyToken?: string) => {
@@ -222,110 +247,111 @@ export function PrescriptionModal({
     return interpretPrescriptionSaveResponse(response.status, payload);
   };
 
-  const openOfficialPrint = (prescriptionId: number) => {
-    /* الوثيقة الرسمية تُطبع من المحفوظ: اسم الطبيب من السجل (createdBy)
-     * لا من الرابط — فلا وثيقة رسمية تحمل اسمًا مزوّرًا (P0.9). */
-    const params = new URLSearchParams();
-    params.set("rx", String(prescriptionId));
-    window.open(`/print/prescription/${patientId}?${params.toString()}`, "_blank");
+  const closeComposer = () => {
+    // Suppress the popup immediately, even before the parent commits isOpen.
+    modalOpen.current = false;
+    closeGeneration.current += 1;
+    onClose();
+  };
+
+  const openOfficialPrint = (prescriptionId: number, generationAtSubmit: number) => {
+    if (!mounted.current) return;
+    if (!isRecordId(patientId) || !isRecordId(prescriptionId)) {
+      showUnconfirmedSave();
+      return;
+    }
+    setDraftPreviewOpen(false);
+    // Closing changes the print intent, not the server's completed save.
+    const href = `/print/prescription/${patientId}?rx=${prescriptionId}`;
+    if (!modalOpen.current || closeGeneration.current !== generationAtSubmit) {
+      setSavedPrintHref(href);
+      return;
+    }
+    setSavedPrintHref(null);
+    window.open(href, "_blank");
   };
 
   const handlePrint = async () => {
-    if (!validatePrintableItems()) return;
-    // Printing claims this diagnosis for the prescription being submitted.
-    // Later visit-note updates cannot silently change its display or the
-    // canonical content while save/safety acknowledgement is in progress.
+    if (saveInFlight.current || !validatePrintableItems()) return;
+    // Pin the submitted diagnosis across visit updates / acknowledgement.
     setDiagnosisOverride(diagnosis);
-    /* الوصفة وثيقة: تُحفَظ أوّلًا ثم تُطبَع من المحفوظ. والخادم هو المرجع
-     * النهائي للسلامة (مراجعة الجولة الثانية — Blocker B):
-     * - تعارضٌ حرج (409) ⇒ توقّف تام: لا طباعة رسمية ولا سقوط تلقائي إلى
-     *   مسودة؛ يُعرض سبب المنع، والمسودة زرّ منفصل صريح فقط.
-     * - تحذيرات غير حرجة ⇒ عرضٌ وإقرارٌ صريح قبل الحفظ والطباعة الرسمية.
-     * - فشلٌ غير حرج (شبكة/500) لا يحرم المريض وصفته: مسودة معلنة مع سببٍ ظاهر. */
     setCriticalBlock(null);
     setSafetyPreview(null);
     setAckInvalidMessage(null);
-    if (patientId) {
-      setPreserving(true);
-      setPreserveError(null);
-      try {
-        const outcome = await submitToServer();
-        if (outcome.kind === "officialPrint") {
-          openOfficialPrint(outcome.prescriptionId);
-          return;
-        }
-        if (outcome.kind === "criticalBlock") {
-          /* منعٌ حرج: توقّف تام — لا window.open إطلاقًا من هذا المسار. */
-          setCriticalBlock({ message: outcome.message, alerts: outcome.safetyAlerts });
-          return;
-        }
-        if (outcome.kind === "awaitAcknowledgement") {
-          /* لا حفظ ولا طباعة بعد: عرض التحذيرات على الطبيب أولاً. */
-          setSafetyPreview({
-            warnings: outcome.safetyWarnings,
-            token: outcome.acknowledgementToken,
-            notice: outcome.message ?? null,
-          });
-          return;
-        }
-        if (outcome.kind === "acknowledgementRejected") {
-          setAckInvalidMessage(outcome.message);
-          return;
-        }
-        setPreserveError(outcome.reason);
-      } catch {
-        setPreserveError("تعذّر حفظ الوصفة كوثيقة — ستُطبع بالطريقة السريعة.");
-      } finally {
-        setPreserving(false);
-      }
+    setDraftPreviewOpen(false);
+    if (!isRecordId(patientId)) {
+      setPreserveError("اربط المسودة بملف المريض قبل الحفظ والطباعة الرسمية.");
+      setDraftPreviewOpen(true);
+      return;
     }
-    const url = buildPrintUrl();
-    if (url) window.open(url, "_blank");
-  };
-
-  /** إقرار الطبيب قراءة التحذيرات غير الحرجة ثم الحفظ والطباعة الرسمية —
-   * يُعاد إرسال نفس الوصفة مع رمز الإقرار؛ فإن تغيّرت الأدوية بعد الإقرار
-   * رفضه الخادم وأُعيد العرض. */
-  const handleAcknowledgeAndPrint = async () => {
-    if (!safetyPreview?.token || !patientId) return;
-    if (!validatePrintableItems()) return;
+    const generationAtSubmit = closeGeneration.current;
+    saveInFlight.current = true;
     setPreserving(true);
-    setAckInvalidMessage(null);
+    setPreserveError(null);
     try {
-      const outcome = await submitToServer(safetyPreview.token);
+      const outcome = await submitToServer();
+      if (!mounted.current) return;
       if (outcome.kind === "officialPrint") {
-        setSafetyPreview(null);
-        openOfficialPrint(outcome.prescriptionId);
-        return;
-      }
-      if (outcome.kind === "criticalBlock") {
-        /* تحوّل الحالة إلى حرج بين المعاينة والإقرار (ملف المريض تغيّر): توقّف تام. */
-        setSafetyPreview(null);
+        openOfficialPrint(outcome.prescriptionId, generationAtSubmit);
+      } else if (outcome.kind === "criticalBlock") {
+        // No automatic draft view or print after a critical refusal.
         setCriticalBlock({ message: outcome.message, alerts: outcome.safetyAlerts });
-        return;
-      }
-      if (outcome.kind === "acknowledgementRejected") {
-        setSafetyPreview(null);
-        setAckInvalidMessage(outcome.message);
-        return;
-      }
-      if (outcome.kind === "awaitAcknowledgement") {
-        /* رجع الخادم بعرض تحذيرات جديدة/محدثة بعد الإقرار — يُعرض من جديد. */
+      } else if (outcome.kind === "awaitAcknowledgement") {
         setSafetyPreview({
           warnings: outcome.safetyWarnings,
           token: outcome.acknowledgementToken,
           notice: outcome.message ?? null,
         });
-        return;
+      } else if (outcome.kind === "acknowledgementRejected") {
+        setSafetyPreview(null);
+        setAckInvalidMessage(outcome.message);
+      } else {
+        showUnconfirmedSave();
       }
-      setSafetyPreview(null);
-      setPreserveError(outcome.reason);
-      const url = buildPrintUrl();
-      if (url) window.open(url, "_blank");
     } catch {
-      setAckInvalidMessage("تعذّر الاتصال بالخادم — حاول الإقرار من جديد.");
+      if (mounted.current) showUnconfirmedSave();
     } finally {
-      setPreserving(false);
+      saveInFlight.current = false;
+      if (mounted.current) setPreserving(false);
+    }
+  };
+
+  /** Acknowledgement still goes through the existing saved-prescription API. */
+  const handleAcknowledgeAndPrint = async () => {
+    if (saveInFlight.current || !safetyPreview?.token || !isRecordId(patientId) || !validatePrintableItems()) return;
+    const generationAtSubmit = closeGeneration.current;
+    saveInFlight.current = true;
+    setPreserving(true);
+    setAckInvalidMessage(null);
+    setPreserveError(null);
+    setDraftPreviewOpen(false);
+    try {
+      const outcome = await submitToServer(safetyPreview.token);
+      if (!mounted.current) return;
+      if (outcome.kind === "officialPrint") {
+        setSafetyPreview(null);
+        openOfficialPrint(outcome.prescriptionId, generationAtSubmit);
+      } else if (outcome.kind === "criticalBlock") {
+        setSafetyPreview(null);
+        setCriticalBlock({ message: outcome.message, alerts: outcome.safetyAlerts });
+      } else if (outcome.kind === "acknowledgementRejected") {
+        setSafetyPreview(null);
+        setAckInvalidMessage(outcome.message);
+      } else if (outcome.kind === "awaitAcknowledgement") {
+        setSafetyPreview({
+          warnings: outcome.safetyWarnings,
+          token: outcome.acknowledgementToken,
+          notice: outcome.message ?? null,
+        });
+      } else {
+        setSafetyPreview(null);
+        showUnconfirmedSave();
+      }
+    } catch {
+      if (mounted.current) setAckInvalidMessage("تعذّر الاتصال بالخادم — حاول الإقرار من جديد.");
+    } finally {
+      saveInFlight.current = false;
+      if (mounted.current) setPreserving(false);
     }
   };
 
@@ -369,7 +395,7 @@ export function PrescriptionModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150">
       <div
         className="fixed inset-0"
-        onClick={onClose}
+        onClick={closeComposer}
       />
       <div className="relative z-10 flex flex-col max-h-[90vh] w-full max-w-3xl rounded-3xl bg-white shadow-2xl border border-slate-200 overflow-hidden">
         {/* رأس النافذة */}
@@ -390,7 +416,7 @@ export function PrescriptionModal({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={closeComposer}
             className="rounded-xl p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-700 transition-colors"
           >
             <Icon name="close" className="h-5 w-5" />
@@ -551,6 +577,42 @@ export function PrescriptionModal({
             </p>
           ) : null}
 
+          {savedPrintHref ? (
+            <p role="status" className="print:hidden rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-950">
+              حُفظت الوصفة ولم تُفتح للطباعة تلقائيًا.{" "}
+              <a href={savedPrintHref} target="_blank" rel="noopener noreferrer" className="font-bold underline">
+                فتح الوصفة المحفوظة للطباعة (A5)
+              </a>
+            </p>
+          ) : null}
+
+          {draftPreviewOpen && (
+            <section ref={draftPreviewRegion} tabIndex={-1} aria-label="معاينة مسودة غير محفوظة" dir="rtl" className="print:hidden space-y-2 rounded-2xl border-2 border-dashed border-amber-500 bg-amber-50 p-4 text-xs">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <h3 className="font-black text-amber-950">مسودة غير معتمدة · معاينة داخلية فقط</h3>
+                <button type="button" onClick={() => setDraftPreviewOpen(false)} className="font-bold text-amber-900 underline">
+                  إغلاق المعاينة
+                </button>
+              </div>
+              <p className="font-bold text-amber-900">هذه المعاينة لا تُطبع ولا تُصرف كوصفة، ولا تثبت حفظها.</p>
+              {diagnosis ? <p><strong>التشخيص: </strong>{diagnosis}</p> : null}
+              {draftItems.length === 0 ? <p>لا توجد أدوية صالحة للمعاينة.</p> : (
+                <ol className="space-y-1">
+                  {draftItems.map((item, index) => (
+                    <li key={index} className="rounded-lg bg-white p-2">
+                      <p dir="ltr" className="font-semibold text-left">
+                        {[item.name, item.dose, item.form, item.frequency, item.duration].filter(Boolean).join(" · ")}
+                      </p>
+                      {lang !== "en" && item.instructions ? <p>{item.instructions}</p> : null}
+                      {lang !== "ar" && item.instructionsEn ? <p dir="ltr" className="text-left">{item.instructionsEn}</p> : null}
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {notes ? <p className="whitespace-pre-wrap"><strong>إرشادات: </strong>{notes}</p> : null}
+            </section>
+          )}
+
           {/* منعٌ حرج من الخادم (409): توقّف تام — لا طباعة رسمية ولا مسودة
               تلقائية؛ سبب المنع ظاهر، والمسودة زرّ منفصل صريح (مراجعة الجولة الثانية). */}
           {criticalBlock && (
@@ -576,10 +638,7 @@ export function PrescriptionModal({
               </p>
               <button
                 type="button"
-                onClick={() => {
-                  const url = buildPrintUrl();
-                  if (url) window.open(url, "_blank");
-                }}
+                onClick={showDraftPreview}
                 className="rounded-xl border border-red-300 bg-white px-4 py-2 text-xs font-bold text-red-700 hover:bg-red-100 transition-colors"
               >
                 عرض مسودة غير معتمدة (لا تُصرف كوصفة)
@@ -831,7 +890,7 @@ export function PrescriptionModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={closeComposer}
               className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
             >
               إلغاء
@@ -844,7 +903,14 @@ export function PrescriptionModal({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={showDraftPreview}
+              className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-900 hover:bg-amber-100"
+            >
+              معاينة مسودة غير محفوظة
+            </button>
             {patientPhone && (
               <button
                 type="button"

@@ -23941,6 +23941,8 @@ export interface PrescriptionRecord {
   createdBy: string;
   /** جهة الطبيب الصادرة منه الوصفة — من سجل المستخدم الخادميّ لا من العميل (P0.8). */
   doctorPartyId: number | null;
+  /** Optional historical treating-doctor snapshot, available on saved-document reads only. */
+  prescribingDoctorName?: string | null;
   createdAt: string;
 }
 
@@ -24005,11 +24007,18 @@ export async function savePrescription(
 
 export async function getPrescription(id: number): Promise<PrescriptionRecord | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<PrescriptionRow>(
-    `SELECT ${PRESCRIPTION_COLUMNS} FROM prescriptions WHERE id = $1`,
+  // Older reviewed Rx releases stored a dedicated prescribing-name snapshot.
+  // The current schema need not have that additive column: read its value only
+  // when present, without a schema change or a fallback to the account/party.
+  const { rows } = await getPool().query<PrescriptionRow & { prescribing_doctor_name: string | null }>(
+    `SELECT ${PRESCRIPTION_COLUMNS},
+       CASE WHEN jsonb_typeof(to_jsonb(rx)->'prescribing_doctor_name') = 'string'
+            THEN to_jsonb(rx)->>'prescribing_doctor_name' END AS prescribing_doctor_name
+      FROM prescriptions AS rx WHERE id = $1`,
     [id],
   );
-  return rows[0] ? toPrescription(rows[0]) : null;
+  const row = rows[0];
+  return row ? { ...toPrescription(row), prescribingDoctorName: row.prescribing_doctor_name?.trim() || null } : null;
 }
 
 /** وصفات المريض — الفاعلة ثم المبطلة، الأحدث أولًا. */
