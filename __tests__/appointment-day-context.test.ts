@@ -126,7 +126,10 @@ beforeEach(async () => {
       const pending = deferred<ReturnType<typeof response>>();
       reads.push({ date: url.split("date=")[1], pending }); return pending.promise;
     }
-    if (url.startsWith("/api/parties") || url.startsWith("/api/waiting-list?")) return response([]);
+    if (url.startsWith("/api/parties")) return response([
+      { id: 9, name: "Synthetic doctor" }, { id: 10, name: "Synthetic other doctor" },
+    ]);
+    if (url.startsWith("/api/waiting-list?")) return response([]);
     if (init?.method === "PATCH") return response({ ok: true });
     throw new Error(`Unexpected request: ${url}`);
   });
@@ -194,6 +197,50 @@ describe("appointment day result ownership (actual page handlers, synthetic tran
       ...appointmentB, id: 20 + index, status, scheduledTime: "9:05", durationMinutes: 5,
     })))); await flush();
     expect(rows()).toEqual([20, 21, 22, 23, 24]);
+  });
+
+  it("finds terms from an existing recorded type's full and short labels without losing legacy custom labels", async () => {
+    refresh();
+    reads[1].pending.resolve(response([
+      { ...appointment, id: 21, appointmentType: "follow_up" },
+      { ...appointment, id: 22, appointmentType: "متابعة دورية" },
+      { ...appointment, id: 23, appointmentType: "إجراء تجريبي مخصص" },
+      { ...appointment, id: 24, appointmentType: null },
+    ]));
+    await flush();
+
+    for (const [query, matching] of [
+      ["  شد تقويم  ", [21, 22]], ["متابعة دورية", [21, 22]], ["مخصص", [23]], ["", [21, 22, 23, 24]],
+    ] as const) {
+      const input = find((node) => node.type === "input" && node.props.type === "search");
+      (input.props.onChange as (event: unknown) => void)({ target: { value: query } });
+      expect(rows()).toEqual(matching);
+    }
+    expect(reads).toHaveLength(2);
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("intersects full-type search with the current doctor and status filters", async () => {
+    refresh();
+    reads[1].pending.resolve(response([
+      { ...appointment, id: 25, appointmentType: "follow_up" },
+      { ...appointment, id: 26, appointmentType: "follow_up", doctorId: 10 },
+      { ...appointment, id: 27, appointmentType: "follow_up", status: "arrived" },
+      { ...appointment, id: 28, appointmentType: "consultation" },
+    ]));
+    await flush();
+
+    const input = find((node) => node.type === "input" && node.props.type === "search");
+    (input.props.onChange as (event: unknown) => void)({ target: { value: "تقويم" } });
+    const doctor = find((node) => node.type === "select"
+      && elements(node.props.children as ReactNode).some((option) => option.props.value === "10"));
+    (doctor.props.onChange as (event: unknown) => void)({ target: { value: "9" } });
+    click("محجوز (3)");
+    expect(rows()).toEqual([25]);
+    click("وصل بالعيادة (1)");
+    expect(rows()).toEqual([27]);
+    expect(reads).toHaveLength(2);
+    expect(writes()).toHaveLength(0);
   });
 
   it.each(["success", "failure"])("retires delayed A %s after B succeeds", async (result) => {

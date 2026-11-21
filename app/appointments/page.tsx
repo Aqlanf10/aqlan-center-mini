@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { ArrivalPanel } from "@/components/ArrivalPanel";
 import { AppointmentReminder } from "@/components/AppointmentReminder";
 import {
+  APPOINTMENT_TYPES,
   clinicDateString,
   dayLoad,
   toMinutes,
@@ -457,21 +458,27 @@ export default function AppointmentsPage() {
   };
 
   const filteredItems = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
     return items.filter((item) => {
       const matchStatus = statusFilter === "all"
         || (statusFilter === "unreminded" ? awaitsReminder(item)
           : statusFilter === "lab" ? isActiveLabStatus(item.status) && hasPendingLabWork(item.labReadiness)
             : item.status === statusFilter);
       const matchDoctor = doctorFilter === "all" || String(item.doctorId) === doctorFilter;
-      const typeLabel = (item.appointmentType && getAppointmentTypeLabel(item.appointmentType)) || "";
-      const q = searchQuery.toLowerCase().trim();
+      // Match the full label staff chose at booking as well as the compact
+      // badge. Only exact stored types/labels are matched to the existing list.
+      const recordedType = typeof item.appointmentType === "string" ? item.appointmentType : "";
+      const type = q ? APPOINTMENT_TYPES.find(({ id, label, shortLabel }) =>
+        recordedType === id || recordedType === label || recordedType === shortLabel
+      ) : undefined;
       const matchSearch =
         !q ||
         item.patientName.toLowerCase().includes(q) ||
         (item.patientPhone ?? "").includes(q) ||
         (item.note ?? "").toLowerCase().includes(q) ||
         (item.doctorName ?? "").toLowerCase().includes(q) ||
-        typeLabel.toLowerCase().includes(q);
+        (type?.shortLabel ?? recordedType).toLowerCase().includes(q) ||
+        (type?.label ?? "").toLowerCase().includes(q);
       return matchStatus && matchDoctor && matchSearch;
     });
   }, [items, statusFilter, doctorFilter, searchQuery]);
