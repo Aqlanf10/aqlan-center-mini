@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Logo } from "@/components/Icon";
 import { InstallApp } from "@/components/InstallApp";
+import { speakDisplayCallOnDevice } from "@/lib/display-local-voice";
+import { readDisplayCallAlert, type DisplayCallCursor } from "@/lib/display-call-alert";
 
 /**
  * شاشة الصالة — تلفاز الانتظار.
@@ -57,7 +59,7 @@ export default function DisplayScreen() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [checkinQr, setCheckinQr] = useState<string>("");
   const audioRef = useRef<AudioContext | null>(null);
-  const lastCallRef = useRef<string | null>(null);
+  const callCursor = useRef<DisplayCallCursor>(undefined);
   const wakeRef = useRef<{ release: () => Promise<void> } | null>(null);
 
   useEffect(() => {
@@ -98,31 +100,18 @@ export default function DisplayScreen() {
   }, []);
 
   /**
-   * نطق الاسم صوتيًا — بصوتٍ عربي إن وُجد في الجهاز.
-   *
-   * يُنطق الاسم الأول فقط كما يُنادى به في الصالة أصلًا، ولا يُنطق حرف العائلة
-   * المُقنَّع («أحمد ميم» لا معنى لها). وصوت التقويم غائب في بعض أجهزة التلفاز:
-   * حين لا يوجد صوت عربي تُتخطى النطقة بصمت — النغمة تكفي، ولا رسالة خطأ أمام
-   * المرضى.
+   * نطق الاسم صوتيًا بصوت عربي محلي فقط. إذا غاب هذا الصوت، تبقى النغمة
+   * والبطاقة المرئية كما هما ولا يُحفظ النداء ليُعاد بعد تحميل الأصوات.
    */
   const speak = useCallback((speechName: string, chair: number | null) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    try {
-      const utterance = new SpeechSynthesisUtterance(
-        chair
-          ? `${speechName}، يرجى التوجه إلى غرفة العلاج رقم ${chair}`
-          : `${speechName}، يرجى التوجه إلى الاستقبال`,
-      );
-      const voices = window.speechSynthesis.getVoices();
-      const arabic = voices.find((voice) => voice.lang?.toLowerCase().startsWith("ar"));
-      if (arabic) utterance.voice = arabic;
-      utterance.lang = arabic?.lang ?? "ar-SA";
-      utterance.rate = 0.95;
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
-    } catch {
-      // لا نطق: الشاشة تعمل بالنغمة وحدها.
-    }
+    speakDisplayCallOnDevice(
+      window.speechSynthesis,
+      chair
+        ? `${speechName}، يرجى التوجه إلى غرفة العلاج رقم ${chair}`
+        : `${speechName}، يرجى التوجه إلى الاستقبال`,
+      text => new SpeechSynthesisUtterance(text),
+    );
   }, []);
 
   // أصوات النطق تُحمَّل في الخلفية متأخرة على بعض الأجهزة — نطلبها مرة عند
@@ -231,18 +220,18 @@ export default function DisplayScreen() {
   // أمر عادي، وتمييزهما بالاسم كان سيبتلع نداء الثاني بلا صوت ولا وميض.
   // إعادة النداء تُحدّث الختمة فيصدر الصوت والوميض من جديد بلا ضغطة ثانية.
   const topCall = feed?.called[0] ?? null;
+  const feedReady = feed !== null;
   useEffect(() => {
     const key = topCall ? `${topCall.at ?? ""}|${topCall.chair ?? ""}` : null;
-    if (!key || !topCall || key === lastCallRef.current) return;
-    const isFirstLoad = lastCallRef.current === null;
-    lastCallRef.current = key;
-    if (isFirstLoad) return; // فتح الشاشة على نداء قديم لا يستحق تنبيهًا.
+    const { cursor, alert, speech } = readDisplayCallAlert(callCursor.current, feedReady, key, soundOn && Boolean(feed?.voice));
+    callCursor.current = cursor;
+    if (!alert || !topCall) return;
     setFlash(true);
     chime();
-    if (soundOn && feed?.voice) speak(topCall.speechName, topCall.chair);
+    if (speech) speak(topCall.speechName, topCall.chair);
     const stop = setTimeout(() => setFlash(false), FLASH_MS);
     return () => clearTimeout(stop);
-  }, [topCall, chime, speak, soundOn, feed?.voice]);
+  }, [feedReady, topCall, chime, speak, soundOn, feed?.voice]);
 
   // تناوب الإعلانات: يتوقف حساب المؤشر حين لا توجد إعلانات، والقسمة تُعيد
   // المؤشر إلى أول القائمة حين تُحذف إعلاناتٌ والشاشة تعمل.
