@@ -185,6 +185,74 @@ function adminPost(url: string, body: unknown): Request {
 }
 
 describe("دخول نقاط النسخ لا يصدر إلا SELECT — إثبات تسجيل SQL على PG 18", () => {
+  it("all six staff backup gates reject a role changed after login before reading settings or archives", async () => {
+    const { createSessionToken, readSessionToken } = await import("../../lib/auth");
+    const { DELETE: deleteArchive } = await import("../../app/api/settings/backup/archive/[backupId]/route");
+    const { POST: restore } = await import("../../app/api/settings/backup/restore/route");
+    const admin = readSessionToken(adminCookieToken)!;
+    try {
+      // Issue an authentic legacy reception session, then promote the stored account.
+      await client.query("UPDATE users SET role='reception' WHERE id=$1", [admin.userId]);
+      state.cookieValue = createSessionToken({ ...admin, role: "reception" });
+      expect((await backupStatusRoute.GET!() as Response).status).toBe(403);
+      await client.query("UPDATE users SET role='admin' WHERE id=$1", [admin.userId]);
+      const req = () => new Request("http://localhost/backup-test", { method: "POST" });
+      const before = mark();
+      for (const call of [
+        () => backupStatusRoute.GET!(),
+        () => backupRunRoute.POST!(),
+        () => backupConfigRoute.POST!(req() as never),
+        () => productionBackupRoute.POST!(req() as never),
+        () => restore(req()),
+        () => deleteArchive(req(), { params: Promise.resolve({ backupId: "synthetic-no-archive" }) }),
+      ]) { expect((await call() as Response).status).toBe(401); }
+      expectSliceReadOnly(before);
+      for (const sql of recorded.slice(before)) expect(sql).toMatch(/FROM\s+users\b/i);
+      // A fresh admin session is accepted; a demoted one must reauthenticate.
+      state.cookieValue = adminCookieToken;
+      expect((await backupStatusRoute.GET!() as Response).status).toBe(200);
+      await client.query("UPDATE users SET role='doctor' WHERE id=$1", [admin.userId]);
+      expect((await backupStatusRoute.GET!() as Response).status).toBe(401);
+    } finally {
+      await client.query("UPDATE users SET role='admin' WHERE id=$1", [admin.userId]);
+      state.cookieValue = adminCookieToken;
+    }
+  });
+
+  it.each([
+    ["ordinary legacy document", '{"canViewPlans":true}', 200],
+    ["valid canonical profile", '{"schemaVersion":1,"revision":1,"patientScope":"none","appointmentScope":"none","grants":{}}', 401],
+    ["partial reserved profile", '{"grants":{}}', 401],
+    ["candidate-only marker", '{"confirmation":null}', 401],
+    ["future profile", '{"schemaVersion":999}', 401],
+    ["malformed text", 'not-json', 401],
+  ] as const)("backup gate: %s", async (_label, permissions, expected) => {
+    await client.query("UPDATE users SET permissions=$1 WHERE username='backupadmin'", [permissions]);
+    try {
+      const before = mark();
+      expect((await backupStatusRoute.GET!() as Response).status).toBe(expected);
+      expectSliceReadOnly(before);
+    } finally {
+      await client.query("UPDATE users SET permissions=NULL WHERE username='backupadmin'");
+    }
+  });
+
+  it("requires the exact username issued at login, including after case-only rename", async () => {
+    await client.query("UPDATE users SET username='BackupAdmin' WHERE username='backupadmin'");
+    try { expect((await backupStatusRoute.GET!() as Response).status).toBe(401); }
+    finally { await client.query("UPDATE users SET username='backupadmin' WHERE username='BackupAdmin'"); }
+  });
+
+  it("refuses a signed session expiring during its account SELECT", async () => {
+    const { readSessionToken } = await import("../../lib/auth");
+    const expires = readSessionToken(adminCookieToken)!.expiresAt;
+    const before = mark();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => recorded.length === before ? expires - 1 : expires);
+    try { expect((await backupStatusRoute.GET!() as Response).status).toBe(401); }
+    finally { clock.mockRestore(); }
+    expectSliceReadOnly(before);
+  });
+
   it("بوابة التفعيل (مدير بكوكي موقّعة) ⇒ 503 fail-closed والمسار SELECT حصرًا", async () => {
     const before = mark();
     console.log("STEP-T1: calling POST");

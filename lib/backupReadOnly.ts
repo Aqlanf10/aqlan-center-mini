@@ -1,5 +1,6 @@
 import { getPool } from "./db";
 import { isAdmin } from "./roles";
+import { classifyStaffPermissionEnvelope } from "./staff-permission-envelope";
 import { withDefaults, type SettingsMap } from "./settings";
 import { readSessionPayload } from "./session";
 import { sessionCredentialVersion } from "./auth";
@@ -62,7 +63,7 @@ export interface BackupAdminSession {
 
 export type BackupAdminAuthResult =
   | { ok: true; session: BackupAdminSession }
-  | { ok: false; reason: "no-session" | "user-gone" | "inactive" | "credential-changed" | "users-unreadable" };
+  | { ok: false; reason: "no-session" | "user-gone" | "inactive" | "credential-changed" | "authority-changed" | "users-unreadable" };
 
 /**
  * جلسة مدير النسخ — بلا أي DDL ضمني.
@@ -84,39 +85,48 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
   const payload = await readSessionPayload();
   if (!payload?.credentialVersion) return { ok: false, reason: "no-session" };
 
-  let userRow: {
+  type BackupUserRow = {
     id: number;
     username: string;
     password_hash: string;
     role: string;
     is_active: boolean;
     party_id: number | null;
-  } | null = null;
+    permissions: string | null;
+  };
+  let userRow: BackupUserRow | null;
   try {
-    const { rows } = await getPool().query<{
-      id: number;
-      username: string;
-      password_hash: string;
-      role: string;
-      is_active: boolean;
-      party_id: number | null;
-    }>(
-      `SELECT id, username, password_hash, role, is_active, party_id
+    const { rows } = await getPool().query<BackupUserRow>(
+      `SELECT id, username, password_hash, role, is_active, party_id, permissions
          FROM users
-        WHERE LOWER(username) = LOWER($1)
-        LIMIT 1`,
-      [payload.username],
+        WHERE id = $1`,
+      [payload.userId],
     );
     userRow = rows[0] ?? null;
   } catch {
     return { ok: false, reason: "users-unreadable" };
   }
 
+  // Recheck after the awaited SELECT: a session can expire waiting for a connection.
+  if (payload.expiresAt <= Date.now()) return { ok: false, reason: "no-session" };
   if (!userRow) return { ok: false, reason: "user-gone" };
   if (!userRow.is_active) return { ok: false, reason: "inactive" };
-  if (userRow.id !== payload.userId) return { ok: false, reason: "user-gone" };
+  // A previous role or login name must not inherit newly granted backup privileges.
+  // Login tokens contain the stored username (not the casing typed at login).
+  if (userRow.username !== payload.username || userRow.role !== payload.role) {
+    return { ok: false, reason: "authority-changed" };
+  }
   if (payload.credentialVersion !== sessionCredentialVersion(userRow.password_hash)) {
     return { ok: false, reason: "credential-changed" };
+  }
+
+  // This is a legacy-only reader. Never reinterpret a future or invalid staff
+  // envelope as the legacy admin role; do not activate or translate grants here.
+  const envelope = classifyStaffPermissionEnvelope(userRow.permissions);
+  // "confirmation" is reserved by the later candidate but not by staging's
+  // five-field parser. Even that marker alone must never imply legacy access.
+  if (envelope.kind !== "legacy" || (envelope.value && Object.hasOwn(envelope.value, "confirmation"))) {
+    return { ok: false, reason: "authority-changed" };
   }
 
   return {
