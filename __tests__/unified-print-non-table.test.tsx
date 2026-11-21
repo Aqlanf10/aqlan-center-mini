@@ -97,6 +97,14 @@ describe("actual non-table print routes retain source semantics (synthetic SSR)"
     if (status === "void") expect(html).toContain("VOIDED"); else expect(html).not.toContain("UNAPPROVED DRAFT");
     expect(source).toEqual(before); artifact(`prescription-${status}`, html, "A5");
   });
+  it.each(["ar", "en", "both"] as const)("keeps the printed Rx mark and bilingual heading on their physical sides (%s)", async instructionsLang => {
+    readers.prescription.mockResolvedValue({ ...prescription, instructionsLang });
+    const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002" }) }));
+    const row = html.match(/<div class="rx-dosage-heading"[^>]*>[\s\S]*?<\/div>/u)?.[0];
+    expect(row).toBeDefined();
+    expect(row).toMatch(/^<div[^>]+dir="ltr"[^>]+justify-content:space-between/u);
+    expect(row).toMatch(/>℞<\/span><span dir="rtl"[^>]+text-align:right[^>]*>الوصفة العلاجية والجرعات · <span dir="ltr">Prescription &amp; Dosage<\/span>/u);
+  });
   it("saved Rx renders the clinic-local issued date after midnight in Aden", async () => {
     const html = render(await PrescriptionPage({ params: params(), searchParams: Promise.resolve({ rx: "99002", date: "2040-01-01" }) }));
     expect(html).toContain(friendlyDateLong("2031-01-05"));

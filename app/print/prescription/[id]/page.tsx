@@ -134,8 +134,8 @@ export default async function PrescriptionPrintPage({
 
         <div className="rule" />
 
-        {/* علامة Rx وقائمة الأدوية */}
-        <div style={{ display: "flex", alignItems: "center", gap: "2mm", margin: "2mm 0" }}>
+        {/* اتجاه الصف مستقل عن العربية حتى تبقى علامة الوصفة على يسار الورقة. */}
+        <div className="rx-dosage-heading" dir="ltr" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2mm", margin: "2mm 0" }}>
           <span style={{
             fontSize: "18pt",
             fontFamily: "serif",
@@ -145,7 +145,7 @@ export default async function PrescriptionPrintPage({
           }}>
             ℞
           </span>
-          <span style={{ fontSize: "8.5pt", color: "#64748b", fontWeight: 600 }}>
+          <span dir="rtl" style={{ fontSize: "8.5pt", color: "#64748b", fontWeight: 600, textAlign: "right" }}>
             الوصفة العلاجية والجرعات · <span dir="ltr">Prescription &amp; Dosage</span>
           </span>
         </div>

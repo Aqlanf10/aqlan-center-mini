@@ -119,6 +119,32 @@ async function pdfGeometry(page: Page, pdf: Buffer): Promise<PdfPaper[]> {
   }, xml);
 }
 
+async function expectRxHeadingOnPhysicalSides(page: Page) {
+  const row = page.locator(".rx-dosage-heading");
+  const mark = row.getByText("℞", { exact: true });
+  const heading = row.locator(":scope > [dir='rtl']");
+  expect(await heading.evaluate(node => getComputedStyle(node).direction)).toBe("rtl");
+  expect(await heading.evaluate(node => getComputedStyle(node).textAlign)).toBe("right");
+  const rowBox = (await row.boundingBox())!;
+  const markBox = (await mark.boundingBox())!;
+  const titleBox = (await heading.boundingBox())!;
+  expect(Math.abs(markBox.x - rowBox.x)).toBeLessThan(1);
+  expect(markBox.x + markBox.width).toBeLessThan(titleBox.x);
+  expect(Math.abs(titleBox.x + titleBox.width - (rowBox.x + rowBox.width))).toBeLessThan(1);
+}
+
+function expectRxHeadingPdfOrder(papers: PdfPaper[]) {
+  const firstPage = papers[0];
+  expect(firstPage).toBeDefined();
+  const mark = firstPage.words.find(word => word.text === "℞");
+  const heading = firstPage.words.find(word => word.text === "Prescription");
+  expect(mark, "the printed Rx symbol is present on the first PDF page").toBeDefined();
+  expect(heading, "the printed dosage heading is present on the first PDF page").toBeDefined();
+  expect(mark!.xMax).toBeLessThan(heading!.xMin);
+  expect(mark!.yMin).toBeLessThan(heading!.yMax);
+  expect(mark!.yMax).toBeGreaterThan(heading!.yMin);
+}
+
 function expectPaperBounds(papers: PdfPaper[], format: PaperFormat) {
   const [width, height] = paperSizeMm[format];
   expect(papers.length).toBeGreaterThan(0);
@@ -262,7 +288,11 @@ describe("positive persisted print routes on the built app", () => {
       expectPaperBounds(papers, format);
       const compactPdf = pdfText.replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
       expect(compactPdf).toContain(marker);
-      if (name === "prescription") expect(compactPdf).toContain(drug);
+      if (name === "prescription") {
+        expect(compactPdf).toContain(drug);
+        await expectRxHeadingOnPhysicalSides(page);
+        expectRxHeadingPdfOrder(papers);
+      }
       if (name === "post-op") {
         const phone = brand["clinic.phone"];
         const nativeText = pdfText.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "");
@@ -310,6 +340,7 @@ describe("positive persisted print routes on the built app", () => {
       const finalItemTokens = itemTokens(items.at(-1)!, lang);
       const allItemTokens = items.flatMap(item => itemTokens(item, lang));
       expect(await sheet.evaluate(element => getComputedStyle(element).direction)).toBe("rtl");
+      await expectRxHeadingOnPhysicalSides(page);
       expect(await metadata.getByText(rxPatientName, { exact: true }).count()).toBe(1);
       expect(await metadata.getByText(rxFile, { exact: true }).count()).toBe(1);
       expect(body).toContain(friendlyDateLong("2031-01-05"));
@@ -327,7 +358,7 @@ describe("positive persisted print routes on the built app", () => {
         expect(body).not.toContain(hidden);
       }
 
-      const formats: readonly PaperFormat[] = variant === "short-en" ? ["A5", "A4", "A6"] : ["A5"];
+      const formats: readonly PaperFormat[] = variant === "short-en" ? ["A5", "A4", "A6"] : variant === "short-ar" ? ["A5", "A6"] : ["A5"];
       for (const format of formats) {
         const basename = `rx-persisted-${variant}-${format.toLowerCase()}`;
         const pdf = await page.pdf({ format, preferCSSPageSize: true, printBackground: true, displayHeaderFooter: false });
@@ -360,6 +391,7 @@ describe("positive persisted print routes on the built app", () => {
         }, null, 2));
 
         expectPaperBounds(papers, format);
+        expectRxHeadingPdfOrder(papers);
         if (count === 20) expect(papers.length).toBeGreaterThan(1);
         else if (format === "A5" || format === "A4") expect(papers).toHaveLength(1);
         for (const token of allItemTokens) expect(actual, `${variant} ${format}: ${token}`).toContain(token);
