@@ -74,19 +74,19 @@ const rxPatientName = "SYNTHETIC PATIENT LONG PRINT IDENTITY MARKER END";
 const rxFile = "SYNTHETIC-RX-GEOMETRY-FILE";
 const unknownDoctor = "اسم الطبيب غير موثق في الوصفة المحفوظة";
 const seedAccountName = "SYNTHETIC-ISSUER-ACCOUNT-NOT-TREATING-DOCTOR";
+const arInstruction = "تمرين بصري اصطناعي بلا إرشاد علاجي";
+const enInstruction = "Fictional print layout text only, not for treatment.";
 let rxAcceptancePatientId: number;
 
 function fictionalItems(variant: RxVariant) {
   const { count } = variedRx[variant];
-  const ar = "تمرين بصري اصطناعي بلا إرشاد علاجي";
-  const en = "Fictional print layout text only, not for treatment.";
   return Array.from({ length: count }, (_, index) => {
     const n = String(index + 1).padStart(2, "0");
     return {
       name: `SYNMED${n}`, dose: `SYNDOSE${n}`, form: `SYNFORM${n}`,
       frequency: `SYNFREQ${n}`, duration: `SYNDURATION${n}`,
-      instructions: `${Array(count === 20 ? 4 : 1).fill(ar).join(" ")} ARONLY${n}`,
-      instructionsEn: `${Array(count === 20 ? 4 : 1).fill(en).join(" ")} ENONLY${n}`,
+      instructions: `${Array(count === 20 ? 4 : 1).fill(arInstruction).join(" ")} ARONLY${n}`,
+      instructionsEn: `${Array(count === 20 ? 4 : 1).fill(enInstruction).join(" ")} ENONLY${n}`,
     };
   });
 }
@@ -135,10 +135,16 @@ function expectPaperBounds(papers: PdfPaper[], format: PaperFormat) {
   }
 }
 
-const compact = (value: string) => value.normalize("NFKC").replace(/[\s\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, "");
-// A wrapped LTR patient name can contain an interleaved RTL field label in
-// layout extraction. Require every ASCII identity character in order.
-const latinIdentity = (value: string) => compact(value).replace(/[^\x21-\x7e]|:/g, "");
+const textWithoutBidiControls = (value: string) => value.normalize("NFKC").replace(/[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, "");
+const compact = (value: string) => textWithoutBidiControls(value).replace(/\s+/gu, "");
+const singleSpaced = (value: string) => textWithoutBidiControls(value).replace(/\s+/gu, " ").trim();
+
+function pdfHasCompletePatientIdentity(pageText: string) {
+  // Raw PDF content order keeps the separately wrapped name and file fields
+  // intact. Spatial `-layout` intentionally reads the opposite RTL grid
+  // column between the two rows of the name.
+  return singleSpaced(pageText).includes(rxPatientName) && compact(pageText).includes(rxFile);
+}
 
 function containsLocalizedWords(value: string, phrase: string) {
   const body = compact(value);
@@ -299,10 +305,13 @@ describe("positive persisted print routes on the built app", () => {
       const sheet = page.locator(".sheet-a5");
       const sign = (await sheet.locator(".sign-row").innerText()).trim();
       const body = await sheet.innerText();
+      const metadata = sheet.locator(".print-metadata");
       const items = fictionalItems(variant);
       const finalItemTokens = itemTokens(items.at(-1)!, lang);
       const allItemTokens = items.flatMap(item => itemTokens(item, lang));
       expect(await sheet.evaluate(element => getComputedStyle(element).direction)).toBe("rtl");
+      expect(await metadata.getByText(rxPatientName, { exact: true }).count()).toBe(1);
+      expect(await metadata.getByText(rxFile, { exact: true }).count()).toBe(1);
       expect(body).toContain(friendlyDateLong("2031-01-05"));
       expect(body).not.toContain(friendlyDateLong("2031-01-04"));
       expect(sign).toContain(unknownDoctor);
@@ -325,13 +334,16 @@ describe("positive persisted print routes on the built app", () => {
         const text = execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" });
         expectFictionalPdfIdentity(text);
         const papers = await pdfGeometry(page, pdf);
+        const rawPages = execFileSync("pdftotext", ["-raw", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" }).split("\f");
+        if (rawPages.at(-1)?.trim() === "") rawPages.pop();
+        expect(rawPages).toHaveLength(papers.length);
         const actual = compact(text);
         const pageTexts = papers.map(paper => paper.words.map(word => word.text).join(" "));
         const lastPage = compact(pageTexts.at(-1) ?? "");
         const historicalA5Parity = {
           applies: format === "A5" && count === 20,
           brandingByPage: pageTexts.map(paper => containsLocalizedWords(paper, brand["clinic.name"])),
-          patientAndFileByPage: pageTexts.map(paper => latinIdentity(paper).includes(latinIdentity(rxPatientName)) && compact(paper).includes(rxFile)),
+          patientAndFileByPage: rawPages.map(pdfHasCompletePatientIdentity),
           rxNumberByPage: pageTexts.map(paper => compact(paper).includes(`Rx#${savedId}`)),
           documentedDoctorAvailable: !sign.includes(unknownDoctor),
           lastPageHasCompleteFinalItem: finalItemTokens.every(token => lastPage.includes(token)),
@@ -351,14 +363,18 @@ describe("positive persisted print routes on the built app", () => {
         if (count === 20) expect(papers.length).toBeGreaterThan(1);
         else if (format === "A5" || format === "A4") expect(papers).toHaveLength(1);
         for (const token of allItemTokens) expect(actual, `${variant} ${format}: ${token}`).toContain(token);
-        expect(latinIdentity(text)).toContain(latinIdentity(rxPatientName));
-        for (const token of [rxFile, "Physician", "Signature", "Stamp",
+        expect(pdfHasCompletePatientIdentity(rawPages[0]), `${variant} ${format}: complete name and file on first page`).toBe(true);
+        for (const token of ["Physician", "Signature", "Stamp",
           `SYN-DIAGNOSIS-${variant}`, `SYN-FINAL-NOTES-${variant}`]) expect(actual).toContain(token);
         expect(containsLocalizedWords(text, unknownDoctor)).toBe(true);
         expect(actual).not.toContain(seedAccountName);
         expect(actual).not.toContain(lang === "ar" ? "ENONLY" : "ARONLY");
-        if (lang === "ar") expect(containsLocalizedWords(text, "تمرين بصري اصطناعي بلا إرشاد علاجي")).toBe(true);
-        else expect(actual).toContain(compact("Fictional print layout text only, not for treatment."));
+        if (lang === "ar") {
+          // Poppler may decode the printed lam-alef glyph as alef-lam. Accept
+          // only that exact alternate within the complete, known sentence.
+          const printOrder = arInstruction.replaceAll("لا", "ال");
+          expect([arInstruction, printOrder].some(phrase => actual.includes(compact(phrase)))).toBe(true);
+        } else expect(actual).toContain(compact(enInstruction));
       }
       expect(unexpected).toEqual([]);
       expect(errors).toEqual([]);
@@ -380,31 +396,50 @@ describe("positive persisted print routes on the built app", () => {
 
   it("refuses legacy draft print queries without rendering clinical fields or logging a print", async () => {
     const root = `/print/prescription/${patientId}`;
-    const privateDraft = "SYNTHETIC-UNSAVED-RX-ONLY";
+    const privateDraft = "SYNTHETIC-UNSAVED-RX-ONLY / نص اصطناعي";
+    const encodedDraft = encodeURIComponent(privateDraft);
     const encodedItems = encodeURIComponent(JSON.stringify([{ name: privateDraft }]));
+    const transports: Array<{ suffix: string; headers: Record<string, string>; type: string }> = [
+      { suffix: "", headers: {}, type: "text/html" },
+      { suffix: "&_rsc=", headers: { RSC: "1" }, type: "text/x-component" },
+    ];
     const printCount = async () => (await db.query(
       "SELECT count(*)::int AS n FROM document_prints WHERE doc_type='prescription' AND doc_id=$1", [String(prescriptionId)],
     )).rows[0].n;
     const before = await printCount();
     for (const staff of [h.sessions.admin, h.sessions.doctorA]) {
-      const saved = await authedGet(`${root}?rx=${prescriptionId}`, staff);
-      expect(saved.status).toBe(200);
-      expect(await saved.text()).toContain(drug);
-      for (const search of [
-        `draft=1&items=${encodedItems}`,
-        `rx=${prescriptionId}&draft=`,
-        `rx=${prescriptionId}&items=${encodedItems}`,
-        `rx=${prescriptionId}&diagnosis=${privateDraft}`,
-        `rx=${prescriptionId}&notes=&notes=${privateDraft}`,
-        `rx=${prescriptionId}&rx=${prescriptionId}`,
-      ]) {
-        const response = await authedGet(`${root}?${search}`, staff);
-        expect(response.status).toBe(404);
-        const text = await response.text();
-        expect(text).not.toContain(drug);
-        expect(text).not.toContain(privateDraft);
-        expect(JSON.stringify([...response.headers])).not.toContain(privateDraft);
+      for (const { suffix, headers, type } of transports) {
+        const saved = await authedGet(`${root}?rx=${prescriptionId}${suffix}`, staff, headers);
+        expect(saved.status).toBe(200);
+        expect(saved.headers.get("content-type")).toContain(type);
+        expect(await saved.text()).toContain(drug);
+        for (const search of [
+          `draft=1&items=${encodedItems}`,
+          `rx=${prescriptionId}&draft=`,
+          `rx=${prescriptionId}&items=${encodedItems}`,
+          `rx=${prescriptionId}&diagnosis=${encodedDraft}`,
+          `rx=${prescriptionId}&notes=&notes=${encodedDraft}`,
+        ]) {
+          const response = await authedGet(`${root}?${search}${suffix}`, staff, headers);
+          expect(response.status).toBe(404);
+          const text = await response.text();
+          expect(text).not.toContain(drug);
+          expect(text).not.toContain(privateDraft);
+          expect(text).not.toContain(encodedDraft);
+          expect(text).not.toContain(encodedItems);
+          expect(text.length).toBe(0);
+          expect(response.headers.get("location")).toBeNull();
+          expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+          expect(response.headers.get("cache-control")).toContain("no-store");
+          const outputHeaders = JSON.stringify([...response.headers]);
+          expect(outputHeaders).not.toContain(privateDraft);
+          expect(outputHeaders).not.toContain(encodedDraft);
+          expect(outputHeaders).not.toContain(encodedItems);
+        }
       }
+      const duplicate = await authedGet(`${root}?rx=${prescriptionId}&rx=${prescriptionId}`, staff);
+      expect(duplicate.status).toBe(404);
+      expect(await duplicate.text()).not.toContain(drug);
     }
     expect(await printCount()).toBe(before);
   });

@@ -9,10 +9,10 @@ import { clinicDateString } from "@/lib/schedule";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
+import { LEGACY_RX_DRAFT_KEYS } from "@/lib/prescription-print-query";
 
 export const dynamic = "force-dynamic";
 
-const LEGACY_DRAFT_KEYS = ["draft", "items", "diagnosis", "notes"] as const;
 const MAX_DATABASE_ID = 2147483647;
 
 function savedId(value: unknown): number | null {
@@ -50,7 +50,7 @@ export default async function PrescriptionPrintPage({
   // Reject the presence of private legacy draft fields even alongside a real
   // saved ID. Empty or repeated fields are not an alternate official transport.
   if (patientId === null || prescriptionId === null
-    || LEGACY_DRAFT_KEYS.some(key => Object.hasOwn(query, key))) notFound();
+    || LEGACY_RX_DRAFT_KEYS.some(key => Object.hasOwn(query, key))) notFound();
 
   if (!(await canAccessPatient(session, patientId).catch(() => false))) notFound();
   const stored = await getPrescription(prescriptionId);
