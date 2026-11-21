@@ -122,7 +122,6 @@ async function withDisplay(
     let edition = 0;
     const fixture = (call: Call | null, voice: boolean) => ({
       now: "2026-01-01T09:10:00Z", called: call ? [call] : [], chairs: [], queue: [],
-      stats: { waiting: 0, inTreatment: 0, done: 0, avgWaitMinutes: null, ortho: null },
       delayNotice: false, voice, announcements: [], welcomeText: `شاشة اختبار رقم ${++edition}`, tagline: "",
     });
     let feed = fixture(initialCall, true);
@@ -147,7 +146,10 @@ async function withDisplay(
 
 it("alerts once on the first fresh call after an empty successful feed", async () => {
   await withDisplay(null, [remoteArabic, localEnglish, localArabic], async (page, publish) => {
-    await page.getByText("لا يوجد انتظار الآن", { exact: true }).waitFor({ state: "visible" });
+    await page.getByText("تابعوا الشاشة لمعرفة النداء القادم", { exact: true }).waitFor({ state: "visible" });
+    for (const metric of ["في الانتظار", "متوسط الانتظار اليوم", "في العلاج الآن", "أُنجز اليوم", "جلسات تقويم اليوم"]) {
+      expect(await page.getByText(metric, { exact: metric !== "جلسات تقويم اليوم" }).count()).toBe(0);
+    }
     await enableSound(page);
     expect(await counts(page)).toEqual([0, 0]);
     await publish(fresh);

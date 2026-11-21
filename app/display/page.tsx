@@ -27,14 +27,12 @@ import { readDisplayCallAlert, type DisplayCallCursor } from "@/lib/display-call
 interface CalledEntry { at: string | null; name: string; speechName: string; chair: number | null }
 interface ChairEntry { chair: number; state: "busy" | "called" | "free"; name: string | null }
 interface QueueEntry { name: string; timeText: string; status: "arrived" | "upcoming"; position: string | null }
-interface OrthoSummary { total: number; done: number; waiting: number; upcoming: number }
 interface Announcement { title: string; body: string }
 interface DisplayFeed {
   now: string;
   called: CalledEntry[];
   chairs: ChairEntry[];
   queue: QueueEntry[];
-  stats: { waiting: number; inTreatment: number; done: number; avgWaitMinutes: number | null; ortho: OrthoSummary | null };
   delayNotice: boolean;
   voice: boolean;
   announcements: Announcement[];
@@ -249,7 +247,6 @@ export default function DisplayScreen() {
   const busyChairs = (feed?.chairs ?? []).filter((chair) => chair.state === "busy");
   const previousCalls = (feed?.called ?? []).slice(1);
   const queue = feed?.queue ?? [];
-  const stats = feed?.stats;
 
   return (
     <div className="fixed inset-0 flex flex-col bg-navy-900 text-white">
@@ -340,9 +337,7 @@ export default function DisplayScreen() {
               <div className="w-full rounded-[2.5rem] border-4 border-white/10 bg-white/5 px-8 py-10 text-center lg:py-14">
                 <p className="text-4xl font-black lg:text-6xl">أهلًا بكم</p>
                 <p className="mt-5 text-xl font-bold text-white/60 lg:text-3xl">
-                  {stats && stats.waiting > 0
-                    ? "سيُنادى على اسمكم عند جاهزية الكرسي"
-                    : "لا يوجد انتظار الآن"}
+                  تابعوا الشاشة لمعرفة النداء القادم
                 </p>
               </div>
             )}
@@ -374,7 +369,6 @@ export default function DisplayScreen() {
         <section className="flex min-h-0 flex-col rounded-[2rem] border border-white/10 bg-white/5 p-4 lg:col-span-2 lg:p-5">
           <h2 className="mb-3 flex shrink-0 items-center justify-between text-xl font-black text-white/80 lg:text-2xl">
             <span>القادمون</span>
-            {stats ? <span className="text-base font-bold text-white/40">{stats.waiting} في الانتظار</span> : null}
           </h2>
           <div className="min-h-0 flex-1 space-y-2 overflow-hidden">
             {queue.length === 0 ? (
@@ -403,40 +397,6 @@ export default function DisplayScreen() {
           </div>
         </section>
       </main>
-
-      {/*
-        شريط الأرقام — أعداد لا أسماء. بطاقة التقويم تُخفى تلقائيًا في يومٍ بلا
-        جلسات تقويم، ومتوسط الانتظار يظهر «—» حين لا يوجد قياس بعد لا صفرًا كاذبًا.
-      */}
-      <section className="grid shrink-0 grid-cols-2 gap-3 border-t border-white/10 px-4 py-3 lg:grid-cols-4 lg:px-6">
-        <div className="rounded-2xl bg-white/5 px-4 py-2.5 text-center">
-          <p className="text-3xl font-black lg:text-4xl">{stats?.waiting ?? "—"}</p>
-          <p className="text-sm font-bold text-white/50 lg:text-base">في الانتظار</p>
-        </div>
-        <div className="rounded-2xl bg-white/5 px-4 py-2.5 text-center">
-          <p className="text-3xl font-black tabular-nums lg:text-4xl">
-            {stats?.avgWaitMinutes != null ? `~${stats.avgWaitMinutes} د` : "—"}
-          </p>
-          <p className="text-sm font-bold text-white/50 lg:text-base">متوسط الانتظار اليوم</p>
-        </div>
-        {stats?.ortho ? (
-          <div className="rounded-2xl bg-brand-orange/15 px-4 py-2.5 text-center">
-            <p className="text-3xl font-black tabular-nums text-brand-orange lg:text-4xl">{stats.ortho.total}</p>
-            <p className="text-sm font-bold text-white/50 lg:text-base">
-              جلسات تقويم اليوم · تم {stats.ortho.done} · ينتظرون {stats.ortho.waiting} · قادمون {stats.ortho.upcoming}
-            </p>
-          </div>
-        ) : (
-          <div className="rounded-2xl bg-white/5 px-4 py-2.5 text-center">
-            <p className="text-3xl font-black lg:text-4xl">{stats?.inTreatment ?? "—"}</p>
-            <p className="text-sm font-bold text-white/50 lg:text-base">في العلاج الآن</p>
-          </div>
-        )}
-        <div className="rounded-2xl bg-white/5 px-4 py-2.5 text-center">
-          <p className="text-3xl font-black lg:text-4xl">{stats?.done ?? "—"}</p>
-          <p className="text-sm font-bold text-white/50 lg:text-base">أُنجز اليوم</p>
-        </div>
-      </section>
 
       {/*
         الثلث الأدنى — رسالة توعوية واحدة تتناوب بهدوء كل ربع دقيقة، والشعار

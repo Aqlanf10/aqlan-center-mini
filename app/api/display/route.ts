@@ -4,17 +4,14 @@ import {
   CLINIC_TIME_ZONE,
   getSettings,
   listAppointmentsByDate,
-  listOrthoActivePatientIds,
   listTodayVisits,
 } from "@/lib/db";
 import { chairCount } from "@/lib/settings";
-import { calledVisits, chairRows, firstNameOnly, waitingRows } from "@/lib/flow";
+import { calledVisits, chairRows, firstNameOnly } from "@/lib/flow";
 import { clinicDateString } from "@/lib/schedule";
 import {
-  averageWaitMinutes,
   DEFAULT_TAGLINE,
   maskName,
-  orthoSessionsToday,
   waitingRoomQueue,
   type PrivacyMode,
 } from "@/lib/waiting-room";
@@ -26,7 +23,7 @@ export const dynamic = "force-dynamic";
  *
  * هذا المسار عام بلا جلسة، لأن الشاشة معلّقة على تلفاز في صالة الانتظار ولا أحد
  * يسجّل الدخول عليها كل صباح. ولأنه عام، يُبنى الجواب هنا بما يُعرض فقط: أسماء
- * مُقنَّعة، وأوقات، وحالات، وأعداد. لا هاتف ولا ملاحظة ولا تشخيص ولا حساب ولا
+ * مُقنَّعة، وأوقات، وحالات. مؤشرات التشغيل تخصّ الموظفين. لا هاتف ولا ملاحظة ولا تشخيص ولا حساب ولا
  * حتى مُعرّف مريض — الفلترة على الخادم لا في الواجهة: إرسال السجل كاملًا ثم
  * إخفاء أجزائه بالعرض يترك البيانات في استجابة يقرأها أي أحد بفتح أدوات
  * المتصفح.
@@ -37,11 +34,10 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   try {
     const now = new Date();
-    const [visits, appointments, settings, orthoPatientIds, announcements] = await Promise.all([
+    const [visits, appointments, settings, announcements] = await Promise.all([
       listTodayVisits(),
       listAppointmentsByDate(clinicDateString(now, CLINIC_TIME_ZONE)),
       getSettings(),
-      listOrthoActivePatientIds(),
       // الإعلانات من سجلاتها المنظّمة: المفعّل وحده بترتيبه، عنوانًا ونصًّا لا
       // أكثر — ولا فرقًا في شكل الجواب عمّا كانت تعيده الخانة القديمة.
       activeAnnouncementsForScreen(),
@@ -51,12 +47,6 @@ export async function GET() {
       ? "first_only"
       : "first_initial") as PrivacyMode;
     const chairs = chairCount(settings);
-
-    const waitingCount = waitingRows(visits, now).length;
-    const inTreatment = visits.filter((visit) => visit.status === "in_chair").length;
-    const doneCount = visits.filter((visit) => visit.status === "done").length;
-    const avgWait = averageWaitMinutes(visits);
-    const ortho = settings["display.show_ortho"] === "false" ? null : orthoSessionsToday(appointments, orthoPatientIds);
 
     return NextResponse.json({
       now: now.toISOString(),
@@ -88,14 +78,6 @@ export async function GET() {
         privacy,
         timeZone: CLINIC_TIME_ZONE,
       }),
-      stats: {
-        waiting: waitingCount,
-        inTreatment,
-        done: doneCount,
-        // متوسط الانتظار الفعلي اليوم — والغياب يعني «لا قياس بعد» لا صفرًا.
-        avgWaitMinutes: avgWait,
-        ortho,
-      },
       // رسالة الاعتذار يشغّلها الاستقبال بضغطة من لوحة اليوم — شريطٌ لطيف يفسّر
       // التأخير بدل أن يبقى المرضى متضايقين بلا تفسير.
       delayNotice: settings["display.delay_notice"] === "true",
