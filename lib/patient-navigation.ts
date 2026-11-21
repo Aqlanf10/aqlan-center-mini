@@ -1,7 +1,7 @@
 import { SPECIALTIES, type ServiceSpecialty } from "./appointment-services";
 
 /** Views over the existing patient record. These destinations never create clinical work. */
-export type PatientTab = "summary" | "treatment" | "today" | "account" | "files";
+export type PatientTab = "summary" | "treatment" | "today" | "account" | "prescriptions" | "files";
 export type TreatmentSubTab = "chart" | "plans" | "cases" | "endo" | "ortho" | "lab" | "referrals" | "materials";
 export type OrthoPillar = "wires" | "diagnostics" | "prescription" | "retention";
 /** Navigation references only; none of these values authorize or create clinical work. */
@@ -53,7 +53,7 @@ export function clinicalContextHref(patientId: number, context: ClinicalNavigati
   return patientLocationHref(`/patients/${patientId}`, { tab: "treatment", sub, context: { ...context, patientId } });
 }
 
-const TABS: readonly string[] = ["summary", "treatment", "today", "account", "files"];
+const TABS: readonly string[] = ["summary", "treatment", "today", "account", "prescriptions", "files"];
 const SUBTABS: Record<string, TreatmentSubTab> = {
   chart: "chart", plans: "plans", cases: "cases", endo: "endo", ortho: "ortho", ceph: "ortho",
   lab: "lab", referrals: "referrals", materials: "materials",

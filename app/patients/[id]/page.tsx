@@ -51,6 +51,7 @@ import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
 import { PatientAppointmentsPanel } from "@/components/patient/PatientAppointmentsPanel";
+import { canShowPrescriptionHistory, PatientPrescriptionHistory, usePatientPrescriptionHistory } from "@/components/patient/PatientPrescriptionHistory";
 import { SummaryTab, type WorkflowSummary } from "@/components/patient/SummaryTab";
 import { TodayVisitTab } from "@/components/patient/TodayVisitTab";
 import { readCheckoutVisitRequest, type CheckoutVisitRequest } from "@/lib/checkout-visit-request";
@@ -80,9 +81,9 @@ interface PatientFile {
 /**
  * ملف المريض — رحلةٌ واحدة لا دليلُ تبويبات (المواصفة §٣-٥).
  *
- * خمسة تبويبات فقط: **الملخص** (ما المطلوب الآن؟)، **العلاج** (المخطط والخطة
+ * تبويبات الملف: **الملخص** (ما المطلوب الآن؟)، **العلاج** (المخطط والخطة
  * والتقويم والمعمل)، **زيارة اليوم** (مساحة الطبيب)، **الحساب** (الرصيد
- * والحركات)، **الأشعة والملفات** (الأشعة والمستندات والسيفالو). وكل ما كان تبويبًا
+ * والحركات)، **الوصفات الطبية** (الوصفات المحفوظة)، و**الأشعة والملفات** (الأشعة والمستندات والسيفالو). وكل ما كان تبويبًا
  * مستقلًّا — المواعيد، الزيارات القديمة، المستهلكات — يظهر داخل مكانه الطبيعي.
  *
  * التقويم والأشعة دائمان في الظهور: التقويم قسمٌ ثابت في «العلاج» يعرض زر
@@ -100,6 +101,7 @@ const TABS: [Tab, string, string][] = [
   ["treatment", "العلاج", "🦷"],
   ["today", "زيارة اليوم", "🪑"],
   ["account", "الحساب", "💳"],
+  ["prescriptions", "الوصفات الطبية", "℞"],
   ["files", "الأشعة والملفات", "🗂️"],
 ];
 
@@ -217,6 +219,11 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const contextRequest = useRef(0);
   const tab = location.tab;
   const treatmentSubTab = location.sub;
+  const canViewPrescriptionHistory = canShowPrescriptionHistory(session?.role);
+  const prescriptionHistory = usePatientPrescriptionHistory(
+    canViewPrescriptionHistory && (tab === "summary" || tab === "prescriptions") ? file?.patient.id ?? null : null,
+    alertScope,
+  );
   const compactWorkspace = tab === "today" || tab === "treatment" || tab === "account";
   const endoDraft = useRef(false);
   const endoLeaveGuard = useRef<(() => boolean) | null>(null);
@@ -1073,9 +1080,10 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         patientPhone={patient.phone}
       />
 
-      {/* خمسة تبويبات لا أحد عشر */}
+      {/* تبويبات داخل ملف المريض */}
       <div className={`${compactWorkspace ? "mb-2 flex-nowrap overflow-x-auto gap-1" : "mb-4 flex-wrap gap-1.5"} flex items-center border-b border-slate-200 pb-2`} aria-label="أقسام ملف المريض">
         {TABS.map(([key, title, icon]) => {
+          if (key === "prescriptions" && !canViewPrescriptionHistory) return null;
           const isSelected = tab === key;
           const badge =
             key === "today" && summary?.openVisit ? " ●" : "";
@@ -1115,6 +1123,11 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         </p>
       ) : null}
       {tab === "summary" ? <PatientAppointmentsPanel patientId={patient.id} /> : null}
+      {tab === "summary" && canViewPrescriptionHistory ? (
+        <div className="mb-4">
+          <PatientPrescriptionHistory patientId={patient.id} {...prescriptionHistory} openHistory={() => setTab("prescriptions")} />
+        </div>
+      ) : null}
       {/* محتوى التبويب — كل وحدة تحمّل بياناتها عند فتحها (§٤٨) */}
       {contextNavigationError ? <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">{contextNavigationError}</p> : null}
       {!clinicalContext.ready && (tab === "treatment" || tab === "today") ? (
@@ -1371,6 +1384,9 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
 
           <LegacyHistory patientId={patient.id} />
         </>
+      ) : tab === "prescriptions" ? (
+        canViewPrescriptionHistory ? <PatientPrescriptionHistory patientId={patient.id} {...prescriptionHistory} />
+          : <p role="alert" className="rounded-xl border border-slate-200 bg-white p-4 text-sm">تعذّر الوصول إلى الوصفات المحفوظة.</p>
       ) : (
         <div className="space-y-4">
           <section aria-label="الأشعة والمستندات">
