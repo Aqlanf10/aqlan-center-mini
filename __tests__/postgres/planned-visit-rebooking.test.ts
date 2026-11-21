@@ -213,7 +213,12 @@ it.each(["done_item","cancelled_item","item_timestamp","item_visit","cross_patie
     if(evidence === "cross_patient_plan") await q("UPDATE planned_visits SET plan_id=$2 WHERE id=$1",[f.planned,other.plan]);
     else await q("UPDATE treatment_sessions SET plan_item_id=$2,sequence=2 WHERE planned_visit_id=$1",[f.planned,other.item]);
   }
-  expect((await db.listPatientPlannedVisits(f.patient))[0].canRebook).toBe(false);
+  const projected = (await db.listPatientPlannedVisits(f.patient)).find(row => row.id === f.planned);
+  if (evidence === "cross_patient_plan" || evidence === "cross_patient_session") {
+    expect(projected).toBeUndefined(); // Do not include any part of a cross-patient projection.
+  } else {
+    expect(projected?.canRebook).toBe(false); // Own historical evidence still appears but blocks rebooking.
+  }
   expect(await rebookPlannedVisit(f.input,reception)).toMatchObject({ok:false,status:409});await assertNoReplacement(f);
 });
 it.each(["treatment_plans","plan_items","treatment_sessions"])("fails closed without deadlock while %s is being changed",async table=>{

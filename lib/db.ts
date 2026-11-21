@@ -17227,6 +17227,7 @@ async function visitSuggestionsFor(
             (SELECT p.primary_doctor_id FROM patients p WHERE p.id = $2::int) AS primary_doctor,
             (SELECT d.id FROM parties d WHERE d.id = $3::int AND d.kind = 'doctor' AND d.is_active) AS actor_doctor
        FROM visits v LEFT JOIN appointments a ON a.id = v.appointment_id
+        AND a.patient_id = v.patient_id AND a.patient_id = $2::int
       WHERE v.id = $1`,
     [visitId, patientId, actorPartyId],
   );
@@ -17234,9 +17235,11 @@ async function visitSuggestionsFor(
   const { rows: [next] } = patientId ? await pool.query<{ title: string; after_days: number | null }>(
     `SELECT nv.title, nv.after_days
        FROM planned_visits nv
-       LEFT JOIN visits cur ON cur.id = $1
+       LEFT JOIN visits cur ON cur.id = $1 AND cur.patient_id = nv.patient_id
        LEFT JOIN planned_visits pv ON pv.id = cur.planned_visit_id
+         AND pv.patient_id = cur.patient_id AND ${plannedVisitReadScopeSql("pv")}
       WHERE nv.patient_id = $2 AND nv.status IN ('planned', 'scheduled')
+        AND ${plannedVisitReadScopeSql("nv")}
         AND nv.id IS DISTINCT FROM pv.id
         AND (pv.id IS NULL OR nv.plan_id IS DISTINCT FROM pv.plan_id OR nv.sequence > pv.sequence)
         AND (nv.plan_id IS NULL OR EXISTS (SELECT 1 FROM treatment_plans t WHERE t.id = nv.plan_id AND t.status = 'active'))
@@ -17583,10 +17586,11 @@ async function visitWorkflowContext(
   }>(
     `SELECT v.id, v.title, v.sequence, v.doctor_id, v.duration_minutes, t.title AS plan_title
        FROM visits cur
-       JOIN planned_visits v ON v.id = cur.planned_visit_id
+       JOIN planned_visits v ON v.id = cur.planned_visit_id AND v.patient_id = cur.patient_id
        LEFT JOIN treatment_plans t ON t.id = v.plan_id
-      WHERE cur.id = $1`,
-    [visitId],
+      WHERE cur.id = $1 AND cur.patient_id = $2
+        AND ${plannedVisitReadScopeSql("v")}`,
+    [visitId, patientId],
   );
   const plannedVisit = plannedRows[0]
     ? {
@@ -21475,6 +21479,36 @@ interface PlannedVisitRow {
   visit_id: number | null; note: string | null; created_at: Date;
 }
 
+/** Projection only: each independent FK can resolve to a different patient's row.
+ * Keep absent optional links and same-patient history, but do not expose a
+ * planned visit assembled from incompatible identities. Do not use this to
+ * authorize scheduling or writes. Aliases are fixed at our SQL call sites. */
+function plannedVisitReadScopeSql(v: "v" | "pv" | "nv"): string {
+  return `(${v}.plan_id IS NULL OR EXISTS (
+      SELECT 1 FROM treatment_plans owned_plan
+       WHERE owned_plan.id = ${v}.plan_id AND owned_plan.patient_id = ${v}.patient_id
+    ))
+    AND (${v}.appointment_id IS NULL OR EXISTS (
+      SELECT 1 FROM appointments owned_appointment
+      LEFT JOIN patient_referrals owned_referral ON owned_referral.id = owned_appointment.referral_id
+       WHERE owned_appointment.id = ${v}.appointment_id AND owned_appointment.patient_id = ${v}.patient_id
+         AND (owned_appointment.referral_id IS NULL OR owned_referral.patient_id = ${v}.patient_id)
+    ))
+    AND (${v}.visit_id IS NULL OR EXISTS (
+      SELECT 1 FROM visits owned_visit
+       WHERE owned_visit.id = ${v}.visit_id AND owned_visit.patient_id = ${v}.patient_id
+    ))
+    AND NOT EXISTS (
+      SELECT 1 FROM treatment_sessions scoped_session
+      LEFT JOIN plan_items session_item ON session_item.id = scoped_session.plan_item_id
+      LEFT JOIN treatment_plans session_plan ON session_plan.id = session_item.plan_id
+      LEFT JOIN visits session_visit ON session_visit.id = scoped_session.visit_id
+       WHERE scoped_session.planned_visit_id = ${v}.id
+         AND (session_plan.patient_id IS DISTINCT FROM ${v}.patient_id
+           OR (scoped_session.visit_id IS NOT NULL AND session_visit.patient_id IS DISTINCT FROM ${v}.patient_id))
+    )`;
+}
+
 const PLANNED_VISIT_SELECT = `
   SELECT v.id, v.patient_id, v.plan_id, t.title AS plan_title, v.sequence, v.title, v.doctor_id,
          d.name AS doctor_name, v.duration_minutes, v.status, v.appointment_id,
@@ -21512,6 +21546,7 @@ export async function listPatientPlannedVisits(patientId: number): Promise<Plann
   const { rows } = await getPool().query<PlannedVisitRow>(
     `${PLANNED_VISIT_SELECT}
       WHERE v.patient_id = $1 AND v.status NOT IN ('completed', 'cancelled')
+        AND ${plannedVisitReadScopeSql("v")}
       ORDER BY v.status = 'in_progress' DESC, v.sequence, v.id`,
     [patientId],
   );
@@ -21855,6 +21890,7 @@ export async function patientWorkflow(patientId: number, today: string): Promise
              يُفوتر مهما قدُمت، وإخفاؤها بعد يومين يعيد العطل نفسه. الجارية تتقدّم، ثم الأحدث. */
           `SELECT v.id, v.status, v.chair, v.arrived_at, pv.title AS planned_title
              FROM visits v LEFT JOIN planned_visits pv ON pv.id = v.planned_visit_id
+               AND pv.patient_id = v.patient_id AND ${plannedVisitReadScopeSql("pv")}
             WHERE v.patient_id = $1 AND v.signed_at IS NULL
             ORDER BY (v.status = 'done'), v.arrived_at DESC LIMIT 1`,
           [patientId],
