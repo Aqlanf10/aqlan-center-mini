@@ -1,32 +1,24 @@
 import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
-import { getPatient, getPrescription, getSettingsSafe } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getPatient, getPrescription, getSettingsSafe } from "@/lib/db";
 import { canAccessPatient } from "@/lib/patient-access";
 import { isAdmin } from "@/lib/roles";
-import { sanitizeRxItems } from "@/lib/prescription";
 import { ageFromBirthYear, ageText, GENDER_LABEL } from "@/lib/patient";
 import { friendlyDateLong } from "@/lib/reminders";
+import { clinicDateString } from "@/lib/schedule";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
+import { LEGACY_RX_DRAFT_KEYS } from "@/lib/prescription-print-query";
 
 export const dynamic = "force-dynamic";
 
-interface RxItem {
-  name: string;
-  dose?: string; // 500mg, 1g
-  form?: string; // Tablets, Capsules, Syrup, Mouthwash, Ointment — English
-  frequency?: string; // 1 tablet every 8 hours — English
-  duration?: string; // 5 days — English
-  instructions?: string; // تعليمات المريض بالعربية
-  instructionsEn?: string; // patient instructions in English
-}
+const MAX_DATABASE_ID = 2147483647;
 
-type InstructionsLang = "both" | "ar" | "en";
-
-function parseInstructionsLang(value: string | undefined): InstructionsLang {
-  if (value === "ar" || value === "en") return value;
-  return "both";
+function savedId(value: unknown): number | null {
+  if (typeof value !== "string" || !/^[1-9][0-9]{0,9}$/.test(value)) return null;
+  const id = Number(value);
+  return id <= MAX_DATABASE_ID ? id : null;
 }
 
 /**
@@ -43,81 +35,37 @@ export default async function PrescriptionPrintPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{
-    diagnosis?: string;
-    items?: string;
-    notes?: string;
-    date?: string;
-    lang?: string;
-    /** رقم وصفةٍ محفوظة (من مستودع الوكيل الآخر) — طباعة الوثيقة كما صدرت. */
-    rx?: string;
-    /** وضع المسودة: معاينة غير معتمدة بعلامة مائية — ليست وصفة صرف. */
-    draft?: string;
-  }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const session = await requireSession();
   if (!session) notFound();
 
-  /* وثيقة سريرية رسمية: مستخدمٌ سريري (طبيب، أو مدير) لا استقبال — ومن يفتحها
-     يملك المريض (P0.9): الطبيب A لا يطبع وصفة مريض الطبيب B. */
+  /* Saved prescriptions are clinical documents: existing doctor/admin access
+     and the patient's own scope still apply. */
   if (!isAdmin(session.role) && session.role !== "doctor") notFound();
 
-  const { id: rawId } = await params;
-  const patientId = Number(rawId);
-  if (!Number.isInteger(patientId) || patientId <= 0) notFound();
-
-  const sParams = await searchParams;
+  const patientId = savedId((await params).id);
+  const query = await searchParams;
+  const prescriptionId = savedId(query.rx);
+  // Reject the presence of private legacy draft fields even alongside a real
+  // saved ID. Empty or repeated fields are not an alternate official transport.
+  if (patientId === null || prescriptionId === null
+    || LEGACY_RX_DRAFT_KEYS.some(key => Object.hasOwn(query, key))) notFound();
 
   if (!(await canAccessPatient(session, patientId).catch(() => false))) notFound();
+  const stored = await getPrescription(prescriptionId);
+  if (!stored || stored.id !== prescriptionId || stored.patientId !== patientId) notFound();
 
-  const [patient, settings] = await Promise.all([
-    getPatient(patientId),
-    getSettingsSafe(),
-  ]);
+  const [patient, settings] = await Promise.all([getPatient(patientId), getSettingsSafe()]);
+  if (!patient || patient.id !== patientId) notFound();
 
-  if (!patient) notFound();
-
-  /* الوصفة المحفوظة (من مستودع الوكيل الآخر): تُطبَع من السجل كما صدرت —
-   * فما طُبِع يُخزّن كما طُبِع، والإبطال وحده يغيّر شيئًا (بسببٍ موثّق). */
-  const storedRx = Number(sParams.rx);
-  const stored = Number.isInteger(storedRx) && storedRx > 0
-    ? await getPrescription(storedRx) : null;
-  if (sParams.rx && !stored) notFound();
-  if (stored && stored.patientId !== patientId) notFound();
-
-  /* الوثيقة الرسمية تُطبع من السجل المحفوظ كما صدرت — وما لم يُحفظ فلا وصفة:
-   * صفحةٌ بلا وصفةٍ محفوظة لا تطبع أدوية «مثالًا» لم يصفها أحد (P0.9)، ولا
-   * يُطبع اسم طبيبٍ من معاملات الرابط. المسودة المعزولة (?draft=1) وحدها
-   * تعرض بياناتٍ مرسلة — منقّاة، وبعلامة «غير معتمدة» لا تصرف بها صيدلية. */
-  const isDraftMode = !stored && sParams.draft === "1" && typeof sParams.items === "string";
-
-  let rxItems: RxItem[] = [];
-  if (stored) {
-    rxItems = stored.items;
-  } else if (isDraftMode) {
-    try {
-      rxItems = sanitizeRxItems(JSON.parse(decodeURIComponent(sParams.items!)));
-    } catch {
-      rxItems = [];
-    }
-  }
-  if (!stored && !isDraftMode) notFound(); // لا وصفة محفوظة ولا مسودة معلنة: لا ورقة
-  if (isDraftMode && rxItems.length === 0) notFound(); // مسودة بلا أدوية صالحة: لا ورقة
-
-  const lang = parseInstructionsLang(stored ? stored.instructionsLang : sParams.lang);
-  const diagnosisText = stored ? stored.diagnosis : isDraftMode ? sParams.diagnosis : null;
-  const notesText = stored ? stored.notes : isDraftMode ? sParams.notes : null;
-  const now = new Date();
-  const dateStr = stored
-    ? stored.createdAt.slice(0, 10)
-    : isDraftMode
-      ? sParams.date || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
-      : `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const { items: rxItems, instructionsLang: lang, diagnosis: diagnosisText, notes: notesText } = stored;
+  const dateStr = clinicDateString(new Date(stored.createdAt), CLINIC_TIME_ZONE);
   const age = ageFromBirthYear(patient.birthYear, dateStr);
 
   return (
     <>
-      {stored ? <PrintButton docType="prescription" docId={stored.id} /> : null}
+      <PrintButton docType="prescription" docId={stored.id} />
       <div className="sheet sheet-a5">
         <PrintHeader settings={settings} title="وصفة طبية (روشتة)" compact />
 
@@ -161,24 +109,7 @@ export default async function PrescriptionPrintPage({
           </div>
         ) : null}
 
-        {/* التشخيص إن وُجد */}
-        {isDraftMode ? (
-          <div style={{
-            border: "2px dashed #b45309",
-            backgroundColor: "#fffbeb",
-            color: "#92400e",
-            padding: "2mm 3mm",
-            borderRadius: "2mm",
-            fontSize: "10pt",
-            fontWeight: 900,
-            textAlign: "center",
-            marginTop: "2mm",
-          }}>
-            مسودة غير معتمدة — لا تُصرف من الصيدلية · UNAPPROVED DRAFT
-          </div>
-        ) : null}
-
-        {stored?.status === "void" ? (
+        {stored.status === "void" ? (
           <div style={{
             border: "2px solid #b91c1c",
             backgroundColor: "#fef2f2",
@@ -295,7 +226,7 @@ export default async function PrescriptionPrintPage({
           <div>
             <div style={{ fontSize: "8pt", color: "#64748b" }}>الطبيب المعالج · <span dir="ltr">Physician</span></div>
             <div style={{ fontWeight: 800, fontSize: "9pt", marginTop: "1mm" }}>
-              {stored ? stored.createdBy : session.username}
+              <bdi>{stored.prescribingDoctorName || "اسم الطبيب غير موثق في الوصفة المحفوظة"}</bdi>
             </div>
             <div style={{ fontSize: "7.5pt", color: "#94a3b8" }}>طب وجراحة الفم والأسنان · <span dir="ltr">Oral Medicine &amp; Dental Surgery</span></div>
           </div>

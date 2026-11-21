@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { recordAudit, recordPrint } from "@/lib/db";
+import { getPrescription, recordAudit, recordPrint } from "@/lib/db";
+import { canAccessPatient } from "@/lib/patient-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
   }
   const source = (body ?? {}) as Record<string, unknown>;
   const docType = String(source.docType ?? "");
-  const docId = String(source.docId ?? "");
+  let docId = String(source.docId ?? "");
   if (!(DOC_TYPES as readonly string[]).includes(docType) || !docId) {
     return NextResponse.json({ message: "مستند غير معروف." }, { status: 400 });
   }
@@ -38,6 +39,17 @@ export async function POST(request: Request) {
     if (!isAdmin(session.role) && session.role !== "doctor") {
       return NextResponse.json({ message: "طباعة الوصفات للطبيب والمدير." }, { status: 403 });
     }
+    // The log must be scoped to the same saved patient document as the print
+    // page. Logging is neither issuance nor a record of dispensing medication.
+    const rxId = Number(docId);
+    if (!/^\d+$/.test(docId) || !Number.isSafeInteger(rxId) || rxId <= 0) {
+      return NextResponse.json({ message: "رقم الوصفة غير صالح." }, { status: 400 });
+    }
+    const saved = await getPrescription(rxId).catch(() => null);
+    if (!saved || !await canAccessPatient(session, saved.patientId).catch(() => false)) {
+      return NextResponse.json({ message: "الوصفة غير موجودة." }, { status: 404 });
+    }
+    docId = String(saved.id);
   } else if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "المستندات المالية للإدارة والاستقبال." }, { status: 403 });
   }

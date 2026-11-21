@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   savePrescription: vi.fn(),
   voidPrescription: vi.fn(),
   getSettingsSafe: vi.fn(),
+  recordPrint: vi.fn(),
+  recordAudit: vi.fn(),
 }));
 
 vi.mock("@/lib/session", () => ({ requireSession: mocks.requireSession }));
@@ -30,12 +32,15 @@ vi.mock("@/lib/db", async (importOriginal) => {
     savePrescription: mocks.savePrescription,
     voidPrescription: mocks.voidPrescription,
     getSettingsSafe: mocks.getSettingsSafe,
+    recordPrint: mocks.recordPrint,
+    recordAudit: mocks.recordAudit,
   };
 });
 
 import PrescriptionPrintPage from "../app/print/prescription/[id]/page";
 import { POST as createPrescription } from "../app/api/prescriptions/route";
 import { POST as voidPrescription } from "../app/api/prescriptions/[id]/void/route";
+import { POST as registerPrint } from "../app/api/print-log/route";
 
 const DOCTOR_SESSION = { userId: 2, username: "dr.amjad", role: "doctor", partyId: 5 };
 
@@ -69,11 +74,13 @@ beforeEach(() => {
   });
   mocks.getSettingsSafe.mockResolvedValue({});
   mocks.getPrescription.mockResolvedValue(null);
+  mocks.recordPrint.mockResolvedValue(0);
+  mocks.recordAudit.mockResolvedValue(undefined);
 });
 
-function pageProps(search: Record<string, string | undefined> = {}) {
+function pageProps(search: Record<string, string | string[] | undefined> = {}, patientId = "42") {
   return {
-    params: Promise.resolve({ id: "42" }),
+    params: Promise.resolve({ id: patientId }),
     searchParams: Promise.resolve(search),
   };
 }
@@ -99,6 +106,42 @@ describe("صفحة طباعة الوصفة (P0.9)", () => {
     ).rejects.toThrow();
   });
 
+  it.each(["draft", "items", "diagnosis", "notes"])("refuses private print keys before any lookup: %s", async (key) => {
+    mocks.getPrescription.mockResolvedValue(STORED_RX);
+    for (const value of ["", "SYNTHETIC-DRAFT-ONLY", ["", "SYNTHETIC-DRAFT-REPEAT"]]) {
+      await expect(PrescriptionPrintPage(pageProps({ rx: "311", [key]: value }))).rejects.toThrow();
+    }
+    expect(mocks.canAccessPatient).not.toHaveBeenCalled();
+    expect(mocks.getPatient).not.toHaveBeenCalled();
+    expect(mocks.getPrescription).not.toHaveBeenCalled();
+    expect(mocks.getSettingsSafe).not.toHaveBeenCalled();
+  });
+
+  it("refuses private legacy draft render even for an authorized patient", async () => {
+    await expect(PrescriptionPrintPage(pageProps({
+      draft: "1", items: JSON.stringify([{ name: "Synthetic forbidden draft only" }]), diagnosis: "SYNTHETIC-NOT-OFFICIAL",
+    }))).rejects.toThrow();
+    expect(mocks.getPatient).not.toHaveBeenCalled();
+    expect(mocks.getPrescription).not.toHaveBeenCalled();
+    expect(mocks.recordPrint).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "", ["311"], ["311", "311"], "3.11e2", "0311", " 311 ", "2147483648", "0", "-311"].map(rx => ({ rx })))(
+    "refuses missing or noncanonical print Rx reference before lookup: $rx", async ({ rx }) => {
+      mocks.getPrescription.mockResolvedValue(STORED_RX);
+      await expect(PrescriptionPrintPage(pageProps({ rx }))).rejects.toThrow();
+      expect(mocks.getPatient).not.toHaveBeenCalled();
+      expect(mocks.getPrescription).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses ambiguous patient id before access or record lookup", async () => {
+    mocks.getPrescription.mockResolvedValue(STORED_RX);
+    await expect(PrescriptionPrintPage(pageProps({ rx: "311" }, "4.2e1"))).rejects.toThrow();
+    expect(mocks.canAccessPatient).not.toHaveBeenCalled();
+    expect(mocks.getPrescription).not.toHaveBeenCalled();
+  });
+
   it("وصفة محفوظة لمريض آخر: 404", async () => {
     mocks.getPrescription.mockResolvedValue({ ...STORED_RX, patientId: 77 });
     await expect(PrescriptionPrintPage(pageProps({ rx: "311" }))).rejects.toThrow();
@@ -120,12 +163,10 @@ describe("صفحة طباعة الوصفة (P0.9)", () => {
     expect(result).toBeDefined();
   });
 
-  it("اسم الطبيب من الرابط لا يعود في الواجهة — الوثيقة تحمل createdBy المخزّن", async () => {
+  it("اسم الطبيب من الرابط لا يعود في الواجهة", async () => {
     mocks.getPrescription.mockResolvedValue(STORED_RX);
     const result = await PrescriptionPrintPage(pageProps({ rx: "311", doctorName: "د. مزوّر تمامًا" }));
-    /* الصفحة نفسها لم تعد تقرأ doctorName من الرابط أصلًا (حُذف من النوع)،
-       والمطبوع يحمل createdBy = dr.amjad. الاختبار يضمن عدم انفجار الصفحة،
-       والاسم المخزن مضمون بالتنفيذ أعلاه (لا مسار آخر للاسم). */
+    /* Dedicated SSR assertions in unified-print-non-table cover snapshot attribution. */
     expect(result).toBeDefined();
   });
 });
@@ -776,5 +817,48 @@ describe("الإقرار مربوط بالتحذيرات التي رآها ال�
     const payload = await response.json();
     expect(payload.ackRejected).toBe(true);
     expect(mocks.savePrescription).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("saved prescription print logging preserves patient scope", () => {
+  const request = (docId: string | number) => new Request("http://localhost/api/print-log", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ docType: "prescription", docId }),
+  });
+
+  it("does not record or audit a colleague's out-of-scope saved document", async () => {
+    mocks.getPrescription.mockResolvedValue({ ...STORED_RX, patientId: 77 });
+    mocks.canAccessPatient.mockResolvedValue(false);
+    expect((await registerPrint(request(311))).status).toBe(404);
+    expect(mocks.canAccessPatient).toHaveBeenCalledWith(DOCTOR_SESSION, 77);
+    expect(mocks.recordPrint).not.toHaveBeenCalled();
+    expect(mocks.recordAudit).not.toHaveBeenCalled();
+  });
+
+  it("does not log a missing or malformed saved document", async () => {
+    expect((await registerPrint(request(311))).status).toBe(404);
+    expect((await registerPrint(request("malformed"))).status).toBe(400);
+    expect(mocks.recordPrint).not.toHaveBeenCalled();
+  });
+
+  it("logs a saved in-scope prescription without any prescription mutation", async () => {
+    mocks.getPrescription.mockResolvedValue(STORED_RX);
+    mocks.recordPrint.mockResolvedValue(1);
+    const response = await registerPrint(request(311));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ reprint: true, previous: 1 });
+    expect(mocks.canAccessPatient).toHaveBeenCalledWith(DOCTOR_SESSION, STORED_RX.patientId);
+    expect(mocks.recordPrint).toHaveBeenCalledWith({ docType: "prescription", docId: "311", printedBy: DOCTOR_SESSION.username });
+    expect(mocks.recordAudit).toHaveBeenCalledWith(expect.objectContaining({ action: "document.reprint", entity: "prescription" }));
+    expect(mocks.savePrescription).not.toHaveBeenCalled();
+    expect(mocks.voidPrescription).not.toHaveBeenCalled();
+  });
+
+  it("retains reception denial for saved logs and does not reach the stored row", async () => {
+    mocks.requireSession.mockResolvedValue({ userId: 3, username: "synthetic-reception", role: "reception" });
+    expect((await registerPrint(request(311))).status).toBe(403);
+    expect(mocks.getPrescription).not.toHaveBeenCalled();
+    expect(mocks.recordPrint).not.toHaveBeenCalled();
   });
 });
