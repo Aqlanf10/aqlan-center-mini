@@ -103,6 +103,7 @@ vi.mock("react", async (original) => {
 import PatientFilePage from "../app/patients/[id]/page";
 import { AssessmentBanner } from "../components/AssessmentBanner";
 import { LegacyCaseBanner } from "../components/LegacyCaseBanner";
+import { PatientPrescriptionHistory } from "../components/patient/PatientPrescriptionHistory";
 
 type Element = ReactElement<Record<string, unknown>>;
 type Reply = { ok: boolean; status: number; json: () => Promise<unknown> };
@@ -194,14 +195,18 @@ const workflow = (patientId = 7, title = "Accepted assessment title") => ({
   assessmentCases: [{ id: 12, patientId, kind: "specialty", orthoCaseId: null,
     specialty: "endodontics", title, needsAssessment: true }], legacyCases: [],
 });
-function seedFetch(patientId = 7, projection: unknown = workflow(patientId)) {
+function seedFetch(patientId = 7, projection: unknown = workflow(patientId), initialFile = reply(patientFile(patientId))) {
   const fetcher = vi.fn<(url: string, options?: RequestInit) => Promise<Reply>>()
     .mockRejectedValue(new Error("Unexpected page-owner request"))
-    .mockResolvedValueOnce(reply(patientFile(patientId))).mockResolvedValueOnce(reply(projection));
+    .mockResolvedValueOnce(initialFile).mockResolvedValueOnce(reply(projection));
   vi.stubGlobal("fetch", fetcher);
   return fetcher;
 }
 const urls = (fetcher: ReturnType<typeof seedFetch>) => fetcher.mock.calls.map(([url]) => url);
+const savedPrescriptions = reply({
+  prescriptions: [{ id: 90201, patientId: 7, status: "active", createdAt: "2031-01-04T23:00:00.000Z", items: [] }],
+  suggestions: [],
+});
 
 beforeEach(() => {
   runtime.frame = null;
@@ -216,7 +221,8 @@ afterEach(() => {
 
 describe("real patient page workflow owner", () => {
   it("retains the verified workflow clinic calendar in the Summary props", async () => {
-    seedFetch(7, { ...workflow(), today: "2026-10-23", timeZone: "Pacific/Kiritimati" });
+    seedFetch(7, { ...workflow(), today: "2026-10-23", timeZone: "Pacific/Kiritimati" })
+      .mockResolvedValueOnce(savedPrescriptions);
     const view = mountPage(7, "?tab=summary"); await flush();
     expect(child(view.render(), "mock-summary").props.summary).toMatchObject({
       today: "2026-10-23", timeZone: "Pacific/Kiritimati",
@@ -350,9 +356,16 @@ describe("real patient page workflow owner", () => {
   });
 
   it("retains the summary editor subtree hidden and inert during an ordinary failed refresh", async () => {
-    const fetcher = seedFetch();
+    const fetcher = seedFetch().mockResolvedValueOnce(savedPrescriptions);
     const view = mountPage(7, "?tab=summary"); await flush();
-    const accepted = child(view.render(), "mock-summary");
+    view.render(); await flush();
+    const initial = view.render();
+    const accepted = child(initial, "mock-summary");
+    const rxCard = (tree: ReactNode) => elements(tree).find((node) => node.type === PatientPrescriptionHistory);
+    expect(rxCard(initial)?.props.history).toMatchObject({ kind: "loaded", rows: [{ id: 90201, status: "active" }] });
+    const initialUrls = ["/api/patients/7", "/api/patients/7/workflow", "/api/patients/7/prescriptions"];
+    expect(urls(fetcher)).toEqual(initialUrls);
+    expect(fetcher.mock.calls[2][1]).toMatchObject({ method: "GET", cache: "no-store", signal: expect.any(AbortSignal) });
     const retained = accepted.props.summary;
     const isCurrent = accepted.props.workflowIsCurrent as () => boolean;
     expect(isCurrent()).toBe(true);
@@ -372,11 +385,24 @@ describe("real patient page workflow owner", () => {
         && node.props.hidden === true && node.props.inert === true
         && elements(node.props.children as ReactNode).some((one) => one.type === "mock-summary"));
       expect(wrapper).toBeDefined();
+      // This independent scoped card is not part of the retained workflow editor.
+      expect(rxCard(wrapper)).toBeUndefined();
+      expect(rxCard(tree)?.props.history).toBe(rxCard(initial)?.props.history);
     };
     checkRetained(view.render());
     pending.resolve(reply({}, 500)); await flush();
     checkRetained(view.render());
-    expect(urls(fetcher)).toEqual(["/api/patients/7", "/api/patients/7/workflow", "/api/patients/7/workflow"]);
+    // Focus refresh re-reads the workflow only, even after its ordinary failure.
+    expect(urls(fetcher)).toEqual([...initialUrls, "/api/patients/7/workflow"]);
+  });
+
+  it("does not mount or read saved prescriptions on Summary when the initial chart cannot be loaded", async () => {
+    const fetcher = seedFetch(7, workflow(), reply({}, 500));
+    const view = mountPage(7, "?tab=summary"); await flush();
+    const unavailable = view.render();
+    expect(hasFile(unavailable)).toBe(false);
+    expect(elements(unavailable).some((node) => node.type === PatientPrescriptionHistory)).toBe(false);
+    expect(urls(fetcher)).toEqual(["/api/patients/7", "/api/patients/7/workflow"]);
   });
 
   it("retires the file at current denial headers and cannot restore it from an older successful body", async () => {
