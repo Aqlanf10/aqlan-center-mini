@@ -210,18 +210,39 @@ describe("زيارات الطابور", () => {
 
   /* وطابورُ الصالة يبقى مشتركًا: زيارةٌ بلا ملفّ ليست ملكًا لطبيب. */
   it("وزيارةٌ غير مربوطة بملفّ يعمل عليها الطاقم — الصالة مشتركة", async () => {
-    const created = await authedMutation(
-      "/api/visits", h.sessions.reception, "POST",
-      JSON.stringify({ patientName: "مريض الطابور المشترك" }),
-    );
-    const walkIn = await created.json().catch(() => null);
-    expect(typeof walkIn?.id).toBe("number");
+    // Configure this serial test's room range explicitly, independent of other suites.
+    const capacity = 20;
+    const { rows: [prior] } = await db.query<{ value: string }>("SELECT value FROM settings WHERE key='clinic.chairs'");
+    await db.query(`INSERT INTO settings(key,value) VALUES ('clinic.chairs',$1)
+                    ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, [String(capacity)]);
+    let fixtureVisitId: number | undefined;
+    try {
+      const { rows: [slot] } = await db.query<{ chair: number }>(
+        `SELECT chair FROM generate_series(1,$1::int) AS slots(chair)
+         WHERE NOT EXISTS (SELECT 1 FROM visits v WHERE v.chair=slots.chair AND v.status IN ('called','in_chair'))
+         ORDER BY chair DESC LIMIT 1`, [capacity]);
+      if (!slot) throw new Error("No unoccupied synthetic chair for shared-queue test");
+      const created = await authedMutation(
+        "/api/visits", h.sessions.reception, "POST",
+        JSON.stringify({ patientName: "مريض الطابور المشترك" }),
+      );
+      const walkIn = await created.json().catch(() => null);
+      expect(typeof walkIn?.id).toBe("number");
 
-    const response = await authedMutation(
-      `/api/visits/${walkIn.id}`, h.sessions.doctorA, "PATCH",
-      JSON.stringify({ action: "seat", chair: 3 }),
-    );
-    expect([200, 409]).toContain(response.status);
+      fixtureVisitId = walkIn.id;
+      const response = await authedMutation(
+        `/api/visits/${walkIn.id}`, h.sessions.doctorA, "PATCH",
+        JSON.stringify({ action: "seat", chair: slot.chair }),
+      );
+      expect([200, 409]).toContain(response.status);
+    } finally {
+      try {
+        if (fixtureVisitId) await db.query("DELETE FROM visits WHERE id=$1", [fixtureVisitId]);
+      } finally {
+        if (prior) await db.query("UPDATE settings SET value=$1 WHERE key='clinic.chairs'", [prior.value]);
+        else await db.query("DELETE FROM settings WHERE key='clinic.chairs'");
+      }
+    }
   });
 });
 

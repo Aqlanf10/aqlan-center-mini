@@ -38,10 +38,19 @@ async function setGate(on: boolean) {
                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [on ? "true" : "false"]);
 }
 
-let chairSeq = 20;
-/* قيمة «clinic.chairs» قبل الاختبار — تُعاد كما كانت في afterAll: أربعون كرسيًّا تُبقي
-   صفّ الانتظار عريضًا فيسقط اختبار عرض الهاتف الذي يليه في الجولة نفسها. */
-let originalChairs: string | null = null;
+// These suites run serially against the same synthetic HTTP database. Do not
+// displace another suite's visit to make room for our clearance exercises.
+const chairCapacity = 20;
+const fixtureKeys = ["clinic.chairs", "ops.require_clearance_before_call"];
+let priorSettings: Map<string, string> | undefined;
+async function freeChair(): Promise<number> {
+  const { rows: [row] } = await db.query<{ chair: number }>(
+    `SELECT chair FROM generate_series(1, $1::int) AS slots(chair)
+     WHERE NOT EXISTS (SELECT 1 FROM visits v WHERE v.chair=slots.chair AND v.status IN ('called','in_chair'))
+     ORDER BY chair DESC LIMIT 1`, [chairCapacity]);
+  if (!row) throw new Error("No unoccupied synthetic chair for clearance test");
+  return row.chair;
+}
 
 beforeAll(async () => {
   h = await harness();
@@ -53,18 +62,23 @@ beforeAll(async () => {
      VALUES ($1, 'مريض الجاهزية', $2, 'حساسية بنسلين') RETURNING id`,
     [`CH-${stamp}`, doctor.party_id]);
   patientId = patient.id;
-  const { rows: chairsRows } = await db.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'clinic.chairs'`);
-  originalChairs = chairsRows[0]?.value ?? null;
-  await db.query(`INSERT INTO settings (key, value) VALUES ('clinic.chairs', '40')
-                  ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
+  const { rows } = await db.query<{ key: string; value: string }>(
+    "SELECT key,value FROM settings WHERE key=ANY($1::text[])", [fixtureKeys]);
+  priorSettings = new Map(rows.map(row => [row.key, row.value]));
+  await db.query(`INSERT INTO settings(key,value) VALUES ('clinic.chairs',$1)
+                  ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value`, [String(chairCapacity)]);
 }, 120_000);
 
 afterAll(async () => {
-  await setGate(false).catch(() => {});
-  await (originalChairs === null
-    ? db.query(`DELETE FROM settings WHERE key = 'clinic.chairs'`)
-    : db.query(`UPDATE settings SET value = $1 WHERE key = 'clinic.chairs'`, [originalChairs])).catch(() => {});
-  await db?.end();
+  try {
+    if (priorSettings) {
+      for (const key of fixtureKeys) {
+        if (priorSettings.has(key)) await db.query("UPDATE settings SET value=$2 WHERE key=$1", [key, priorSettings.get(key)]);
+        else await db.query("DELETE FROM settings WHERE key=$1", [key]);
+      }
+    }
+    if (patientId) await db.query("DELETE FROM visits WHERE patient_id=$1", [patientId]);
+  } finally { await db?.end(); }
 });
 
 describe("CHAIR-1 — readiness permissions and messages", () => {
@@ -129,8 +143,8 @@ describe("CHAIR-1 — the ready-for-chair gate over HTTP", () => {
   it("setting off: an uncleared call succeeds with an Arabic warning", async () => {
     await setGate(false);
     const visitId = await newVisit();
-    chairSeq += 1;
-    const response = await patch("reception", visitId, { action: "call", chair: chairSeq });
+    const chair = await freeChair();
+    const response = await patch("reception", visitId, { action: "call", chair });
     expect(response.status).toBe(200);
     expect(String((await jsonOf(response)).warning)).toMatch(/[؀-ۿ]/);
   });
@@ -138,18 +152,18 @@ describe("CHAIR-1 — the ready-for-chair gate over HTTP", () => {
   it("setting on: refused 409 with an Arabic message and a code; an emergency with a reason passes", async () => {
     await setGate(true);
     const visitId = await newVisit();
-    chairSeq += 1;
-    const refused = await patch("reception", visitId, { action: "seat", chair: chairSeq });
+    const chair = await freeChair();
+    const refused = await patch("reception", visitId, { action: "seat", chair });
     expect(refused.status).toBe(409);
     const body = await expectCleanArabic(refused);
     expect(body.code).toBe("clearance_required");
     expect(Object.keys(body).sort()).toEqual(["code", "message"]);
 
-    const noReason = await patch("reception", visitId, { action: "seat", chair: chairSeq, emergency: true, emergencyReason: "" });
+    const noReason = await patch("reception", visitId, { action: "seat", chair, emergency: true, emergencyReason: "" });
     expect(noReason.status).toBe(409);
     expect((await expectCleanArabic(noReason)).code).toBe("emergency_reason_required");
 
-    const bypass = await patch("reception", visitId, { action: "seat", chair: chairSeq, emergency: true, emergencyReason: "نزيف" });
+    const bypass = await patch("reception", visitId, { action: "seat", chair, emergency: true, emergencyReason: "نزيف" });
     expect(bypass.status).toBe(200);
     const { rows } = await db.query(`SELECT 1 FROM audit_log WHERE action = 'visit.clearance_bypass' AND entity_id = $1`, [String(visitId)]);
     expect(rows).toHaveLength(1);
