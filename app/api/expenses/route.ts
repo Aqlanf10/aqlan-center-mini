@@ -20,8 +20,10 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  /* صلاحيات الوكيل المساعد: المصروفات من «المالية المخفية» — تُفتح للطبيب
-     بتصريح المدير الصريح فقط، وللإدارة والاستقبال كما كانت. */
+  // P1: patient collection is not authority to read clinic-wide expense vouchers.
+  if (session.role === "reception") {
+    return NextResponse.json({ message: "سندات الصرف والمصروفات للإدارة المالية فقط." }, { status: 403 });
+  }
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
     if (!canDoctorViewExpenses(user?.permissions, session.role)) {
@@ -47,7 +49,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) {
+  // Reception may collect authorized patient payments, not create clinic expenses.
+  if (session.role === "reception" || !canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
 
