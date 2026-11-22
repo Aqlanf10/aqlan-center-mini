@@ -140,3 +140,79 @@ describe("outstanding debt uses one inclusive clinic-date cutoff", () => {
     } finally { querySpy.mockRestore(); connectSpy.mockRestore(); }
   });
 });
+
+describe("debt movement clips each monthly row to the selected clinic dates", () => {
+  async function movement(pid: number, from: string, to: string) {
+    const params = new URLSearchParams({ report: "debt", debtMode: "movement", preset: "custom", from, to, patientId: String(pid) });
+    return buildReport("debt", parseFilters(params));
+  }
+
+  it("reports December and January in order and reconciles movements and boundary balances by currency", async () => {
+    const pid = await patient();
+    const cases = [
+      { currency: "YER", prior: 120, december: 50, january: 10, paid: 20 },
+      { currency: "SAR", prior: 35, december: 11, january: 8, paid: 5 },
+      { currency: "USD", prior: 52, december: 9, january: 4, paid: 3 },
+    ];
+    for (const { currency, prior, december, january, paid } of cases) {
+      const old = await invoice(pid, currency, prior + 2, "2026-12-29T12:00:00+03:00");
+      await payment(pid, old, currency, 2, "2026-12-30T20:59:59.999Z");
+      const first = await invoice(pid, currency, december, "2026-12-30T21:00:00Z");
+      const collected = await payment(pid, first, currency, paid, "2026-12-31T20:59:59.999Z");
+      await payment(pid, first, currency, paid, "2026-12-31T21:00:00Z", collected);
+      await invoice(pid, currency, january, "2027-01-01T20:59:59.999Z");
+      await invoice(pid, currency, 70, "2027-01-01T21:00:00Z");
+    }
+
+    const result = await movement(pid, "2026-12-31", "2027-01-01");
+    expect(result.monthly?.rows).toHaveLength(6);
+    // Screen and print use this metadata to total flows but never balance snapshots.
+    expect(result.monthly?.columns.filter(column => column.type === "money" && column.aggregate !== "none")
+      .map(column => column.key)).toEqual(["newDebtMinor", "collectedMinor", "adjustmentsMinor"]);
+    for (const { currency, prior, december, january, paid } of cases) {
+      const minor = (value: number) => toMinor(value, currency);
+      const decClosing = prior + december - paid;
+      const janClosing = decClosing + january + paid;
+      expect(result.monthly?.rows.filter(row => row.currency === currency)).toEqual([
+        { monthLabel: "ديسمبر 2026", currency, openingMinor: minor(prior), newDebtMinor: minor(december),
+          collectedMinor: minor(paid), adjustmentsMinor: 0, closingMinor: minor(decClosing) },
+        { monthLabel: "يناير 2027", currency, openingMinor: minor(decClosing), newDebtMinor: minor(january),
+          collectedMinor: 0, adjustmentsMinor: minor(paid), closingMinor: minor(janClosing) },
+      ]);
+      const cards = Object.fromEntries(result.kpis.filter(kpi => kpi.currency === currency).map(kpi => [kpi.key, kpi.minor]));
+      const suffix = currency === "YER" ? "" : `-${currency}`;
+      expect(cards).toEqual({
+        [`opening${suffix}`]: minor(prior), [`new${suffix}`]: minor(december + january),
+        [`collected${suffix}`]: minor(paid), [`adj${suffix}`]: minor(paid), [`closing${suffix}`]: minor(janClosing),
+      });
+    }
+    expect(result.bars).toEqual([{ label: "ديسمبر 2026", minor: 150 }, { label: "يناير 2027", minor: 180 }]);
+  });
+
+  it("shows a newly recorded opening balance without inventing a movement", async () => {
+    const pid = await patient();
+    await opening(pid, "SAR", "2027-01-03", 20);
+    const result = await movement(pid, "2027-01-02", "2027-01-04");
+    expect(result.monthly?.rows).toEqual([{ monthLabel: "يناير", currency: "SAR", openingMinor: 0,
+      newDebtMinor: 0, collectedMinor: 0, adjustmentsMinor: 0, closingMinor: toMinor(20, "SAR") }]);
+    expect(result.kpis.filter(kpi => kpi.currency === "SAR").map(kpi => [kpi.key, kpi.minor]))
+      .toEqual([["closing-SAR", toMinor(20, "SAR")]]);
+    expect(result.bars).toEqual([{ label: "يناير", minor: 0 }]);
+  });
+
+  it("excludes the January 31 refund on January 1, then includes it for the full month", async () => {
+    const pid = await patient();
+    const old = await invoice(pid, "YER", 100, "2026-12-31T12:00:00+03:00");
+    const collected = await payment(pid, old, "YER", 30, "2027-01-01T12:00:00+03:00");
+    await payment(pid, old, "YER", 30, "2027-01-31T12:00:00+03:00", collected);
+
+    for (const [to, refund, closing] of [["2027-01-01", 0, 70], ["2027-01-31", 30, 100]] as const) {
+      const result = await movement(pid, "2027-01-01", to);
+      expect(result.monthly?.rows).toEqual([{ monthLabel: "يناير", currency: "YER", openingMinor: 100,
+        newDebtMinor: 0, collectedMinor: 30, adjustmentsMinor: refund, closingMinor: closing }]);
+      expect(result.kpis.find(kpi => kpi.key === "adj")?.minor).toBe(refund);
+      expect(result.kpis.find(kpi => kpi.key === "closing")?.minor).toBe(closing);
+      expect(result.bars).toEqual([{ label: "يناير", minor: closing }]);
+    }
+  });
+});
