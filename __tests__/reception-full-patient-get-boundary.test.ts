@@ -32,7 +32,7 @@ beforeEach(() => {
   deps.file.mockResolvedValue(syntheticFile);
   deps.access.mockResolvedValue(true);
   deps.read.mockResolvedValue({
-    today: "2026-11-22", appointments: [appointment()], nextCursor: null,
+    today: "2026-11-22", appointments: [{ ...appointment(), scheduledDate: "2026-11-23" }], nextCursor: null,
   });
   deps.user.mockResolvedValue({ isActive: true, partyId: 9, permissions: {} });
   deps.owns.mockResolvedValue(true);
