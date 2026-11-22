@@ -50,15 +50,21 @@ function noClinicalReads() {
 }
 
 describe("P0: reception cannot print clinical cephalometric data", () => {
-  it("blocks reception before the single-study print fetch", async () => {
-    await expect(CephPrintReportPage(single)).rejects.toThrow();
-    noClinicalReads();
-  });
+  it.each(["reception", "cashier", "accountant", "assistant"])(
+    "blocks %s before the single-study print fetch", async role => {
+      mocks.session.mockResolvedValue({ role, username: "synthetic-unprivileged" });
+      await expect(CephPrintReportPage(single)).rejects.toThrow();
+      noClinicalReads();
+    },
+  );
 
-  it("blocks reception before either comparison analysis fetch", async () => {
-    await expect(CephComparePrintPage(compare)).rejects.toThrow();
-    noClinicalReads();
-  });
+  it.each(["reception", "cashier", "accountant", "assistant"])(
+    "blocks %s before either comparison analysis fetch", async role => {
+      mocks.session.mockResolvedValue({ role, username: "synthetic-unprivileged" });
+      await expect(CephComparePrintPage(compare)).rejects.toThrow();
+      noClinicalReads();
+    },
+  );
 
   it("rejects anonymous access to both print pages without clinical reads", async () => {
     mocks.session.mockResolvedValue(null);
