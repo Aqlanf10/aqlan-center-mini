@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionPayload } from "../lib/auth";
+import { restrictedRouteAllowed } from "../lib/role-routes";
 import { parseDoctorPermissions } from "../lib/doctor-permissions";
 
 // Invoke the real handlers and body validation with synthetic data only.
 // All persistence and session boundaries are mocked; no database is opened.
 const mocks = vi.hoisted(() => ({
   session: vi.fn(), user: vi.fn(), create: vi.fn(), update: vi.fn(),
-  audit: vi.fn(), opening: vi.fn(), duplicates: vi.fn(), file: vi.fn(),
+  audit: vi.fn(), opening: vi.fn(), duplicates: vi.fn(), patient: vi.fn(), file: vi.fn(),
   owns: vi.fn(), visitToday: vi.fn(), settings: vi.fn(), locked: vi.fn(),
   search: vi.fn(), browse: vi.fn(), delete: vi.fn(),
 }));
@@ -19,6 +20,7 @@ vi.mock("@/lib/db", () => ({
   recordAudit: mocks.audit,
   setPatientOpeningBalance: mocks.opening,
   duplicateCandidates: mocks.duplicates,
+  getPatient: mocks.patient,
   getPatientFile: mocks.file,
   doctorOwnsPatient: mocks.owns,
   patientHasVisitToday: mocks.visitToday,
@@ -61,6 +63,7 @@ beforeEach(() => {
   mocks.session.mockResolvedValue(session);
   mocks.user.mockResolvedValue(currentDoctor());
   mocks.duplicates.mockResolvedValue([]);
+  mocks.patient.mockResolvedValue(patient);
   mocks.file.mockResolvedValue({ patient });
   mocks.owns.mockResolvedValue(true);
   mocks.visitToday.mockResolvedValue(true);
@@ -124,12 +127,30 @@ describe.each(cases)("$method patient write authority", ({ method, permission, s
     expect(mocks.delete).not.toHaveBeenCalled();
   });
 
-  it.each(["admin", "reception", "assistant"] as const)("preserves the existing %s role path", async (role) => {
+  it.each(["admin", "reception"] as const)("preserves the existing %s role path", async (role) => {
     mocks.session.mockResolvedValue({ ...session, role });
     mocks.user.mockRejectedValue(new Error("Doctor-only lookup must not run"));
     expect((await invoke(request(method))).status).toBe(status);
     expect(mocks.user).not.toHaveBeenCalled();
     expect(writer).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not grant the clinical assistant general patient write access", async () => {
+    const req = request(method);
+    expect(restrictedRouteAllowed("assistant", new URL(req.url).pathname, method)).toBe(false);
+    if (method === "PATCH") {
+      mocks.session.mockResolvedValue({ ...session, role: "assistant" });
+      const response = await invoke(req);
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ message: expect.any(String) });
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(req.bodyUsed).toBe(false);
+      expect(mocks.file).not.toHaveBeenCalled();
+      expect(mocks.visitToday).not.toHaveBeenCalled();
+      expect(mocks.owns).not.toHaveBeenCalled();
+      expect(mocks.user).not.toHaveBeenCalled();
+      expectNoWrites();
+    }
   });
 
   it("still rejects an absent session", async () => {
@@ -147,5 +168,87 @@ describe("PATCH patient access remains independent of edit permission", () => {
     expect((await PATCH(request("PATCH"), { params: Promise.resolve({ id: "91" }) })).status).toBe(403);
     expect(mocks.owns).toHaveBeenCalledExactlyOnceWith(7, patient.id);
     expectNoWrites();
+  });
+});
+
+describe("reception contact maintenance", () => {
+  it("saves a contact-only change and returns an administrative acknowledgement", async () => {
+    const email = "reception-edit@example.invalid";
+    const before = { ...patient, email: null, medicalAlert: "synthetic alert", note: "synthetic note", photoDocumentId: 12 };
+    mocks.session.mockResolvedValue({ ...session, role: "reception" });
+    mocks.patient.mockResolvedValue(before);
+    mocks.update.mockResolvedValue({ ...before, email });
+    const req = new Request("http://test.invalid/api/patients/91", {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ email }),
+    });
+    const response = await PATCH(req, { params: Promise.resolve({ id: "91" }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ...patient, email });
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith(patient.id, { email });
+    expect(mocks.file).not.toHaveBeenCalled();
+    expect(mocks.audit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ordinary receptionist and clinician writes to the same synthetic file", () => {
+  const context = { params: Promise.resolve({ id: String(patient.id) }) };
+  const patch = (body: Record<string, unknown>) => PATCH(new Request("http://test.invalid/api/patients/91", {
+    method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }), context);
+  const reception = { ...session, username: "synthetic-front-desk", role: "reception" as const };
+
+  it("keeps the newer clinician changes when a delayed reception address save finishes", async () => {
+    let row = { ...patient, address: "Old synthetic address", referralSource: "Synthetic referral",
+      medicalAlert: "Previous synthetic alert", note: "Previous synthetic note" };
+    let allowReceptionWrite!: () => void;
+    let receptionRead!: () => void;
+    const paused = new Promise<void>((resolve) => { allowReceptionWrite = resolve; });
+    const started = new Promise<void>((resolve) => { receptionRead = resolve; });
+    mocks.session.mockResolvedValue(reception);
+    const delayedReceptionRead = async () => {
+      const snapshot = { ...row };
+      receptionRead();
+      await paused;
+      return snapshot;
+    };
+    let clinicianStarted = false;
+    mocks.patient.mockImplementation(delayedReceptionRead);
+    mocks.file.mockImplementation(async () => ({ patient: clinicianStarted ? { ...row } : await delayedReceptionRead() }));
+    // Model the existing partial DB writer: only supplied keys replace values.
+    mocks.update.mockImplementation(async (_id: number, writes: Partial<typeof row>) => {
+      row = { ...row, ...writes }; return { ...row };
+    });
+    const pending = patch({ address: "New synthetic address" });
+    await started;
+    try {
+      clinicianStarted = true;
+      mocks.session.mockResolvedValue(session);
+      expect((await patch({ medicalAlert: "New synthetic alert", note: "New synthetic clinician note" })).status).toBe(200);
+    } finally { allowReceptionWrite(); }
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    const result = await response.json();
+    expect(result).toMatchObject({ address: "New synthetic address", referralSource: "Synthetic referral" });
+    expect(result).not.toHaveProperty("medicalAlert");
+    expect(result).not.toHaveProperty("note");
+    expect(row).toMatchObject({ address: "New synthetic address", referralSource: "Synthetic referral",
+      medicalAlert: "New synthetic alert", note: "New synthetic clinician note" });
+    expect(mocks.update).toHaveBeenLastCalledWith(patient.id, { address: "New synthetic address" });
+    expect(mocks.file).toHaveBeenCalledTimes(1); // only the authorized clinician used the full file
+    const auditEvent = mocks.audit.mock.calls.find(([event]) => event.actor === reception.username)?.[0];
+    expect(auditEvent?.details).toEqual({ "العنوان": { "قبل": "Old synthetic address", "بعد": "New synthetic address" } });
+  });
+
+  it("never copies the old birth date/year into a date or year-only write", async () => {
+    mocks.session.mockResolvedValue(reception);
+    mocks.patient.mockResolvedValue({ ...patient, birthYear: 2001, birthDate: "2001-07-12" });
+    expect((await patch({ birthYear: "2002" })).status).toBe(200);
+    expect(mocks.update).toHaveBeenLastCalledWith(patient.id, { birthYear: 2002 }, { reconcileYearOnlyBirthDate: true });
+    expect((await patch({ birthDate: "2002-01-17" })).status).toBe(200);
+    expect(mocks.update).toHaveBeenLastCalledWith(patient.id, { birthDate: "2002-01-17", birthYear: 2002 });
+    expect((await patch({ birthDate: "" })).status).toBe(200);
+    expect(mocks.update).toHaveBeenLastCalledWith(patient.id, { birthDate: null });
   });
 });
