@@ -6,7 +6,7 @@ import { CLINIC_TIME_ZONE, ensureSchema, getSettings, listAppointmentsByDate, li
 import { refusalStatus } from "@/lib/expense-request";
 import { rateOf, refusalMessage, type SupplierPaymentRefusal } from "@/lib/supplier-payments";
 import { addDays, clinicDateString } from "@/lib/schedule";
-import { isAdmin } from "@/lib/roles";
+import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import {
   buildBatchSettlementNote,
@@ -29,8 +29,19 @@ const privateJson = (body: unknown, status = 200) => NextResponse.json(body, {
 export async function GET(request: Request) {
   const session = await requireSession();
   const { searchParams } = new URL(request.url);
-  if (!session) return searchParams.has("view")
-    ? privateJson({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401) : denied();
+  if (!session) return privateJson({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401);
+  // Financial reconciliation includes laboratory costs, supplier balances and patient-linked
+  // order details. Do not rely on the HTTP proxy: reject unauthorized roles before ANY DB read.
+  // Reception must keep patient-specific collection access through separate APIs only.
+  if (!canViewFinancialReports(session.role)) {
+    return privateJson({ message: "مطابقة المختبرات المالية متاحة للإدارة والمحاسبة فقط." }, 403);
+  }
+  // The accountant capability is owner-configurable. Enforce it at this handler,
+  // not only in the proxy: a direct/legacy caller must not bypass the grant.
+  // requireSession() supplies a normalized, version-checked financeAccess.
+  if (session.role === "accountant" && session.financeAccess?.viewReconciliation !== true) {
+    return privateJson({ message: "مطابقة المختبرات خارج الصلاحيات المالية الممنوحة." }, 403);
+  }
   if (searchParams.has("view")) {
     // Financial ledger admission is stricter than legacy reconciliation reads. The
     // existing proxy/capability gates still apply; no role is granted access here.
@@ -74,7 +85,7 @@ export async function GET(request: Request) {
     if (targetPartyId) {
       const party = labParties.find((p) => p.id === targetPartyId);
       if (!party) {
-        return NextResponse.json({ message: "المختبر غير موجود." }, { status: 404 });
+        return privateJson({ message: "المختبر غير موجود." }, 404);
       }
 
       // الأوامر الخاصة بهذا المختبر غير المسددة أو المستلمة حديثاً
@@ -97,7 +108,7 @@ export async function GET(request: Request) {
         notes: o.details,
       }));
 
-      return NextResponse.json({
+      return privateJson({
         party,
         orders: reconcileItems,
         unsettledCount: reconcileItems.filter((i) => i.financialStatus !== "paid").length,
@@ -124,7 +135,7 @@ export async function GET(request: Request) {
       };
     });
 
-    return NextResponse.json({
+    return privateJson({
       labs: labStats,
       financialSummary: { state: "unavailable", reason: "use_authorized_financial_read" },
       clinicalScope: { kind: "loaded_global_window", limit: 300 },
@@ -133,7 +144,7 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     console.error("Failed to load lab reconciliation data:", error);
-    return NextResponse.json({ message: "تعذّر تحميل بيانات المطابقة." }, { status: 500 });
+    return privateJson({ message: "تعذّر تحميل بيانات المطابقة." }, 500);
   }
 }
 
