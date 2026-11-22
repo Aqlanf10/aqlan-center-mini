@@ -1,0 +1,3 @@
+# P0 dossier print test-fixture CI replay
+
+2026-11-22. Review-only. The earlier run [45020155903](https://github.com/Aqlanf10/aqlan-center-mini/actions/runs/45020155903) failed two authorized-clinician tests with `RangeError: Invalid time value` because the synthetic visit fixture omitted `arrivedAt`. Commit `55a9f87020fce29846d435aa10d2374281138d30` supplies a fixed, fully synthetic ISO timestamp, chair and status; production page code and reception denial unchanged. This docs-only child commit triggers CI on `feat/**` to validate the revision. Do not merge or deploy until all CI and HTTP/browser gates pass. No patient data or shared DB accessed.
