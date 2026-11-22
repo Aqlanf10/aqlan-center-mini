@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   session: vi.fn(), access: vi.fn(),
   history: vi.fn(), vitals: vi.fn(), settings: vi.fn(),
-  save: vi.fn(), audit: vi.fn(),
+  save: vi.fn(), recordVitals: vi.fn(), audit: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.session }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: mocks.access }));
@@ -15,14 +15,22 @@ vi.mock("@/lib/db", () => ({
   listVitals: mocks.vitals,
   recordAudit: mocks.audit,
   saveMedicalHistory: mocks.save,
+  recordVitals: mocks.recordVitals,
 }));
 import { GET, POST } from "../app/api/patients/[id]/medical-history/route";
+import { GET as GET_VITALS, POST as POST_VITALS } from "../app/api/patients/[id]/vitals/route";
 
 const context = { params: Promise.resolve({ id: "17" }) };
 const get = () => GET(new Request("http://localhost/api/patients/17/medical-history"), context);
 const post = () => POST(new Request("http://localhost/api/patients/17/medical-history", {
   method: "POST", headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ notes: "synthetic-private-record" }),
+}), context);
+
+const getVitals = () => GET_VITALS(new Request("http://localhost/api/patients/17/vitals"), context);
+const postVitals = () => POST_VITALS(new Request("http://localhost/api/patients/17/vitals", {
+  method: "POST", headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ pulse: 72 }),
 }), context);
 
 beforeEach(() => {
@@ -33,6 +41,8 @@ beforeEach(() => {
   mocks.vitals.mockResolvedValue([]);
   mocks.settings.mockResolvedValue({});
   mocks.save.mockResolvedValue(null);
+  mocks.recordVitals.mockResolvedValue({ patientId: 17, id: 22, visitId: 3, pulse: 72 });
+  mocks.audit.mockResolvedValue(undefined);
 });
 
 const expectNoClinicalReadsOrWrites = () => {
@@ -41,6 +51,7 @@ const expectNoClinicalReadsOrWrites = () => {
   expect(mocks.vitals).not.toHaveBeenCalled();
   expect(mocks.settings).not.toHaveBeenCalled();
   expect(mocks.save).not.toHaveBeenCalled();
+  expect(mocks.recordVitals).not.toHaveBeenCalled();
   expect(mocks.audit).not.toHaveBeenCalled();
 };
 
@@ -60,10 +71,31 @@ describe("P0: reception upload-only boundary on structured medical history", () 
     expectNoClinicalReadsOrWrites();
   });
 
+  it("denies reception vitals GET/POST before all DB reads and writes", async () => {
+    const read = await getVitals();
+    expect(read.status).toBe(403);
+    expect(read.headers.get("Cache-Control")).toBe("private, no-store");
+    const write = await postVitals();
+    expect(write.status).toBe(403);
+    expect(write.headers.get("Cache-Control")).toBe("private, no-store");
+    expectNoClinicalReadsOrWrites();
+  });
+
+  it.each(["admin", "doctor"])("retains authorized vitals GET and POST for %s", async role => {
+    mocks.session.mockResolvedValue({ role, username: "synthetic-clinical" });
+    expect((await getVitals()).status).toBe(200);
+    expect(mocks.vitals).toHaveBeenCalledWith(17, 30);
+    expect((await postVitals()).status).toBe(201);
+    expect(mocks.access).toHaveBeenCalledWith(expect.anything(), 17, "canEditPatient");
+    expect(mocks.recordVitals).toHaveBeenCalled();
+  });
+
   it.each(["cashier", "accountant", "assistant"])("denies nonclinical role %s on GET and POST", async role => {
     mocks.session.mockResolvedValue({ role, username: "synthetic-restricted" });
     expect((await get()).status).toBe(403);
     expect((await post()).status).toBe(403);
+    expect((await getVitals()).status).toBe(403);
+    expect((await postVitals()).status).toBe(403);
     expectNoClinicalReadsOrWrites();
   });
 
