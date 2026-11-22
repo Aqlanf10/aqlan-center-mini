@@ -114,9 +114,19 @@ describe("manual payable existing admission and monetary contract", () => {
     noWrite();
   });
 
-  // This is the direct-handler gate only. Existing proxy restrictions still
-  // govern cashier HTTP access; no role-route or permission policy is changed.
-  it.each(["admin", "reception", "cashier"])("retains the existing direct-handler canHandleMoney gate for %s", async (role) => {
+  // Supplier liabilities are clinic-wide money, never patient collections.
+  // Reception must be rejected by the handler before reading the party or FX.
+  it("denies reception payable creation before any financial store access", async () => {
+    boundary.requireSession.mockResolvedValue({ userId: 3, username: "synthetic-reception", role: "reception" });
+    expect((await send()).status).toBe(403);
+    expect(boundary.getParty).not.toHaveBeenCalled();
+    expect(boundary.getSettings).not.toHaveBeenCalled();
+    noWrite();
+  });
+
+  // Keep unrelated direct-handler semantics: the proxy independently limits
+  // cashier HTTP entry. Do not widen or alter patient-specific collections.
+  it.each(["admin", "cashier"])("retains the non-reception direct-handler money gate for %s", async (role) => {
     boundary.requireSession.mockResolvedValue({ userId: 3, username: "synthetic", role });
     expect((await send()).status).toBe(201);
     expect(boundary.createPayable).toHaveBeenCalledTimes(1);
