@@ -53,11 +53,23 @@ beforeEach(() => {
 });
 
 describe("بطاقة المريض A6 (P0.11)", () => {
-  it("طبيب لا يملك المريض يفتح البطاقة بالرقم: 404 — لا هاتف ولا رقم ملف", async () => {
+  it("طبيب لا يملك المريض يفتح البطاقة بالرقم: 404 قبل قراءة الهوية أو المواعيد", async () => {
     mocks.canAccessPatient.mockResolvedValue(false);
     await expect(
       PatientCardPage({ params: Promise.resolve({ id: "77" }) }),
     ).rejects.toThrow();
+    expect(mocks.getPatient).not.toHaveBeenCalled();
+    expect(mocks.getSettingsSafe).not.toHaveBeenCalled();
+    expect(mocks.patientAppointmentsFrom).not.toHaveBeenCalled();
+  });
+
+  it("فشل التحقق من النطاق لا يفتح قراءة الملف في مسار بطاقة الطباعة", async () => {
+    mocks.canAccessPatient.mockRejectedValue(new Error("synthetic scope lookup failure"));
+    await expect(
+      PatientCardPage({ params: Promise.resolve({ id: "77" }) }),
+    ).rejects.toThrow();
+    expect(mocks.getPatient).not.toHaveBeenCalled();
+    expect(mocks.patientAppointmentsFrom).not.toHaveBeenCalled();
   });
 
   it("الاستقبال يفتح بطاقة أي مريض (سياسة المركز) — السلوك الطبيعي", async () => {
