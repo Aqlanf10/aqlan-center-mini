@@ -55,8 +55,8 @@ afterAll(async () => {
 });
 
 describe("P3-6 — expense voucher attachments", () => {
-  it("reception attaches a receipt photo; it is listed and served privately", async () => {
-    const response = await upload(h.sessions.reception.cookie, expenseId, VALID_PNG);
+  it("an authorized manager attaches an expense receipt; reception cannot read it", async () => {
+    const response = await upload(h.sessions.admin.cookie, expenseId, VALID_PNG);
     expect(response.status).toBe(201);
     const attachment = await response.json() as { id: number; title: string; expenseId: number };
     expect(attachment.expenseId).toBe(expenseId);
@@ -71,8 +71,20 @@ describe("P3-6 — expense voucher attachments", () => {
     expect(file.headers.get("cache-control")).toContain("no-store");
     expect(Buffer.from(await file.arrayBuffer()).equals(VALID_PNG)).toBe(true);
 
+    // P1: reception can collect patient installments, but cannot list, upload,
+    // or download clinic expense evidence after a manager has attached it.
+    expect((await upload(h.sessions.reception.cookie, expenseId, VALID_PNG)).status).toBe(403);
+    const receptionList = await fetch(`${baseUrl}/api/expenses/${expenseId}/attachments`, {
+      headers: { Cookie: h.sessions.reception.cookie },
+    });
+    expect(receptionList.status).toBe(403);
+    const receptionFile = await fetch(`${baseUrl}/api/expense-attachments/${attachment.id}`, {
+      headers: { Cookie: h.sessions.reception.cookie },
+    });
+    expect(receptionFile.status).toBe(403);
+
     const { rows } = await db.query(`SELECT actor FROM audit_log WHERE action = 'expense.attachment' ORDER BY id DESC LIMIT 1`);
-    expect(rows[0]?.actor).toBe("secreception");
+    expect(rows[0]?.actor).toBe("secadmin");
   });
 
   it("a doctor can neither attach nor view", async () => {
