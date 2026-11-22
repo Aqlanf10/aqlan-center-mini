@@ -96,6 +96,12 @@ export default async function PatientDossierPage({
   const { id: rawId } = await params;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
+  // P0: The dossier includes medical alerts, tooth chart, treatment notes and
+  // endodontic records. Reception may collect patient payments and upload
+  // external files, but must never read/print this clinical dossier.
+  // Reject before *any* clinical or financial reader, regardless of the legacy
+  // canAccessPatient(session, id) reception shortcut.
+  if (session.role === "reception") notFound();
   if (!(await canAccessPatient(session, id))) notFound();
   const showFinance = await canAccessPatient(session, id, "canViewPatientPayments");
 
