@@ -125,8 +125,16 @@ describe("receipt provenance through existing authorized read routes", () => {
       assertProjection(body);
       if (role !== "admin") expect(body.receiptRemaining).toBeUndefined();
       const shift = await authedGet("/api/shifts", h.sessions[role]);
-      expect(shift.status).toBe(200);
-      assertProjection(await shift.json() as Feed);
+      if (role === "reception") {
+        // P1: patient-specific ledger remains visible while clinic-wide shifts do not.
+        expect(shift.status).toBe(403);
+        const denied = await shift.text();
+        expect(denied).not.toContain(original.receiptNumber);
+        expect(denied).not.toContain(privateReason);
+      } else {
+        expect(shift.status).toBe(200);
+        assertProjection(await shift.json() as Feed);
+      }
     }
     for (const role of ["doctorA", "doctorB", "portalA", "portalB"] as const) {
       for (const path of [`/api/patients/${patientId}/ledger`, "/api/shifts", `/print/receipt/${original.id}`]) {
