@@ -3,7 +3,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 // Exercise the real rendered input handlers and upload command with synthetic files.
 // This hook harness is not browser/React reconciliation acceptance.
-const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0 }));
+const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, role: "admin" }));
 vi.mock("react", async original => ({
   ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
@@ -20,7 +20,7 @@ vi.mock("react", async original => ({
   useCallback: (callback: unknown) => callback,
   useEffect: () => {},
 }));
-vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ role: "admin" }) }));
+vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ role: hooks.role }) }));
 vi.mock("../components/ConsentModal", () => ({ ConsentModal: () => null }));
 vi.mock("../components/BeforeAfterSlider", () => ({ BeforeAfterSlider: () => null }));
 import { PatientDocuments } from "../components/PatientDocuments";
@@ -51,7 +51,7 @@ const submit = async () => {
 };
 const fetchMock = vi.fn();
 beforeEach(() => {
-  hooks.values = []; hooks.cursor = 0;
+  hooks.values = []; hooks.cursor = 0; hooks.role = "admin";
   fetchMock.mockReset().mockResolvedValue({ ok: true, json: async () => ({ documents: [], storageReady: true }) });
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -130,6 +130,31 @@ describe("patient document selection integrity", () => {
     expect(posts[0][0]).toBe("/api/patients/7/documents");
     expect(input(render(8), "document-camera").props.disabled).toBe(false);
     expect(render(8).some(node => node.props.children === "seven.png")).toBe(false);
+  });
+
+  it("keeps reception upload-only even with a stale preloaded clinical document", async () => {
+    hooks.role = "reception";
+    // Simulate stale previous-role state: never project it into the upload-only UI.
+    hooks.values[0] = [{
+      id: 93, patientId: 7, title: "PRIVATE SYNTHETIC X-RAY",
+      kind: "xray", isImage: true, mimeType: "image/png",
+      removedAt: null, sizeBytes: 12, note: null, takenOn: null,
+    }];
+    const displayed = render();
+    expect(displayed.some(node => node.props["data-testid"] === "reception-document-upload-only")).toBe(true);
+    expect(displayed.some(node => node.type === "img")).toBe(false);
+    expect(displayed.some(node => node.type === "a" && String(node.props.href).includes("/api/documents/"))).toBe(false);
+    expect(displayed.some(node => node.props.children === "PRIVATE SYNTHETIC X-RAY")).toBe(false);
+
+    select("document-file", new File(["synthetic-only"], "outside.pdf", { type: "application/pdf" }));
+    await submit();
+    const requests = fetchMock.mock.calls;
+    expect(requests).toHaveLength(1);
+    expect(requests[0][0]).toBe("/api/patients/7/documents");
+    expect(requests[0][1].method).toBe("POST");
+    const posted = requests[0][1].body as FormData;
+    expect((posted.get("file") as File).name).toBe("outside.pdf");
+    expect(render().some(node => node.props.role === "status")).toBe(true);
   });
 
 });
