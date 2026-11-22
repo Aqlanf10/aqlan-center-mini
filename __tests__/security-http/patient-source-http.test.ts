@@ -39,10 +39,15 @@ describe("P3-8ب — مصدر المريض", () => {
     expect(JSON.stringify(rows[0]?.details)).toContain("مصدر_المريض");
   });
 
-  it("تعديل حقلٍ آخر لا يمحو المصدر", async () => {
+  it("تعديل حقلٍ إداري آخر لا يمحو المصدر أو يكشف الملاحظات السريرية", async () => {
     const response = await authedMutation(`/api/patients/${patientId}`, h.sessions.reception, "PATCH",
-      JSON.stringify({ note: "ملاحظة" }));
-    expect(await response.json()).toMatchObject({ referralSource: "توصية مريض" });
+      JSON.stringify({ address: "عنوان اختبار اصطناعي" }));
+    expect(response.status).toBe(200);
+    const payload = await response.json() as Record<string, unknown>;
+    expect(payload).toMatchObject({ referralSource: "توصية مريض", address: "عنوان اختبار اصطناعي" });
+    expect(payload).not.toHaveProperty("note");
+    expect(payload).not.toHaveProperty("medicalAlert");
+    expect(payload).not.toHaveProperty("photoDocumentId");
   });
 
   it("تقرير المرضى الجدد يعرض المصدر ويعدّ المرضى بحسبه", async () => {

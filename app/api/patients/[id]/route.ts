@@ -81,6 +81,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  // Defense in depth: the HTTP proxy also restricts PATCH, but the route must
+  // never allow non-clinical accounts through if called without that proxy.
+  if (!["admin", "doctor", "reception"].includes(session.role)) {
+    return NextResponse.json({ message: "تعديل بيانات المريض غير مصرّح لهذا الدور." },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } });
+  }
   const { id: rawId } = await context.params;
   const id = readId(rawId);
   if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
@@ -108,6 +114,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+
+  // Reception may maintain demographic/contact details, but cannot overwrite
+  // clinical alerts or notes. Reject before reading the unrestricted patient file.
+  if (session.role === "reception" && (Object.hasOwn(source, "medicalAlert") || Object.hasOwn(source, "note"))) {
+    return NextResponse.json({ message: "التنبيهات والملاحظات السريرية للطبيب المخوّل فقط." },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } });
+  }
 
   // التعديل يمرّ من نفس تحقّق الإنشاء: قاعدتان مختلفتان للاسم أو سنة الميلاد تعنيان
   // أن ما يُرفض عند الإنشاء يدخل من باب التعديل.
@@ -181,7 +194,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actor: session.username, actorRole: session.role,
       });
     }
-    return NextResponse.json(updated);
+    // A successful PATCH previously returned the entire updated Patient,
+    // including medicalAlert, note and photoDocumentId, to reception.
+    // Return an explicit administrative projection, never a spread of the row.
+    const responsePatient = session.role === "reception" ? {
+      id: updated.id, patientNumber: updated.patientNumber,
+      fullName: updated.fullName, phone: updated.phone, altPhone: updated.altPhone,
+      gender: updated.gender, birthYear: updated.birthYear, birthDate: updated.birthDate,
+      address: updated.address, guardianName: updated.guardianName, guardianPhone: updated.guardianPhone,
+      referralSource: updated.referralSource, referredBy: updated.referredBy,
+      email: updated.email, preferredChannel: updated.preferredChannel,
+      flags: updated.flags, createdAt: updated.createdAt,
+    } : updated;
+    return NextResponse.json(responsePatient, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ التعديل. أعد المحاولة." }, { status: 500 });
   }
