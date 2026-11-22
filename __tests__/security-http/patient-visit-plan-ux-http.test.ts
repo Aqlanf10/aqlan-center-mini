@@ -82,10 +82,10 @@ describe("(P1) intake history", () => {
     const path = `/api/patients/${ownedId}/intake-history`;
     const read = await get("reception", path);
     await expectArabic(read, 403);
-    expect(read.headers.get("Cache-Control")).toBe("no-store");
+    expect(read.headers.get("Cache-Control")).toMatch(/(?:^|,\s*)no-store(?:,|$)/);
     const write = await post("reception", path, { conditions: ["diabetes"], allergies: "test-secret" });
     await expectArabic(write, 403);
-    expect(write.headers.get("Cache-Control")).toBe("no-store");
+    expect(write.headers.get("Cache-Control")).toMatch(/(?:^|,\s*)no-store(?:,|$)/);
   });
 
   it("cashier and accountant do not reach the clinical intake", async () => {
