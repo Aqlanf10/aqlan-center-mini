@@ -11,6 +11,13 @@ export const dynamic = "force-dynamic";
 
 const denied = () => NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
+// P0: vitals and medical alerts are protected clinical records, not
+// reception documents. Deny nonclinical roles before any patient or DB access.
+const clinicalDenied = () => NextResponse.json(
+  { message: "غير مصرّح لك بقراءة أو تعديل العلامات الحيوية للمريض." },
+  { status: 403, headers: { "Cache-Control": "private, no-store" } },
+);
+
 const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
   const value = Number((await context.params).id);
   return Number.isInteger(value) && value > 0 ? value : null;
@@ -20,6 +27,7 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "admin" && session.role !== "doctor") return clinicalDenied();
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
   if (!(await canAccessPatient(session, patientId))) {
@@ -35,6 +43,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "admin" && session.role !== "doctor") return clinicalDenied();
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
   if (!(await canAccessPatient(session, patientId, "canEditPatient"))) {

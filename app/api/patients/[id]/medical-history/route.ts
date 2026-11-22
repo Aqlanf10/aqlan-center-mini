@@ -11,6 +11,17 @@ export const dynamic = "force-dynamic";
 
 const denied = () => NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
+// P0: the questionnaire contains diagnoses, allergies, medications, ASA and vitals.
+// Reception may upload externally supplied clinical documents for filing, but
+// cannot read or write the patient's structured medical history. Reject *before*
+// consulting patient data, even when legacy canAccessPatient allows reception.
+const clinicalOnly = (role: string) =>
+  role === "admin" || role === "doctor";
+const clinicalDenied = () => NextResponse.json(
+  { message: "غير مصرّح لك بقراءة أو تعديل التاريخ الطبي للمريض." },
+  { status: 403, headers: { "Cache-Control": "private, no-store" } },
+);
+
 const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
   const value = Number((await context.params).id);
   return Number.isInteger(value) && value > 0 ? value : null;
@@ -18,11 +29,12 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 
 /**
  * (PAT-2) التاريخ الطبي المنظَّم: آخر نسخة وتنبيهاتها، ونسخٌ سابقة، وهل حان وقت المراجعة،
- * وآخر العلامات الحيوية. للطبيب (مرضاه) والاستقبال والمدير — لا للأدوار المالية.
+ * وآخر العلامات الحيوية. للطبيب المخوّل (مرضاه) والمدير فقط؛ الاستقبال يرفع المرفقات الخارجية دون معاينة السجل.
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (!clinicalOnly(session.role)) return clinicalDenied();
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
   if (!(await canAccessPatient(session, patientId))) {
@@ -50,6 +62,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (!clinicalOnly(session.role)) return clinicalDenied();
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
   if (!(await canAccessPatient(session, patientId, "canEditPatient"))) {
