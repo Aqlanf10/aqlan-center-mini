@@ -85,15 +85,15 @@ describe("bounded admin-only lab net balance overview", () => {
     const response = await request(); expect(response.status).toBe(503); expect(await response.json()).not.toHaveProperty("labs");
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
   });
-  it.each(["admin", "doctor", "reception", "accountant"])("preserves published legacy GET admission for %s without introducing a new cost gate", async (role) => {
-    // Handler admission only: the unchanged proxy role/capability rules remain cumulative.
+  it.each(["admin", "accountant"])("preserves finance-role legacy GET admission for %s without requiring a clinical cost-price permission", async (role) => {
+    // Handler admission only: the proxy still enforces the accountant reconciliation capability.
     boundary.session = { username: "legacy-user", role, permissions: { canViewCostPrices: false } };
     const response = await request(""); expect(response.status).toBe(200);
     expect(boundary.partyDueByCurrency).not.toHaveBeenCalled();
     expect(boundary.findUserByUsername).not.toHaveBeenCalled();
   });
-  it("preserves legacy party detail fields and costs without adding canonical ledger data", async () => {
-    boundary.session = { username: "legacy-doctor", role: "doctor", permissions: {} };
+  it.each(["admin", "accountant"])("preserves legacy party detail for %s without adding canonical ledger data", async (role) => {
+    boundary.session = { username: "synthetic-finance-user", role, permissions: { financeAccess: { viewReconciliation: true } } };
     boundary.listLabOrders.mockResolvedValue([{ id: 71, partyId: 1, labName: "Inactive lab", patientName: "Synthetic patient",
       patientNumber: "P-7", workType: "Synthetic crown", toothNumbers: "11", sentDate: "2026-10-01", dueDate: "2026-10-05",
       costMinor: 1500, costCurrency: "USD", status: "sent", financialStatus: "pending_delivery", details: "Synthetic detail" }]);
@@ -104,8 +104,8 @@ describe("bounded admin-only lab net balance overview", () => {
       unsettledCount: 1, risks: [] });
     expect(boundary.partyDueByCurrency).not.toHaveBeenCalled(); expect(boundary.findUserByUsername).not.toHaveBeenCalled();
   });
-  it("does not leak canonical data to a cost-enabled doctor through the legacy catalog", async () => {
-    boundary.session = { username: "synthetic-doctor", role: "doctor", permissions: { canViewCostPrices: true } };
+  it.each(["admin", "accountant"])("keeps the legacy catalog separate from canonical data for %s", async (role) => {
+    boundary.session = { username: "synthetic-finance-user", role, permissions: { financeAccess: { viewReconciliation: true } } };
     const response = await request(""); const body = await response.json();
     expect(response.status).toBe(200); expect(boundary.partyDueByCurrency).not.toHaveBeenCalled();
     expect(body.financialSummary).toEqual({ state: "unavailable", reason: "use_authorized_financial_read" });
