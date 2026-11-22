@@ -46,9 +46,9 @@ describe("P0: confidential patient intake history backend boundary", () => {
     "rejects %s reading or adding medical questionnaire before any patient DB access", async role => {
       mocks.session.mockResolvedValue({ role, username: "synthetic-unprivileged" });
       for (const response of [await get(), await post()]) {
-        expect(response.status).toBe(403);
-        expect(response.headers.get("Cache-Control")).toBe("no-store");
-        expect(JSON.stringify(await response.json())).not.toContain("synthetic-private-allergy");
+        expect(response?.status).toBe(403);
+        expect(response?.headers.get("Cache-Control")).toBe("no-store");
+        expect(JSON.stringify(await response?.json())).not.toContain("synthetic-private-allergy");
       }
       noPatientQueries();
     },
@@ -57,11 +57,11 @@ describe("P0: confidential patient intake history backend boundary", () => {
   it.each(["admin", "doctor"])("preserves authorized %s reads and appends", async role => {
     mocks.session.mockResolvedValue({ role, username: "synthetic-clinician" });
     const read = await get();
-    expect(read.status).toBe(200);
+    expect(read?.status).toBe(200);
     expect(mocks.access).toHaveBeenCalledWith(expect.anything(), 17);
     expect(mocks.list).toHaveBeenCalledWith(17);
     const write = await post();
-    expect(write.status).toBe(201);
+    expect(write?.status).toBe(201);
     expect(mocks.create).toHaveBeenCalledWith(
       17, expect.anything(), { actor: "synthetic-clinician", actorRole: role },
     );
@@ -70,16 +70,16 @@ describe("P0: confidential patient intake history backend boundary", () => {
   it("refuses doctor who is not authorized for this patient", async () => {
     mocks.session.mockResolvedValue({ role: "doctor", username: "synthetic-doctor" });
     mocks.access.mockResolvedValue(false);
-    expect((await get()).status).toBe(403);
-    expect((await post()).status).toBe(403);
+    expect((await get())?.status).toBe(403);
+    expect((await post())?.status).toBe(403);
     expect(mocks.list).not.toHaveBeenCalled();
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it("rejects missing session without any patient query", async () => {
     mocks.session.mockResolvedValue(null);
-    expect((await get()).status).toBe(401);
-    expect((await post()).status).toBe(401);
+    expect((await get())?.status).toBe(401);
+    expect((await post())?.status).toBe(401);
     noPatientQueries();
   });
 });
