@@ -124,12 +124,24 @@ describe.each(cases)("$method patient write authority", ({ method, permission, s
     expect(mocks.delete).not.toHaveBeenCalled();
   });
 
-  it.each(["admin", "reception", "assistant"] as const)("preserves the existing %s role path", async (role) => {
+  it.each(["admin", "reception", "assistant"] as const)("keeps authorized %s writes while denying assistant PATCH before reads", async (role) => {
     mocks.session.mockResolvedValue({ ...session, role });
     mocks.user.mockRejectedValue(new Error("Doctor-only lookup must not run"));
-    expect((await invoke(request(method))).status).toBe(status);
+    const response = await invoke(request(method));
+    if (method === "PATCH" && role === "assistant") {
+      // The P0 patient PATCH boundary intentionally excludes assistants even
+      // though their legacy patient POST permission remains unchanged.
+      expect(response.status).toBe(403);
+      expect(response.headers.get("Cache-Control")).toContain("no-store");
+      expect(await response.json()).toEqual({ message: expect.any(String) });
+      expect(mocks.file).not.toHaveBeenCalled();
+      expect(mocks.owns).not.toHaveBeenCalled();
+      expectNoWrites();
+    } else {
+      expect(response.status).toBe(status);
+      expect(writer).toHaveBeenCalledTimes(1);
+    }
     expect(mocks.user).not.toHaveBeenCalled();
-    expect(writer).toHaveBeenCalledTimes(1);
   });
 
   it("still rejects an absent session", async () => {
