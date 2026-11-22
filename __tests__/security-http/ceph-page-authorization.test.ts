@@ -69,12 +69,23 @@ describe.each([false, true])("Ceph page authorization (RSC=%s)", (rsc) => {
       await db.query("UPDATE users SET permissions=$1 WHERE username=$2", [original, TEST_USERS.doctorA.username]);
     }
   });
-  it.each(["doctorA", "admin", "reception"] as const)("preserves authorized %s access", async (role) => {
+  it.each(["doctorA", "admin"] as const)("preserves authorized %s access", async (role) => {
     const body = await payload(`/ceph/${first}`, role, rsc);
     for (const marker of markers) expect(body.includes(marker), `authorized response missing ${marker}`).toBe(true);
     expect((await payload(compare(first, second, patientId), role, rsc)).includes(patientMarker)).toBe(true);
     expect((await payload(compare(first, second), role, rsc)).includes(patientMarker)).toBe(true);
   });
+  it.each(["workspace", "comparison", "comparison-with-patient"] as const)(
+    "does not serialize ceph private records for reception: %s",
+    async (page) => {
+      const path = page === "workspace"
+        ? `/ceph/${first}`
+        : page === "comparison"
+          ? compare(first, second)
+          : compare(first, second, patientId);
+      privateDataAbsent(await payload(path, "reception", rsc));
+    },
+  );
   it("rejects missing, invalid, discarded, same and mismatched comparison identities", async () => {
     for (const path of [
       "/ceph/invalid", "/ceph/0", "/ceph/999999999", `/ceph/${discarded}`,
@@ -102,5 +113,7 @@ describe("positive ceph print HTTP documents", () => {
     expect(body).toContain(kind === "study" ? "تقرير التحليل السيفالومتري" : "مقارنة");
     expect(body).not.toMatch(/Application error|server error occurred/);
     expect((await authedGet(path, h.sessions.doctorB)).status).toBe(404);
+    // P0: reception may upload new X-rays/PDFs, never read or print saved ceph records.
+    expect((await authedGet(path, h.sessions.reception)).status).toBe(404);
   });
 });
