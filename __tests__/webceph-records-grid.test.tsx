@@ -231,3 +231,38 @@ describe("record action ownership", () => {
     expect(text(render())).toContain("هذا لا يعني عدم وجود صور"); expect(writes()).toHaveLength(1); expect(location.href).toBe("");
   });
 });
+
+describe("P0 reception uploads without clinical-media read authority", () => {
+  it("shows upload-only controls, never reads stored records, and confirms a synthetic upload without a preview", async () => {
+    hooks.role = "reception"; hooks.username = "synthetic-reception";
+    // A stale legacy flag cannot grant gallery access to reception.
+    hooks.permissions = { canViewXrays: true, canUploadXrays: true };
+    await ready();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(imageSources()).toEqual([]);
+    expect(text(render())).toContain("رفع صور وأشعة للتوثيق فقط");
+    expect(text(render())).not.toContain("Synthetic case A image");
+    expect(nodes(render()).some(node => node.type === "a" && String(node.props.href).startsWith("/api/documents/"))).toBe(false);
+    expect(picker().props.disabled).toBe(false);
+
+    invoke(button("رفع "));
+    await selectFile();
+    await settle(); render();
+    expect(writes()).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // POST only; never a document/ceph GET.
+    expect(writes()[0][0]).toBe("/api/patients/11/documents");
+    expect((writes()[0][1].body as FormData).get("orthoCaseId")).toBe("21");
+    expect(text(render())).toContain("تم رفع الملف للتوثيق");
+    expect(imageSources()).toEqual([]);
+  });
+
+  it("rejects an old reception picker after changing to another patient", async () => {
+    hooks.role = "reception"; hooks.username = "synthetic-reception";
+    await ready(); invoke(button("رفع "));
+    const oldPicker = picker();
+    props = { patientId: 12, orthoCaseId: 22 };
+    await ready(); await selectFile(oldPicker); await settle();
+    expect(writes()).toHaveLength(0);
+    expect(imageSources()).toEqual([]);
+  });
+});
