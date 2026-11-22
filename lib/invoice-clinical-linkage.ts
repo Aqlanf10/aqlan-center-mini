@@ -43,6 +43,21 @@ export function lineLinkage(input: { serviceId: number | null; category: string 
   return found ? { kind: "clinical", ...found } : { kind: "financial" };
 }
 
+/** Only an explicit or exactly matched item physician can anchor a new clinical invoice.
+ * The writer and preview verify the resulting identity against the doctor registry.
+ */
+export function resolveInvoiceLineDoctor(
+  kind: LineLinkage["kind"], requestedDoctor: number | null, matchedItemDoctor: number | null,
+): { ok: true; doctorId: number | null } | { ok: false; reason: "provider_required" | "bad_provider" } {
+  if (matchedItemDoctor !== null && requestedDoctor !== null && matchedItemDoctor !== requestedDoctor) {
+    return { ok: false, reason: "bad_provider" };
+  }
+  const doctorId = matchedItemDoctor ?? requestedDoctor;
+  return kind === "clinical" && doctorId === null
+    ? { ok: false, reason: "provider_required" }
+    : { ok: true, doctorId };
+}
+
 export const LINKAGE_SPECIALTY_LABEL: Record<LinkageSpecialty, string> = {
   general: "عام", orthodontics: "تقويم", endodontics: "علاج جذور", surgery: "جراحة فموية",
   implantology: "زراعة", prosthodontics: "تركيبات", periodontics: "لثة", pediatric: "أطفال",
@@ -267,7 +282,7 @@ export function parseLineSiteFields(raw: Record<string, unknown>):
 /** حالة HTTP لرفض الربط: خطأ إدخالٍ في البند ⇒ 400، وتعارضٌ مع حالة المريض القائمة ⇒ 409. */
 export function linkageRefusalStatus(reason: InvoiceLinkageRefusal): 400 | 409 {
   return reason === "bad_tooth" || reason === "bad_case" || reason === "tooth_required"
-    || reason === "episode_split_required" || reason === "bad_surfaces" || reason === "bad_scope" ? 400 : 409;
+    || reason === "provider_required" || reason === "episode_split_required" || reason === "bad_surfaces" || reason === "bad_scope" ? 400 : 409;
 }
 
 export const INVOICE_IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -294,13 +309,14 @@ export type InvoiceLinkageRefusal =
   | "visit_context_invalid" | "idempotency_conflict" | "ambiguous_case" | "bad_case" | "amount_mismatch" | "bad_tooth" | "already_billed"
   | "case_mismatch" | "shape_mismatch" | "ambiguous_item"
   | "tooth_required" | "episode_split_required" | "bad_surfaces" | "bad_scope"
-  | "needs_financial_review" | "existing_work" | "bad_provider" | "incompatible_plan" | "bad_site" | "legacy_covered" | "selected_item_mismatch";
+  | "needs_financial_review" | "existing_work" | "provider_required" | "bad_provider" | "incompatible_plan" | "bad_site" | "legacy_covered" | "selected_item_mismatch";
 
 export const INVOICE_LINKAGE_MESSAGE: Record<InvoiceLinkageRefusal, string> = {
   visit_context_invalid:"الزيارة المحددة لا تخص هذا المريض أو لم تعد متاحة لربط الفاتورة؛ حدّث الزيارة واختر سياقها صراحةً.",
   selected_item_mismatch: "بند الخطة المختار لم يعد مطابقًا للمريض والخدمة والنطاق والاتفاق؛ أعد اختيار البند الأصلي دون إنشاء بديل.",
   needs_financial_review: "هذا العلاج يحتاج مراجعة مالية لسجل فواتيره؛ لا تُنشئ التزامًا جديدًا للعمل نفسه.",
   existing_work: "يوجد سجل للعلاج نفسه بدأ أو أُنجز أو أُلغي؛ راجع البند الأصلي قبل إصدار فاتورة أخرى.",
+  provider_required: "اختر الطبيب المكلّف بهذا البند العلاجي قبل حفظ الفاتورة.",
   bad_provider: "حدّد طبيب البند المالي المتفق عليه. تغيير الطبيب أو توزيع قيمة العلاج بين أطباء يحتاج مراجعة الاتفاق.",
   incompatible_plan: "للمريض خطة قائمة غير قابلة للإضافة بهذه الفاتورة؛ راجع الخطة الأصلية دون إنشاء خطة مكررة.",
   bad_site: "موضع الحالة لا يطابق نطاق هذا العلاج. صحّح الموضع السريري أولًا؛ الموضع الفارغ لا يثبت التوافق.",

@@ -362,6 +362,8 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     await pickTeeth(page, 0, [26], ["M", "O"]);
     await confirm(page);
     expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("الأسنان: 26 (MO)");
+    await page.getByTestId("invoice-provider-0").selectOption(String(doctorPartyId));
+    await expect.poll(() => page.getByRole("button", { name: "احفظ الفاتورة", exact: true }).isEnabled()).toBe(true);
     await page.getByTestId("invoice-clinical-preview-0").waitFor();
     await save(page);
     expect(await planItems(patientId)).toEqual([{ tooth_code: 26, surfaces: "MO" }]);
@@ -374,6 +376,7 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     await chooseService(page, services.ortho);
     const row = page.getByTestId("invoice-row-0");
     await row.getByLabel("نطاق العلاج",{exact:true}).selectOption("upper");
+    await page.getByTestId("invoice-provider-0").selectOption(String(doctorPartyId));
     expect(await row.getByLabel("نطاق العلاج",{exact:true}).inputValue()).toBe("upper");
     expect(await page.getByTestId("invoice-tooth-button-0").count()).toBe(0);
     const proof=page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]');

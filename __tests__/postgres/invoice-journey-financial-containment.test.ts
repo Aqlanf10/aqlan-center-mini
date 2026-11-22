@@ -118,20 +118,31 @@ describe("Invoice-origin clinical work is financially contained", () => {
     expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toHaveLength(1);
   });
 
-  it("unknown financial provider is not silently assigned to the first clinician; truthful draft care remains saved", async () => {
+  it("a historical unknown financial provider stays unresolved; truthful draft care remains saved", async () => {
     const patientId = await patient();
-    const request = input(patientId);
-    const created = await createLinkedInvoice({ ...request, items: request.items.map((item) => ({ ...item, doctorId: null })) });
-    if (!created.ok || !created.planId || !created.links[0].planItemId) throw new Error("Expected the invoice-origin review identity");
-    await consent(created.planId);
-    const visitId = await staged(patientId, created.links[0].planItemId);
+    // Seed a genuinely pre-rule obligation, never request a new blank-provider invoice.
+    const oldPlan = await db.createPlanV2({ patientId, title: "خطة سابقة اصطناعية", specialty: null, primaryDoctorId: null,
+      billingMode: "per_procedure", baseCurrency: "YER", startDate: "2026-10-07", note: null, installments: [],
+      createdBy: "acceptance-reception", items: [{ serviceId: fillingId, serviceName: "filling", category: "filling",
+        toothCode: 26, surfaces: "MO", quantity: 1, unitPriceMinor: 100000, billingRule: "per_session", sessionCount: 1, note: null }] });
+    if (!oldPlan.ok) throw new Error(oldPlan.message);
+    const [item] = await q<{ id: number }>("SELECT id FROM plan_items WHERE plan_id=$1", [oldPlan.planId]);
+    const [invoice] = await q<{ id: number }>(`INSERT INTO invoices(invoice_number,patient_id,total_minor,created_by,created_at)
+      VALUES ('SYNTHETIC-CONTAIN-HISTORY-01',$1,100000,'acceptance-reception','2026-10-07T09:00:00Z') RETURNING id`, [patientId]);
+    await q(`UPDATE plan_items SET doctor_id=NULL, origin='invoice', origin_invoice_id=$1, billed_invoice_id=$1,
+      billing_status='needs_financial_review' WHERE id=$2`, [invoice.id, item.id]);
+    await q(`INSERT INTO invoice_items(invoice_id, service_id, description, quantity, unit_price_minor, total_minor,
+      doctor_id, plan_item_id, source_type, source_id) VALUES ($1,$2,'filling',1,100000,100000,NULL,$3,'plan_item',$4)`,
+    [invoice.id, fillingId, item.id, item.id]);
+    await consent(oldPlan.planId);
+    const visitId = await staged(patientId, item.id);
     const before = await durable(patientId, visitId);
     await expect(sign(visitId)).rejects.toBeInstanceOf(db.ClinicalPlanConflict);
     expect(await durable(patientId, visitId)).toEqual(before);
     const walkout = await db.visitWalkout(visitId);
     expect(walkout?.lines[0]).toMatchObject({ financialReviewRequired: true });
     expect(walkout?.lines[0].billingClass).not.toBe("INCLUDED");
-    expect(await q(`SELECT doctor_id FROM invoice_items WHERE invoice_id = $1`, [created.invoice.id])).toEqual([{ doctor_id: null }]);
+    expect(await q(`SELECT doctor_id FROM invoice_items WHERE invoice_id = $1`, [invoice.id])).toEqual([{ doctor_id: null }]);
     expect(await q(`SELECT doctor_id FROM visit_procedures WHERE visit_id = $1`, [visitId])).toEqual([{ doctor_id: doctorId }]);
   });
 

@@ -155,6 +155,20 @@ describe("canonical invoice template linkage", () => {
       .toEqual(result.links.map((link) => ({ source_type: "plan_item", source_id: link.planItemId, plan_item_id: link.planItemId })));
   });
 
+  it("a scheduled records line remains exempt, but an orthodontic template without a doctor writes nothing", async () => {
+    const patient = await newPatient("TPL-MISSING-PHYSICIAN");
+    const input = await command(patient, { ...selection("ortho", [], true), doctorId: null });
+    const before = await counts(patient);
+    const number = () => q("SELECT last_value,is_called FROM invoice_number_seq");
+    const priorNumber = await number();
+    const proposed = await preview(input);
+    expect(proposed[0]).toMatchObject({ kind: "financial", scheduled: true, refusal: null, case: { mode: "none" } });
+    expect(proposed[1]).toMatchObject({ kind: "clinical", scheduled: true, refusal: "provider_required" });
+    expect(await save(input)).toEqual({ ok: false, reason: "provider_required", line: 1 });
+    expect(await counts(patient)).toEqual(before);
+    expect(await number()).toEqual(priorNumber);
+  });
+
   it("groups two teeth into three shared template visits and preserves exact session titles, durations and gaps", async () => {
     const patient = await newPatient("TPL-TWO-TEETH");
     const input = await command(patient, selection("endo", [36, 46]));
