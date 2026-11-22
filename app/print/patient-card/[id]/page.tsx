@@ -38,14 +38,15 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
+  /* حرس الباب (P0.12): تحقق من نطاق المريض قبل جلب الاسم والرقم والهاتف
+   * والإعدادات أو المواعيد؛ إخفاء الصفحة بعد القراءة ليس حدّ خصوصية.
+   * الاستقبال المخوّل ما زال يستطيع طباعة البطاقة الإدارية فقط. */
+  if (!(await canAccessPatient(session, id).catch(() => false))) notFound();
+
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const [patient, settings] = await Promise.all([getPatient(id), getSettingsSafe()]);
   // ومريضٌ لا وجود له ٤٠٤، لا بطاقةً باسمٍ فارغ على ترويسة المركز.
   if (!patient) notFound();
-  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
-   * تعتمد على الوكيل العام الذي يمرر /print/*. */
-  if (!(await canAccessPatient(session, id).catch(() => false))) notFound();
-
 
   const next = upcomingAppointments(await patientAppointmentsFrom(id, today), today);
 
