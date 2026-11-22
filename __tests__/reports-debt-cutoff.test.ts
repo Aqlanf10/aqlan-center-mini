@@ -189,6 +189,21 @@ describe("debt movement clips each monthly row to the selected clinic dates", ()
     expect(result.bars).toEqual([{ label: "ديسمبر 2026", minor: 150 }, { label: "يناير 2027", minor: 180 }]);
   });
 
+  it("keeps native amounts at both endpoints of a 120-month window ending on January 1", async () => {
+    const pid = await patient();
+    await invoice(pid, "YER", 101, "2017-02-28T00:00:00+03:00");
+    await invoice(pid, "SAR", 23, "2027-01-01T23:59:59+03:00");
+    await invoice(pid, "SAR", 79, "2027-01-02T00:00:00+03:00");
+
+    const result = await movement(pid, "2027-01-01", "2017-02-28");
+    expect(result.bars).toHaveLength(120);
+    expect(result.bars?.at(-1)).toEqual({ label: "يناير 2027", minor: 101 });
+    expect(result.monthly?.rows.filter(row => row.newDebtMinor !== 0)).toEqual([
+      expect.objectContaining({ monthLabel: "فبراير 2017", currency: "YER", newDebtMinor: 101 }),
+      expect.objectContaining({ monthLabel: "يناير 2027", currency: "SAR", newDebtMinor: toMinor(23, "SAR") }),
+    ]);
+  });
+
   it("shows a newly recorded opening balance without inventing a movement", async () => {
     const pid = await patient();
     await opening(pid, "SAR", "2027-01-03", 20);

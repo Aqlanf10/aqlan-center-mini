@@ -1195,9 +1195,9 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
 
 /** يبني التقرير كاملًا وفق نوعه وفلاتره. */
 export async function buildReport(report: string, filters: ReportFilters): Promise<ReportResult> {
-  // الطلب السنوي محدود الحجم قبل تحميل أي سياق مالي، من دون اقتطاع المدى.
-  if (report === "annual") {
-    const range = validateAnnualReportRange(filters.from, filters.to);
+  // نتحقق من المدى قبل تحميل السياق حتى عند استدعاء الباني مباشرةً.
+  const range = validateReportMonthRange(report, filters.debtMode, filters.from, filters.to);
+  if (range) {
     filters = { ...filters, from: range.from, to: range.to };
   }
 
@@ -6056,12 +6056,14 @@ export class ReportInputError extends Error {
  * سقف تقني لحجم الطلب الواحد، لا حد للاحتفاظ بالتاريخ المالي.
  * يمكن طلب تاريخ أطول في نوافذ منفصلة؛ 120 شهرًا ميزانية محافظة لا ضمان أداء.
  */
-const MAX_ANNUAL_REPORT_MONTHS = 120;
+const MAX_REPORT_MONTHS = 120;
 
 /** يتحقق من التقويم والمدى قبل تحميل المالية؛ لا يقتطع أي جزء منه بصمت. */
-export function validateAnnualReportRange(from: string | null | undefined, to: string | null | undefined) {
+function validateMonthRange(from: string | null | undefined, to: string | null | undefined, kind: "annual" | "movement") {
+  const title = kind === "annual" ? "التقرير السنوي" : "تقرير حركة المديونية";
+  const forReport = kind === "annual" ? "للتقرير السنوي" : "لتقرير حركة المديونية";
   const parseDate = (value: string | null | undefined): { date: string; month: number } => {
-    const invalid = () => new ReportInputError("أدخل تاريخي بداية ونهاية صالحين للتقرير السنوي بصيغة YYYY-MM-DD.");
+    const invalid = () => new ReportInputError(`أدخل تاريخي بداية ونهاية صالحين ${forReport} بصيغة YYYY-MM-DD.`);
     if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) throw invalid();
     const instant = toUTC(value);
     if (!Number.isFinite(instant) || fromUTC(instant) !== value) throw invalid();
@@ -6072,9 +6074,9 @@ export function validateAnnualReportRange(from: string | null | undefined, to: s
   const last = parseDate(to);
   const firstMonth = Math.min(first.month, last.month);
   const lastMonth = Math.max(first.month, last.month);
-  if (lastMonth - firstMonth + 1 > MAX_ANNUAL_REPORT_MONTHS) {
+  if (lastMonth - firstMonth + 1 > MAX_REPORT_MONTHS) {
     throw new ReportInputError(
-      "التقرير السنوي يدعم حتى 120 شهرًا في الطلب الواحد. اختر فترة أقصر، ويمكن عرض التاريخ الأطول على فترات منفصلة.",
+      `${title} يدعم حتى ${MAX_REPORT_MONTHS} شهرًا في الطلب الواحد. اختر فترة أقصر، ويمكن عرض التاريخ الأطول على فترات منفصلة.`,
     );
   }
   return {
@@ -6085,14 +6087,29 @@ export function validateAnnualReportRange(from: string | null | undefined, to: s
   };
 }
 
+export function validateAnnualReportRange(from: string | null | undefined, to: string | null | undefined) {
+  return validateMonthRange(from, to, "annual");
+}
+
+function validateReportMonthRange(
+  report: string | null, debtMode: string | null, from: string | null, to: string | null,
+) {
+  if (report === "annual") return validateAnnualReportRange(from, to);
+  if (report === "debt" && debtMode === "movement") return validateMonthRange(from, to, "movement");
+}
+
+export function validateCustomReportRange(params: URLSearchParams) {
+  if (params.get("preset") === "custom") {
+    validateReportMonthRange(params.get("report"), params.get("debtMode"), params.get("from"), params.get("to"));
+  }
+}
+
 export function parseFilters(params: URLSearchParams, today?: string): ReportFilters {
   const presetRaw = params.get("preset") ?? "this_month";
   const preset = (["today", "yesterday", "this_week", "this_month", "prev_month", "this_quarter", "this_year", "prev_year", "custom"] as const)
     .includes(presetRaw as PeriodPreset) ? (presetRaw as PeriodPreset) : "this_month";
-  // روابط التقرير السنوي المحفوظة والطباعة تمرّ أيضًا بهذا المحلّل.
-  if (params.get("report") === "annual" && preset === "custom") {
-    validateAnnualReportRange(params.get("from"), params.get("to"));
-  }
+  // فحص تواريخ الرابط الخام قبل أن يستبدل محلّل الفلاتر القيم الناقصة.
+  validateCustomReportRange(params);
   const { from, to } = resolvePeriod(preset, params.get("from"), params.get("to"), today);
 
   const doctorIdRaw = params.get("doctorId");
