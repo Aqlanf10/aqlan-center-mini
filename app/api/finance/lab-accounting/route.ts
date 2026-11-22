@@ -13,7 +13,7 @@ import {
   STANDARD_LAB_PAYABLE_ACCOUNTS,
   getAccountName,
 } from "@/lib/accounting";
-import { canViewMoney, isAdmin } from "@/lib/roles";
+import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -24,8 +24,10 @@ const denied = () =>
 export async function GET() {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canViewMoney(session.role)) {
-    return NextResponse.json({ message: "حسابات المختبرات للإدارة والمصرح لهم بالمالية فقط." }, { status: 403 });
+  // P1: supplier debt, lab spend, payment totals and account mappings are not reception data.
+  // Gate before listLabAccountingMappings() so no financial DB rows are read for denied roles.
+  if (!canViewFinancialReports(session.role)) {
+    return NextResponse.json({ message: "حسابات المختبرات للإدارة والمحاسب المخوّل فقط." }, { status: 403 });
   }
 
   try {
