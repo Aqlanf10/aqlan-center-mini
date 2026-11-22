@@ -38,6 +38,7 @@ const readers = [
 function signIn(role: string) {
   mocks.session.mockResolvedValue({
     role, username: "synthetic-actor", userId: 7000, expiresAt: Date.now() + 60_000,
+    financeAccess: role === "accountant" ? { viewReconciliation: true } : undefined,
   });
 }
 
@@ -77,12 +78,26 @@ describe("P1: laboratory reconciliation financial read boundary", () => {
     signIn(role);
     const response = await GET(request());
     expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     const body = await response.json();
     expect(body.labs).toEqual([]);
     expect(body.risks).toEqual([]);
     expect(mocks.parties).toHaveBeenCalledWith("lab");
     expect(mocks.orders).toHaveBeenCalledWith({ limit: 300 });
     expect(mocks.appointments).toHaveBeenCalledTimes(3);
+  });
+
+  it("refuses accountant even in a direct route call when the owner disabled reconciliation", async () => {
+    mocks.session.mockResolvedValue({
+      role: "accountant", username: "synthetic-accountant", userId: 7000,
+      expiresAt: Date.now() + 60_000, financeAccess: { viewReconciliation: false },
+    });
+    for (const suffix of ["", "?partyId=17", "?view=lab-balances-v1"]) {
+      const response = await GET(request(suffix));
+      expect(response.status).toBe(403);
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    }
+    for (const reader of readers) expect(reader).not.toHaveBeenCalled();
   });
 
   it("keeps the existing admin-only canonical balance view intact", async () => {
