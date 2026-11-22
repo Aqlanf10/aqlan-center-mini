@@ -25,8 +25,17 @@ describe("expense catalogue visibility policy", () => {
     expect(expenseCatalogueAccess("accountant", parseDoctorPermissions({}, "admin"), { viewReports: false })).toBe("catalogue");
   });
 
-  it.each(["admin", "reception", "cashier"])("preserves the existing %s read contract without inventing new restrictions", (role) => {
+  it.each(["admin", "cashier"])("preserves the authorized %s read contract", (role) => {
     expect(expenseCatalogueAccess(role, parseDoctorPermissions({}, role), { viewReports: false, createExpenses: false })).toBe("full");
+  });
+
+  it("allows reception expense-category labels but strips budget totals and counts", () => {
+    expect(expenseCatalogueAccess("reception")).toBe("catalogue");
+    const payload = projectExpenseCategories(input, expenseCatalogueAccess("reception"))!;
+    expect(payload.visibility).toBe("catalogue");
+    expect(payload).not.toHaveProperty("summary");
+    expect(payload.categories[0]).not.toHaveProperty("actualSpentMinor");
+    expect(payload.categories[0]).not.toHaveProperty("expensesCount");
   });
 
   it.each(["assistant", "unknown", "manager", undefined, null])("does not grant a new role access: %j", (role) => {

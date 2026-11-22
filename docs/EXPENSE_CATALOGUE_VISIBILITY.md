@@ -126,3 +126,11 @@ artifact step. No broad hidden-directory upload is added. These cases are author
 and typechecked locally, **not locally executed**. The exact-head CI and
 visual-inspection release gates subsequently passed as recorded above. They prove UI contract handling, while
 server admission/serialization is covered separately by the GET/proxy regressions.
+
+## 2026-11-22 P1 owner policy change — PR #550 (NOT RELEASED)
+
+The historical October 2 release description above is retained as evidence for that earlier policy, **not as the currently requested owner contract**. The owner now requires reception to collect authorized patient payments and see only that patient's remaining balance, with **no clinic-wide expense totals, expense vouchers, cash-desk aggregates, operating spend or commission reports**.
+
+Review PR #550 changes the expense-catalogue projection from `full` to `catalogue` for reception (operational category labels remain visible; budget, spend counts, figures and summaries are omitted). It also denies receptionist GET/POST/quote on expense vouchers, lists/uploads/byte reads of expense attachments, both at HTTP matrix and endpoint guard. `/api/payments` patient collection and `/api/patients/[id]/ledger` keep their preexisting receptionist role admission; their patient/service-specific scope still requires a separate acceptance review.
+
+**This is a partial P1 boundary, not authorization to deploy or a complete finance-privacy fix.** Audit `/api/shifts`, payables, saved/exported reports, financial reconciliation, expense documents through other paths, and client views. Owner-controlled granular grants and revocation flow remain outstanding. Check exact-head CI and real synthetic HTTP/browser tests; do not mistake standalone test descriptions for passed evidence. No production or staging data were read or modified by this checkpoint.
