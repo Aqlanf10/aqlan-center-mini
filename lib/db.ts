@@ -3322,6 +3322,7 @@ export async function searchPatients(
   term: string,
   limit = 8,
   doctorPartyId?: number | null,
+  options: { rankNormalizedFileCode?: boolean } = {},
 ): Promise<PatientSummary[]> {
   await ensureSchema();
   const trimmed = term.trim();
@@ -3336,16 +3337,23 @@ export async function searchPatients(
   const doctorFilter = scoped
     ? ` AND ${DOCTOR_PATIENT_CONDITION.replaceAll(":doc", `$${doctorParam}`)}`
     : "";
+  // The front desk compares a complete file number using the same digit
+  // normalization as search filtering. Keep internal callers' prior rank.
+  const rankNormalizedFileCode = options.rankNormalizedFileCode === true;
+  const exactFile = rankNormalizedFileCode
+    ? `${normalizedSql("patient_number")} = $2`
+    : "lower(patient_number) = lower($2)";
+  const exactTerm = rankNormalizedFileCode ? normalizeSearchText(trimmed) : trimmed;
   const { rows } = await getPool().query<PatientRow>(
     `SELECT id, patient_number, full_name, phone, medical_alert FROM patients
       WHERE ${condition.sql}
       ${doctorFilter}
-      ORDER BY CASE WHEN lower(patient_number) = lower($2) THEN 0
+      ORDER BY CASE WHEN ${exactFile} THEN 0
                     WHEN ${normalizedSql("full_name")} LIKE $3 ESCAPE '!' THEN 1
                     ELSE 2 END,
                full_name
       LIMIT $1`,
-    [limit, trimmed, `${tokens[0].replace(/[!%_]/g, (char) => `!${char}`)}%`, ...condition.params,
+    [limit, exactTerm, `${tokens[0].replace(/[!%_]/g, (char) => `!${char}`)}%`, ...condition.params,
       ...(scoped ? [doctorPartyId] : [])],
   );
   return rows.map((row) => ({

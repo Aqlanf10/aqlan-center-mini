@@ -49,7 +49,9 @@ export async function GET(request: Request) {
       id: patient.id, patientNumber: patient.patientNumber, fullName: patient.fullName, phone: patient.phone,
     });
     if (term.trim()) {
-      const rows = await searchPatients(term, 20, doctorPartyId);
+      const rows = session.role === "reception"
+        ? await searchPatients(term, 20, doctorPartyId, { rankNormalizedFileCode: true })
+        : await searchPatients(term, 20, doctorPartyId);
       return NextResponse.json(financeOnly ? rows.map(financeSummary) : rows);
     }
 

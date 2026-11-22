@@ -195,7 +195,12 @@ describe.each(listingModes)("GET patient %s doctor scope", (mode) => {
     const response = await GET(request(mode));
     expect(response.status).toBe(200);
     expect(mocks.user).not.toHaveBeenCalled();
-    expectScope(mode, null);
+    if (role === "reception" && mode === "search") {
+      expect(mocks.search).toHaveBeenCalledExactlyOnceWith("synthetic", 20, null, { rankNormalizedFileCode: true });
+      expect(mocks.browse).not.toHaveBeenCalled();
+    } else {
+      expectScope(mode, null);
+    }
     expect(await response.json()).toEqual(mode === "search" ? rows : {
       rows, total: 42, page: 0, pageSize: 25, filter: "all", sort: "recent", flag: null,
     });

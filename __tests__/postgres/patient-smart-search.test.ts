@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
 
 /**
@@ -7,11 +7,18 @@ import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_set
  * الهوية وجوال وليّ الأمر. كان «احمد» لا يجد «أحمد» — فيُنشأ ملفٌ مكرر.
  */
 
+// Exercise the real ordinary GET route and PostgreSQL query with an already
+// signed-in, fictional reception identity; no live authentication or traffic.
+vi.mock("@/lib/session", () => ({
+  requireSession: async () => ({ userId: 1, role: "reception", username: "synthetic-desk" }),
+}));
+
 assertRealPostgresUrl();
 stubPostgresEnv();
 
 const { getPool, resetPoolForTesting, ensureSchema, searchPatients, duplicateCandidates } = await import("../../lib/db");
 const { normalizeSearchText, normalizedSql } = await import("../../lib/patient-search");
+const { GET: receptionistSearch } = await import("../../app/api/patients/route");
 
 const ids: Record<string, number> = {};
 
@@ -26,12 +33,50 @@ beforeAll(async () => {
   await add("fatima", `INSERT INTO patients (patient_number, full_name, phone) VALUES ('PS-2', 'فاطمة مصطفى', '0733444555') RETURNING id`, []);
   await add("child", `INSERT INTO patients (patient_number, full_name, guardian_name, guardian_phone, national_id)
     VALUES ('PS-3', 'مُحَمَّد علي', 'علي سعيد', '771999888', '01010123456') RETURNING id`, []);
+  // Stage allocates P- with five digits minimum, not maximum. Match both a
+  // supported five-digit ID and a supported six-digit partial result.
+  await add("rankExact", "INSERT INTO patients (patient_number, full_name) VALUES ($1, $2) RETURNING id",
+    ["P-12345", "SYNTHETIC FRONT DESK ZULU"]);
+  await add("rankLonger", "INSERT INTO patients (patient_number, full_name) VALUES ($1, $2) RETURNING id",
+    ["P-123456", "SYNTHETIC FRONT DESK ALPHA"]);
+  await add("rankPadded", "INSERT INTO patients (patient_number, full_name) VALUES ($1, $2) RETURNING id",
+    ["P-07000", "SYNTHETIC FRONT DESK PADDED"]);
 }, 120_000);
 afterAll(async () => { await resetPoolForTesting(); });
 
 const found = async (term: string) => (await searchPatients(term, 20)).map((row) => row.id);
 
+const receptionFound = async (term: string) => {
+  const url = new URL("http://127.0.0.1/api/patients");
+  url.searchParams.set("q", term);
+  const response = await receptionistSearch(new Request(url));
+  expect(response.status).toBe(200);
+  const rows = await response.json() as { id: number; patientNumber: string }[];
+  return rows.map(({ id, patientNumber }) => ({ id, patientNumber }));
+};
+
 describe("(PAT-1) smart patient search", () => {
+  it.each(["P-12345", "p-١٢٣٤٥", "P-۱۲۳۴۵"])("ranks the exact file first for ordinary reception search %s", async term => {
+    expect(await receptionFound(term)).toEqual([
+      { id: ids.rankExact, patientNumber: "P-12345" }, { id: ids.rankLonger, patientNumber: "P-123456" },
+    ]);
+  });
+
+  it("preserves zero padding and keeps partial terms ambiguous", async () => {
+    for (const term of ["P-07000", "p-٠٧٠٠٠", "P-۰۷۰۰۰"]) {
+      expect(await receptionFound(term)).toEqual([{ id: ids.rankPadded, patientNumber: "P-07000" }]);
+    }
+    for (const term of ["P-1234", "۱۲۳۴۵"]) {
+      expect(await receptionFound(term)).toEqual([
+        { id: ids.rankLonger, patientNumber: "P-123456" }, { id: ids.rankExact, patientNumber: "P-12345" },
+      ]);
+    }
+  });
+
+  it("leaves unopted internal lookups in their existing order", async () => {
+    expect(await found("p-١٢٣٤٥")).toEqual([ids.rankLonger, ids.rankExact]);
+  });
+
   it("finds names regardless of hamza, taa marbuta, alef maqsura and diacritics", async () => {
     expect(await found("احمد")).toContain(ids.ahmad);
     expect(await found("فاطمه")).toContain(ids.fatima);
