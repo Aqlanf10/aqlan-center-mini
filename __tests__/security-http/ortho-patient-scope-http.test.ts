@@ -113,14 +113,31 @@ describe("ortho list patient and image isolation over real HTTP", () => {
     expect(response.status).toBe(400);
   });
 
-  it.each(["admin", "reception"] as const)("preserves %s list and direct metadata access", async (who) => {
-    const body = await listAs(h.sessions[who]);
+  it("preserves admin list and direct image metadata access", async () => {
+    const body = await listAs(h.sessions.admin);
     expect(body.cases.map((row) => row.id)).toEqual(expect.arrayContaining([caseA, caseB]));
-    const response = await authedGet(`/api/ortho/${caseB}`, h.sessions[who]);
+    const response = await authedGet(`/api/ortho/${caseB}`, h.sessions.admin);
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ photosVisible: true,
       adjustments: [expect.objectContaining({ photos: [expect.objectContaining({ id: photoB })] })],
     });
+  });
+
+  it("allows reception operational case context but denies clinical images and document bytes", async () => {
+    const body = await listAs(h.sessions.reception);
+    expect(body.cases.map((row) => row.id)).toEqual(expect.arrayContaining([caseA, caseB]));
+    const entry = body.cases.find((row) => row.id === caseB)!;
+    expect(entry.photosVisible).toBe(false);
+    expect(entry.adjustments[0].photos).toEqual([]);
+    expect(JSON.stringify(body)).not.toContain("Synthetic image B");
+
+    const response = await authedGet(`/api/ortho/${caseB}`, h.sessions.reception);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      photosVisible: false, adjustments: [expect.objectContaining({ photos: [] })],
+    });
+    expect((await authedGet(`/api/patients/${patientB}/documents`, h.sessions.reception)).status).toBe(403);
+    expect((await authedGet(`/api/documents/${photoB}`, h.sessions.reception)).status).toBe(403);
   });
 
   it("preserves the explicit all-patient grant even without a linked doctor party", async () => {

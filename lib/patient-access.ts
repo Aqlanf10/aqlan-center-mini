@@ -12,7 +12,13 @@ export async function canAccessPatient(
   ownershipLockMode?: "nowait",
 ): Promise<boolean> {
   if (client && session.expiresAt < Date.now()) return false;
-  if (session.role === "admin" || session.role === "reception") return true;
+  if (session.role === "admin") return true;
+  /* P0: the front desk can record outside images/PDFs but must never read them.
+   * All /api/documents bytes, patient document listings, ceph reads and ortho
+   * photo projections call this check with canViewXrays. Keep unrelated queue
+   * and per-patient collection access unchanged; role-specific owner grants are
+   * a separate, not-yet-implemented policy surface. */
+  if (session.role === "reception") return permission !== "canViewXrays";
   /* (P0-F) المساعد السريري: مرضى زيارات اليوم وحدهم — وبلا صلاحيات طبيبٍ إضافية (مدفوعات، أشعة…). */
   if (session.role === "assistant") {
     if (permission) return false;
