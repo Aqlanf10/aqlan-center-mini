@@ -70,9 +70,27 @@ describe("P0 reception full patient GET boundary (synthetic data only)", () => {
     deps.session.mockResolvedValue({ role, username: "synthetic-authorized" });
     const result = await get();
     expect(result.status).toBe(200);
+    expect(result.headers.get("Cache-Control")).toBe("private, no-store");
     expect(await result.json()).toEqual(syntheticFile);
     expect(deps.file).toHaveBeenCalledWith(syntheticId);
   });
+
+  it.each(["assistant", "cashier", "accountant"])(
+    "rejects nonclinical %s full-file access without querying even visit metadata",
+    async role => {
+      deps.session.mockResolvedValue({ role, username: `synthetic-${role}` });
+      const response = await get();
+      expect(response.status).toBe(403);
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+      const serialized = JSON.stringify(await response.json());
+      expect(serialized).not.toContain("synthetic-clinical-secret");
+      expect(serialized).not.toContain("synthetic-xray.png");
+      expect(serialized).not.toContain("99999");
+      expect(deps.visit).not.toHaveBeenCalled();
+      expect(deps.file).not.toHaveBeenCalled();
+      expect(deps.read).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects unauthenticated requests without querying patient data", async () => {
     deps.session.mockResolvedValue(null);
