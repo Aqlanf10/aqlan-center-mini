@@ -90,7 +90,16 @@ describe("expense catalogue GET authorization and serialization", () => {
     expect(findUser).not.toHaveBeenCalled();
   });
 
-  it.each(["admin", "reception", "cashier", "accountant"] as const)("preserves the existing authorized %s read contract", async (role) => {
+  it("redacts expense budgets and counts for reception while retaining category labels", async () => {
+    const req = request("reception");
+    expect((await proxy(req)).headers.get("x-middleware-next")).toBe("1");
+    const response = await GET(req);
+    expect(response.status).toBe(200);
+    catalogueOnly(await response.json());
+    expect(findUser).not.toHaveBeenCalled();
+  });
+
+  it.each(["admin", "cashier", "accountant"] as const)("preserves the authorized %s read contract", async (role) => {
     const req = request(role, {}, { createExpenses: false });
     expect((await proxy(req)).headers.get("x-middleware-next")).toBe("1");
     const body = await (await GET(req)).json();
