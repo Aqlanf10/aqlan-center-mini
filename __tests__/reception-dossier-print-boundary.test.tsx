@@ -32,7 +32,7 @@ beforeEach(() => {
       gender: "male", birthYear: 1990, phone: null, address: null,
       medicalAlert: "synthetic-private-alert", createdAt: "2026-01-01T00:00:00Z",
     },
-    visits: [{ id: 4, note: "synthetic-private-visit" }],
+    visits: [{ id: 4, arrivedAt: "2026-11-22T09:00:00.000Z", chair: 1, status: "done", note: "synthetic-private-visit" }],
     appointments: [],
   });
   mocks.chart.mockResolvedValue(null);
