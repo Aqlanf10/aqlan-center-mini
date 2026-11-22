@@ -6,7 +6,7 @@ import { CLINIC_TIME_ZONE, ensureSchema, getSettings, listAppointmentsByDate, li
 import { refusalStatus } from "@/lib/expense-request";
 import { rateOf, refusalMessage, type SupplierPaymentRefusal } from "@/lib/supplier-payments";
 import { addDays, clinicDateString } from "@/lib/schedule";
-import { isAdmin } from "@/lib/roles";
+import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import {
   buildBatchSettlementNote,
@@ -31,6 +31,12 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   if (!session) return searchParams.has("view")
     ? privateJson({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, 401) : denied();
+  // Financial reconciliation includes laboratory costs, supplier balances and patient-linked
+  // order details. Do not rely on the HTTP proxy: reject unauthorized roles before ANY DB read.
+  // Reception must keep patient-specific collection access through separate APIs only.
+  if (!canViewFinancialReports(session.role)) {
+    return privateJson({ message: "مطابقة المختبرات المالية متاحة للإدارة والمحاسبة فقط." }, 403);
+  }
   if (searchParams.has("view")) {
     // Financial ledger admission is stricter than legacy reconciliation reads. The
     // existing proxy/capability gates still apply; no role is granted access here.
