@@ -69,6 +69,16 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return patientAppointmentsResponse(_request, session, rawId);
   }
 
+  // P0: reception may use narrow appointment/collection endpoints, never the
+  // complete clinical file (documents, images, medical notes and finance).
+  // Reject BEFORE getPatientFile so no sensitive data is fetched or serialized.
+  if (session.role === "reception") {
+    return NextResponse.json(
+      { message: "الاستقبال لا يملك صلاحية فتح الملف السريري الكامل. استخدم بيانات الموعد أو التحصيل المصرح بها." },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
+
   try {
     const file = await getPatientFile(id);
     if (!file) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
