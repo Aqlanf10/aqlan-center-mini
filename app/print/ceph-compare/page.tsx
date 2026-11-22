@@ -33,7 +33,9 @@ export default async function CephComparePrintPage({
   searchParams: Promise<{ first?: string; second?: string }>;
 }) {
   const session = await requireSession();
-  if (!session) notFound();
+  // P0 privacy: legacy canAccessPatient admits reception even for canViewXrays.
+  // Deny print before any cephalometric study/analysis or patient data is read.
+  if (!session || session.role === "reception") notFound();
 
   const params = await searchParams;
   const first = Number(params.first);
