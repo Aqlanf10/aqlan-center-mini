@@ -122,12 +122,28 @@ describe("actual ortho route, proxy and canonical patient guard", () => {
     expect(patientCases).toHaveBeenCalledWith(101, expect.any(String));
   });
 
-  it.each(["admin", "reception"] as const)("preserves full authorized %s data without a doctor lookup", async (role) => {
-    const req = request(role);
+  it("preserves full authorized admin data without a doctor lookup", async () => {
+    const req = request("admin");
     expect((await proxy(req)).headers.get("x-middleware-next")).toBe("1");
     expect((await (await list(req)).json()).cases).toEqual(cases.map((row) => ({ ...row, photosVisible: true })));
     expect(await (await detail(req, context(22))).json()).toEqual({ ...cases[1], photosVisible: true });
     expect(userByName).not.toHaveBeenCalled(); expect(owns).not.toHaveBeenCalled();
+  });
+
+  it("preserves reception clinical case rows but strips saved image metadata", async () => {
+    const req = request("reception");
+    expect((await proxy(req)).headers.get("x-middleware-next")).toBe("1");
+    const redacted = (row: OrthoCase) => ({
+      ...row, photosVisible: false,
+      adjustments: row.adjustments.map((entry) => ({ ...entry, photos: [] })),
+    });
+    const listing = await (await list(req)).json();
+    expect(listing.cases).toEqual(cases.map(redacted));
+    expect(await (await detail(req, context(22))).json()).toEqual(redacted(cases[1]));
+    expect(JSON.stringify(listing)).not.toContain("Synthetic private image note");
+    expect(userByName).not.toHaveBeenCalled(); expect(owns).not.toHaveBeenCalled();
+    // The shared original stays unmodified so an authorized doctor still receives the image.
+    expect(cases[0].adjustments[0].photos).toHaveLength(1);
   });
 
   it.each([true, false])("honors canViewAllPatients independently of image access %s", async (canViewXrays) => {
