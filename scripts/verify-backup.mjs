@@ -103,11 +103,16 @@ const SEQUENCES = [
 
 const admin = new Client({ connectionString: source, ssl: sslFor(source) });
 let sourceClient = null;
+// Own only databases whose CREATE completed in this invocation. A name
+// collision or a failed CREATE must never authorize dropping an existing DB.
+const ownedDatabases = [];
 
 try {
   await admin.connect();
   await admin.query(`CREATE DATABASE ${sourceDb}`);
+  ownedDatabases.push(sourceDb);
   await admin.query(`CREATE DATABASE ${restoreDb}`);
+  ownedDatabases.push(restoreDb);
 
   /* ── ١+٢: قاعدة المصدر بمخطط البرنامج الحالي وببذره، ثم صفوفٌ معلومة ── */
   process.env.DATABASE_URL = withDatabase(source, sourceDb);
@@ -265,10 +270,17 @@ try {
 } finally {
   await sourceClient?.end().catch(() => {});
   try { rmSync(dumpFile, { force: true }); } catch {}
-  for (const name of [sourceDb, restoreDb]) {
-    await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`).catch(async () => {
-      await admin.query(`DROP DATABASE IF EXISTS ${name}`).catch(() => {});
-    });
+  for (const name of ownedDatabases.reverse()) {
+    try {
+      await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`);
+    } catch {
+      try {
+        await admin.query(`DROP DATABASE IF EXISTS ${name}`);
+      } catch {
+        // Do not report a successful drill if an owned disposable DB remains.
+        check(`cleanup of owned fixture ${name}`, false);
+      }
+    }
   }
   await admin.end().catch(() => {});
 }
