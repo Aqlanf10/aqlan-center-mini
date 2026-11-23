@@ -35,17 +35,23 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
   if (!session) notFound();
 
   const { id: rawId } = await params;
+  // This route accepts only canonical database IDs. A patient file number
+  // (e.g. P-07000) is printed from storage, never parsed as the URL ID.
+  // Reject exponent/hex/leading-zero aliases and unsafe integers before
+  // any patient-scope check or private data read.
+  if (!/^[1-9]\d*$/.test(rawId)) notFound();
   const id = Number(rawId);
-  if (!Number.isInteger(id) || id <= 0) notFound();
+  if (!Number.isSafeInteger(id)) notFound();
+
+  /* حرس الباب (P0.12): تحقق من نطاق المريض قبل جلب الاسم والرقم والهاتف
+   * والإعدادات أو المواعيد؛ إخفاء الصفحة بعد القراءة ليس حدّ خصوصية.
+   * الاستقبال المخوّل ما زال يستطيع طباعة البطاقة الإدارية فقط. */
+  if (!(await canAccessPatient(session, id).catch(() => false))) notFound();
 
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const [patient, settings] = await Promise.all([getPatient(id), getSettingsSafe()]);
   // ومريضٌ لا وجود له ٤٠٤، لا بطاقةً باسمٍ فارغ على ترويسة المركز.
   if (!patient) notFound();
-  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
-   * تعتمد على الوكيل العام الذي يمرر /print/*. */
-  if (!(await canAccessPatient(session, id).catch(() => false))) notFound();
-
 
   const next = upcomingAppointments(await patientAppointmentsFrom(id, today), today);
 
