@@ -66,6 +66,22 @@ describe("حدود بيانات المرضى", () => {
     expect(response.status).toBe(200);
     expect(mocks.patient).toHaveBeenCalledWith(42);
   });
+  it("يحظر عرض وسحب الأشعة من الاستقبال مع إبقاء رفع المستندات متاحًا", async () => {
+    mocks.staff.mockResolvedValue({ userId: 8, username: "reception", role: "reception" });
+    const session = await mocks.staff();
+    expect(await canAccessPatient(session, 42)).toBe(true);
+    expect(await canAccessPatient(session, 42, "canUploadXrays")).toBe(true);
+    expect(await canAccessPatient(session, 42, "canViewXrays")).toBe(false);
+    const response = await documentGet(new Request("http://localhost/api/documents/1"), {
+      params: Promise.resolve({ id: "1" }),
+    });
+    expect(response.status).toBe(403);
+    // Never load the document metadata or blob for a receptionist request.
+    expect(mocks.document).not.toHaveBeenCalled();
+    expect(mocks.bytes).not.toHaveBeenCalled();
+    expect(response.headers.get("Cache-Control")).toContain("no-store");
+  });
+
   it("يرفض تنزيل مستند مريض آخر قبل قراءة الملف", async () => {
     expect((await documentGet(new Request("http://localhost/api/documents/1"), { params: Promise.resolve({ id: "1" }) })).status).toBe(403);
     expect(mocks.bytes).not.toHaveBeenCalled();
