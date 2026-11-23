@@ -33,6 +33,10 @@ export const dynamic = "force-dynamic";
 export default async function PatientCardPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) notFound();
+  // Administrative A6 card: the assistant's visit-today clinical grant must
+  // not imply permission to print identity, phone and appointment details.
+  // Keep reception, admin and scoped doctors on their established workflow.
+  if (session.role !== "admin" && session.role !== "reception" && session.role !== "doctor") notFound();
 
   const { id: rawId } = await params;
   // This route accepts only canonical database IDs. A patient file number
