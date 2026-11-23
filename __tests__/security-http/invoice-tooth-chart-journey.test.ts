@@ -364,7 +364,13 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
     expect(await page.getByTestId("invoice-tooth-chip-0").innerText()).toContain("الأسنان: 26 (MO)");
     await page.getByTestId("invoice-provider-0").selectOption(String(doctorPartyId));
     await expect.poll(() => page.getByRole("button", { name: "احفظ الفاتورة", exact: true }).isEnabled()).toBe(true);
-    await page.getByTestId("invoice-clinical-preview-0").waitFor();
+    // A successful preview is attached inside closed disclosure by design.
+    const proof = page.locator('[data-testid="invoice-clinical-preview-0"][data-preview-state="ready"]');
+    await proof.waitFor({ state: "attached" });
+    const details = proof.locator("..");
+    if (await details.getAttribute("open") === null) await details.locator(":scope > summary").click();
+    await proof.waitFor({ state: "visible" });
+    expect(await proof.innerText()).toContain("بند خطة جديد");
     await save(page);
     expect(await planItems(patientId)).toEqual([{ tooth_code: 26, surfaces: "MO" }]);
     await context.close();

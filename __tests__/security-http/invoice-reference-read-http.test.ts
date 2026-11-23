@@ -8,7 +8,7 @@ import type { TreatmentFinancialContext } from "../../lib/treatment-financial-co
  * the invoice and historical agreement below use the real authenticated writers. */
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
-let patientId = 0, foreignPatientId = 0, planId = 0, siblingId = 0, itemId = 0, visitId = 0, serviceId = 0;
+let patientId = 0, foreignPatientId = 0, planId = 0, siblingId = 0, itemId = 0, visitId = 0, serviceId = 0, treatingDoctorId = 0;
 async function id(sql: string, values: unknown[] = []) {
   return (await db.query<{ id: number }>(sql, values)).rows[0].id;
 }
@@ -21,6 +21,8 @@ beforeAll(async () => {
   expect(new URL(h.seeded.dbUrl).hostname).toBe("127.0.0.1");
   expect(new URL(h.seeded.dbUrl).pathname).toBe("/aqlan_sec_http");
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false }); await db.connect();
+  ({ rows: [{ party_id: treatingDoctorId }] } = await db.query<{ party_id: number }>(
+    "SELECT party_id FROM users WHERE username = 'secdoctora'"));
   patientId = await patient(); foreignPatientId = await patient();
   const plan = () => id("INSERT INTO treatment_plans(patient_id,title,total_minor,base_currency) VALUES($1,'Synthetic existing plan',25250000,'SAR') RETURNING id", [patientId]);
   planId = await plan(); siblingId = await plan();
@@ -71,7 +73,7 @@ describe("invoice reference readers through the built application", () => {
   it("reads a real invoice's exact plan item and currency without manufacturing receipts", async () => {
     const target = await patient();
     const response = await authedMutation("/api/invoices", h.sessions.reception, "POST", JSON.stringify({
-      patientId: target, currency: "YER", idempotencyKey: randomUUID(), items: [{ serviceId, toothCode: 36 }],
+      patientId: target, currency: "YER", idempotencyKey: randomUUID(), items: [{ serviceId, toothCode: 36, doctorId: treatingDoctorId }],
     }));
     const created = await response.json(); expect(response.status, JSON.stringify(created)).toBe(201);
     const before = await snapshot(target); const result = await financial(target);

@@ -14,11 +14,14 @@ let db: Client;
 let patientId = 0;
 let rctId = 0;
 let crownId = 0;
+let treatingDoctorId = 0;
 
 beforeAll(async () => {
   h = await harness();
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
+  ({ rows: [{ party_id: treatingDoctorId }] } = await db.query<{ party_id: number }>(
+    "SELECT party_id FROM users WHERE username = 'secdoctora'"));
   const stamp = Date.now();
   ({ rows: [{ id: patientId }] } = await db.query<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'مريض القالب') RETURNING id`, [`T1-${stamp}`]));
@@ -35,7 +38,7 @@ async function create(templateSelection: Record<string, unknown>, selectedPatien
   const body = {
     patientId: selectedPatientId, currency: "YER", items: [],
     idempotencyKey: `template-adapter:${randomUUID()}`,
-    templateSelection: { doctorId: null, ...templateSelection },
+    templateSelection: { doctorId: treatingDoctorId, ...templateSelection },
   };
   const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify(body));
   if (preview.status !== 200) return preview;
@@ -207,7 +210,7 @@ describe("(SPEC-T1) plan from a specialty template", () => {
     const settingsBefore = await (await authedGet("/api/settings", h.sessions.admin)).json() as Record<string, unknown> & { __versions: Record<string, string | null> };
     const catalog = await (await authedGet("/api/plan-templates", h.sessions.admin)).json() as { templates: { id: string; steps: { key: string; sessions: { title: string; minutes: number; afterDays: number }[] }[] }[] };
     const key = "plans.specialty_templates";
-    const selection = { templateId: "endo", teeth: [18], doctorId: null, steps: [{ key: "rct", include: true, serviceId: rctId }] };
+    const selection = { templateId: "endo", teeth: [18], doctorId: treatingDoctorId, steps: [{ key: "rct", include: true, serviceId: rctId }] };
     const body = { patientId: patient.id, currency: "YER", items: [], idempotencyKey: `template-http-recovery:${randomUUID()}`, templateSelection: selection };
     const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify(body));
     expect(preview.status).toBe(200);

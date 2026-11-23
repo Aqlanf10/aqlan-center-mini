@@ -14,6 +14,7 @@ import { authedGet, authedMutation, harness } from "./_server";
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let crownId = 0;
+let treatingDoctorId = 0;
 let unpricedId = 0;
 let unpricedInUsd = 0;
 const stamp = Date.now();
@@ -37,6 +38,7 @@ async function createTreatment(session: "admin" | "reception", items: Record<str
   return authedMutation("/api/invoices", h.sessions[session], "POST", JSON.stringify({
     patientId: patient.id, currency: "YER", items: items.map((item) => ({
       serviceId: item.serviceId, description: item.serviceName, quantity: item.quantity,
+      doctorId: item.serviceId === crownId || item.serviceId === unpricedId ? treatingDoctorId : undefined,
       price: String(item.unitPriceMinor), priceReason: item.priceReason, toothCode: 36, sessions: 2,
     })),
   }));
@@ -56,6 +58,8 @@ beforeAll(async () => {
   h = await harness();
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
+  ({ rows: [{ party_id: treatingDoctorId }] } = await db.query<{ party_id: number }>(
+    "SELECT party_id FROM users WHERE username = 'secdoctora'"));
   await setMaxDiscount("10");
   ({ rows: [{ id: crownId }] } = await db.query<{ id: number }>(
     `INSERT INTO services (name, category, price_minor, price_configured, is_active)
