@@ -27,25 +27,35 @@ export const dynamic = "force-dynamic";
  *
  * **ولا تحمل تشخيصًا ولا مبلغًا ولا تنبيهًا طبيًّا.** ورقةٌ تُحمل في جيبٍ وتُنسى
  * على طاولة، ووضعُ حساسيةِ المريض أو رصيده عليها إفشاءٌ لا يحتاجه غرضُها.
- * **ولا تحمل رابط البوّابة**: الدخول إليها رقمُ الجوال ورقمُ الملف، والبطاقة
- * تحمل الاثنين — فالرابط المطبوع يجعلها مفتاحًا كاملًا لمن يجدها.
+ * **ولا تعلن دخول بوابة المرضى** قبل اعتمادها من المالك: رقم الملف والهاتف
+ * مطبوعان لأغراض إدارية، ولا تُقدَّم الورقة كدعوة لتسجيل الدخول.
  */
 export default async function PatientCardPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) notFound();
+  // Administrative A6 card: the assistant's visit-today clinical grant must
+  // not imply permission to print identity, phone and appointment details.
+  // Keep reception, admin and scoped doctors on their established workflow.
+  if (session.role !== "admin" && session.role !== "reception" && session.role !== "doctor") notFound();
 
   const { id: rawId } = await params;
+  // This route accepts only canonical database IDs. A patient file number
+  // (e.g. P-07000) is printed from storage, never parsed as the URL ID.
+  // Reject exponent/hex/leading-zero aliases and unsafe integers before
+  // any patient-scope check or private data read.
+  if (!/^[1-9]\d*$/.test(rawId)) notFound();
   const id = Number(rawId);
-  if (!Number.isInteger(id) || id <= 0) notFound();
+  if (!Number.isSafeInteger(id)) notFound();
+
+  /* حرس الباب (P0.12): تحقق من نطاق المريض قبل جلب الاسم والرقم والهاتف
+   * والإعدادات أو المواعيد؛ إخفاء الصفحة بعد القراءة ليس حدّ خصوصية.
+   * الاستقبال المخوّل ما زال يستطيع طباعة البطاقة الإدارية فقط. */
+  if (!(await canAccessPatient(session, id).catch(() => false))) notFound();
 
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const [patient, settings] = await Promise.all([getPatient(id), getSettingsSafe()]);
   // ومريضٌ لا وجود له ٤٠٤، لا بطاقةً باسمٍ فارغ على ترويسة المركز.
   if (!patient) notFound();
-  /* حرس الباب (P0.12): صفحة الطباعة تتحقق بنفسها من ملكية المريض — لا
-   * تعتمد على الوكيل العام الذي يمرر /print/*. */
-  if (!(await canAccessPatient(session, id).catch(() => false))) notFound();
-
 
   const next = upcomingAppointments(await patientAppointmentsFrom(id, today), today);
 
@@ -94,8 +104,8 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
 
         <div className="rule-light" />
         <p style={{ fontSize: "9pt", fontWeight: 700, margin: "1mm 0 0" }}>
-          متابعة مواعيدك وحسابك من جوّالك: ادخل بوّابة المرضى برقم ملفّك أعلاه
-          ورقم جوّالك المسجَّل لدينا.
+          احتفظ بهذه البطاقة وقدّم رقم الملف للاستقبال عند المراجعة أو الاستفسار
+          عن موعدك القادم.
         </p>
 
         {/* وتاريخ الطبع يقول إلى متى تصحّ الورقة. */}
