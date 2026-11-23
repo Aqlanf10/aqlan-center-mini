@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { validateOperationalVerificationEnvironment } from "../lib/verification-target-policy.mjs";
+import { assertSafeLegacyRestoreTarget } from "./security/synthetic-restore-target-guard.mjs";
 
 /**
  * هل النسخة الاحتياطية تُستعاد فعلًا؟
@@ -32,8 +34,15 @@ import { fileURLToPath } from "node:url";
  *   (الرابط للخادم فقط — تُنشأ منه قاعدتان جديدتان ولا تُقرأ قاعدته)
  */
 
-const source = process.env.SOURCE_DATABASE_URL ?? process.env.DATABASE_URL ?? "";
-if (!source.trim()) { console.error("خطأ: SOURCE_DATABASE_URL غير مضبوط."); process.exit(1); }
+// Direct invocation must enforce the same isolation policy as verify:ci.
+// Validate all aliases before rewriting DATABASE_URL or constructing a pg client.
+let source;
+try {
+  source = validateOperationalVerificationEnvironment(process.env, { requireSource: true });
+} catch (error) {
+  console.error(error instanceof Error ? error.message : "Backup verification target refused.");
+  process.exit(2);
+}
 
 function sslFor(url) {
   const lowered = url.toLowerCase();
@@ -52,6 +61,16 @@ const suffix = `${Date.now().toString(36)}_${randomBytes(4).toString("hex")}`;
 const sourceDb = `backup_src_${suffix}`;
 const restoreDb = `backup_dst_${suffix}`;
 const dumpFile = join(tmpdir(), `${restoreDb}.sql`);
+
+// Reuse the stricter legacy restore guard before *any* database connection or
+// CREATE DATABASE. In particular reject Railway markers, pg environment
+// overrides, ambiguous hosts and missing explicit users even on direct runs.
+try {
+  assertSafeLegacyRestoreTarget(withDatabase(source, restoreDb), process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : "Backup verification target refused.");
+  process.exit(2);
+}
 
 let failed = false;
 const check = (label, ok, extra = "") => {
