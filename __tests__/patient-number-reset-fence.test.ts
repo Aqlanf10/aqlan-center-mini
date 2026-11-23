@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { RESET_SEQUENCES } from "../lib/clinic-reset";
 import { PATIENT_NUMBER_SQL, paddedSequenceSql } from "../lib/document-numbers";
@@ -48,5 +49,23 @@ describe("direct backup drill target fence", () => {
     expect(result.error).toBeUndefined();
     expect(result.status).toBe(2);
     expect(result.stderr).toMatch(expected);
+  });
+});
+
+describe("backup drill cleanup ownership (source contract)", () => {
+  const source = readFileSync(new URL("../scripts/verify-backup.mjs", import.meta.url), "utf8");
+
+  it("registers ownership only after each CREATE succeeds", () => {
+    for (const name of ["sourceDb", "restoreDb"]) {
+      const create = 'await admin.query(`CREATE DATABASE ${' + name + '}`);';
+      expect(source).toContain(create + "\n  ownedDatabases.push(" + name + ");");
+    }
+    expect(source).toContain("const ownedDatabases = [];");
+    expect(source).not.toContain("for (const name of [sourceDb, restoreDb])");
+  });
+
+  it("cleans only registered databases and fails the drill if both drops fail", () => {
+    expect(source).toContain("for (const name of ownedDatabases.reverse())");
+    expect(source).toContain("check(`cleanup of owned fixture ${name}`, false);");
   });
 });
