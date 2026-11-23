@@ -42,13 +42,16 @@ beforeAll(async () => {
 afterAll(async () => { await db?.end(); });
 
 const compare = (a: number, b: number, patient?: number) => `/ceph/compare?first=${a}&second=${b}${patient === undefined ? "" : `&patient=${patient}`}`;
-async function payload(path: string, role: keyof typeof h.sessions, rsc: boolean) {
+async function fetchPage(path: string, role: keyof typeof h.sessions, rsc: boolean) {
   // Next validates the RSC cache key; with no router-state headers its value is empty.
   const requestPath = rsc ? `${path}${path.includes("?") ? "&" : "?"}_rsc=` : path;
   const response = await authedGet(requestPath, h.sessions[role], rsc ? { RSC: "1" } : {});
   expect(response.status).toBeLessThan(500);
   expect(response.headers.get("content-type")).toContain(rsc ? "text/x-component" : "text/html");
-  return response.text();
+  return { response, body: await response.text() };
+}
+async function payload(path: string, role: keyof typeof h.sessions, rsc: boolean) {
+  return (await fetchPage(path, role, rsc)).body;
 }
 function privateDataAbsent(body: string) {
   expect([...markers, otherPatientMarker].filter((marker) => body.includes(marker)), "private markers in response").toEqual([]);
@@ -69,11 +72,37 @@ describe.each([false, true])("Ceph page authorization (RSC=%s)", (rsc) => {
       await db.query("UPDATE users SET permissions=$1 WHERE username=$2", [original, TEST_USERS.doctorA.username]);
     }
   });
-  it.each(["doctorA", "admin", "reception"] as const)("preserves authorized %s access", async (role) => {
+  it.each(["doctorA", "admin"] as const)("preserves authorized %s access", async (role) => {
     const body = await payload(`/ceph/${first}`, role, rsc);
     for (const marker of markers) expect(body.includes(marker), `authorized response missing ${marker}`).toBe(true);
     expect((await payload(compare(first, second, patientId), role, rsc)).includes(patientMarker)).toBe(true);
     expect((await payload(compare(first, second), role, rsc)).includes(patientMarker)).toBe(true);
+  });
+  it("refuses reception clinical workspace and comparisons even after authorized reads", async () => {
+    const paths = [`/ceph/${first}`, compare(first, second, patientId), compare(first, second)];
+    for (const path of paths) {
+      const authorized = await fetchPage(path, "admin", rsc);
+      expect(authorized.response.status).toBe(200);
+      expect(authorized.body.includes(patientMarker)).toBe(true);
+
+      const { response, body } = await fetchPage(path, "reception", rsc);
+      // A streamed App Router response can carry the not-found boundary after
+      // a 200 envelope has started. A bare 200 (including a login page) is not denial.
+      expect([404, 200]).toContain(response.status);
+      if (response.status === 200) {
+        expect(body).toMatch(/NEXT_HTTP_ERROR_FALLBACK;404|This page could not be found\./);
+      }
+      const cache = (response.headers.get("cache-control") ?? "").toLowerCase().split(",").map(value => value.trim());
+      expect(cache).toContain("no-store");
+      expect(cache.some(value => value === "public" || value.startsWith("s-maxage="))).toBe(false);
+      privateDataAbsent(body);
+      for (const label of [
+        "التحليل السيفالومتري —", "مقارنة التحليلات السيفالومترية —",
+        "الشععة تُقرأ من مستندات المريض", "طباعة تقرير المقارنة",
+      ]) {
+        expect(body.includes(label), "clinical label present in a denied response").toBe(false);
+      }
+    }
   });
   it("rejects missing, invalid, discarded, same and mismatched comparison identities", async () => {
     for (const path of [
