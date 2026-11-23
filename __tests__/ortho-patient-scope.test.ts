@@ -30,6 +30,16 @@ const caseById = vi.mocked(getOrthoCase);
 const userByName = vi.mocked(findUserByUsername);
 const owns = vi.mocked(doctorOwnsPatient);
 const secret = "synthetic-ortho-patient-scope-not-a-live-credential";
+const syntheticPng = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6nAAAAABJRU5ErkJggg==", "base64");
+function syntheticPhoto(caseId: number, patientId: number): PatientDocument {
+  return {
+    id: 965000 + caseId, patientId, kind: "photo", title: `Synthetic private image ${patientId}`,
+    note: "Synthetic private image note", visitId: null, mimeType: "image/png", sizeBytes: syntheticPng.length,
+    isImage: true, takenOn: "2026-10-01", uploadedBy: "synthetic-photo-uploader", uploadedAt: "2026-10-01T10:00:00Z",
+    removedAt: null, removedBy: null, removedNote: null, orthoCaseId: caseId, adjustmentId: caseId + 1000,
+    photoStage: "synthetic-photo-stage", photoView: "synthetic-photo-view", width: 1, height: 1,
+  };
+}
 function fixture(id: number, patientId: number): OrthoCase {
   return {
     id, patientId, patientName: `Synthetic patient ${patientId}`, appliance: "fixed_metal", arches: "both", slot: "022",
@@ -42,7 +52,7 @@ function fixture(id: number, patientId: number): OrthoCase {
       id: id + 1000, visitId: null, visitSigned: false, doneOn: "2026-10-01", phase: "aligning",
       upperWire: "014 NiTi", lowerWire: "014 NiTi", elastics: "none", elasticNote: null,
       done: `Synthetic procedure ${id}`, nextWeeks: 4, note: "Synthetic adjustment note", recordedBy: "synthetic",
-      photos: [{ id: id + 2000, patientId, title: `Synthetic image ${patientId}`, note: "Synthetic private image note" } as PatientDocument],
+      photos: [syntheticPhoto(id, patientId)],
     }],
     progress: { monthsElapsed: 0, monthsPlanned: 18, monthsRemaining: 18, percent: 0, overdue: false,
       adjustments: 1, lastAdjustment: "2026-10-01", daysSinceLast: 0 },
@@ -54,13 +64,13 @@ function user(raw: unknown = {}) {
   return { id: 7, username: "synthetic", role: "doctor", isActive: true, partyId: 7,
     permissions: parseDoctorPermissions(raw, "doctor") } as NonNullable<Awaited<ReturnType<typeof findUserByUsername>>>;
 }
-function request(role: Role | null = "doctor", suffix = "", raw: unknown = {}) {
+function request(role: Role | null = "doctor", suffix = "", raw: unknown = {}, path = "/api/ortho") {
   const payload = { username: "synthetic", userId: 7, role: role!, expiresAt: Date.now() + 60_000, partyId: 7 };
   session.mockResolvedValue(role ? payload : null);
   userByName.mockResolvedValue(user(raw));
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const token = `${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
-  return new NextRequest(`https://synthetic.invalid/api/ortho${suffix}`, {
+  return new NextRequest(`https://synthetic.invalid${path}${suffix}`, {
     headers: role ? { authorization: `Bearer ${token}` } : {},
   });
 }
@@ -122,12 +132,70 @@ describe("actual ortho route, proxy and canonical patient guard", () => {
     expect(patientCases).toHaveBeenCalledWith(101, expect.any(String));
   });
 
-  it.each(["admin", "reception"] as const)("preserves full authorized %s data without a doctor lookup", async (role) => {
-    const req = request(role);
-    expect((await proxy(req)).headers.get("x-middleware-next")).toBe("1");
+  it("keeps full clinical photos for admin without a doctor lookup", async () => {
+    const req = request("admin");
+    const middleware = await proxy(req);
+    expect(middleware.headers.get("x-middleware-next")).toBe("1");
+    expect(middleware.headers.get("cache-control")).toBe("private, no-store");
     expect((await (await list(req)).json()).cases).toEqual(cases.map((row) => ({ ...row, photosVisible: true })));
     expect(await (await detail(req, context(22))).json()).toEqual({ ...cases[1], photosVisible: true });
     expect(userByName).not.toHaveBeenCalled(); expect(owns).not.toHaveBeenCalled();
+  });
+
+  it("keeps reception case context but no photo document on global, patient-filtered or detail GET", async () => {
+    const withoutPhotos = (row: OrthoCase) => ({
+      ...row, photosVisible: false, adjustments: row.adjustments.map((entry) => ({ ...entry, photos: [] })),
+    });
+    // Switch roles across requests against the same immutable hydrated rows.
+    expect((await (await list(request("admin"))).json()).cases[0].adjustments[0].photos).toHaveLength(1);
+    const global = request("reception");
+    const filtered = request("reception", "?patientId=101");
+    const direct = request("reception", "", {}, "/api/ortho/22");
+    for (const req of [global, filtered, direct]) {
+      const middleware = await proxy(req);
+      expect(middleware.headers.get("x-middleware-next")).toBe("1");
+      expect(middleware.headers.get("cache-control")).toBe("private, no-store");
+    }
+    const responses = [await list(global), await list(filtered), await detail(direct, context(22))];
+    for (const response of responses) expect(response.status).toBe(200);
+    const [all, scoped, single] = await Promise.all(responses.map((response) => response.json()));
+    expect(all.cases).toStrictEqual(cases.map(withoutPhotos));
+    expect(scoped.cases).toStrictEqual([cases[0], cases[2]].map(withoutPhotos));
+    expect(single).toStrictEqual(withoutPhotos(cases[1]));
+    const serialized = JSON.stringify([all, scoped, single]);
+    for (const { adjustments } of cases) for (const { photos } of adjustments) for (const photo of photos) {
+      for (const privateValue of [photo.id, photo.title, photo.note, photo.photoStage, photo.photoView, photo.uploadedBy, photo.mimeType]) {
+        expect(serialized).not.toContain(String(privateValue));
+      }
+    }
+    expect(getDocumentForDownload).not.toHaveBeenCalled(); expect(readFileByKey).not.toHaveBeenCalled();
+    expect(userByName).not.toHaveBeenCalled(); expect(owns).not.toHaveBeenCalled();
+    expect((await (await detail(request("doctor"), context(11))).json()).adjustments[0].photos)
+      .toStrictEqual(cases[0].adjustments[0].photos);
+  });
+
+  it("uses a separate no-store document byte boundary for reception versus authorized clinicians", async () => {
+    const photo = cases[0].adjustments[0].photos[0];
+    const url = `/api/documents/${photo.id}`;
+    vi.mocked(getDocumentForDownload).mockResolvedValue({ document: photo, storageKey: "synthetic-private-key" });
+    vi.mocked(readFileByKey).mockResolvedValue(syntheticPng);
+    const withheld = await download(request("reception", "", {}, url), context(photo.id));
+    expect(withheld.status).toBe(403);
+    expect(withheld.headers.get("cache-control")).toBe("private, no-store");
+    expect(withheld.headers.get("content-disposition")).toBeNull();
+    expect(Object.keys(await withheld.json())).toEqual(["message"]);
+    expect(getDocumentForDownload).not.toHaveBeenCalled(); expect(readFileByKey).not.toHaveBeenCalled();
+
+    for (const role of ["admin", "doctor"] as const) {
+      const allowed = await download(request(role, "", {}, url), context(photo.id));
+      expect(allowed.status).toBe(200);
+      expect(allowed.headers.get("cache-control")).toBe("private, no-store");
+      expect(allowed.headers.get("content-type")).toBe("image/png");
+      expect(Buffer.from(await allowed.arrayBuffer())).toEqual(syntheticPng);
+    }
+    expect(getDocumentForDownload).toHaveBeenCalledTimes(2);
+    expect(readFileByKey).toHaveBeenCalledTimes(2);
+    expect(owns).toHaveBeenCalledWith(7, 101);
   });
 
   it.each([true, false])("honors canViewAllPatients independently of image access %s", async (canViewXrays) => {
@@ -157,7 +225,7 @@ describe("actual ortho route, proxy and canonical patient guard", () => {
     // No mutation of the shared hydrated object can destroy photos for another authorized reader.
     expect(cases[0].adjustments[0].photos).toHaveLength(1);
     vi.mocked(getDocumentForDownload).mockResolvedValue({ document: cases[0].adjustments[0].photos[0], storageKey: "synthetic" });
-    expect((await download(req, context(2011))).status).toBe(403);
+    expect((await download(req, context(cases[0].adjustments[0].photos[0].id))).status).toBe(403);
     expect(readFileByKey).not.toHaveBeenCalled();
   });
 
