@@ -10,6 +10,9 @@ import {
   type Currency,
 } from "@/lib/money";
 import { ShiftCloseStatus } from "./ShiftCloseStatus";
+import { useSession } from "../SessionProvider";
+import { canViewFinancialReports } from "@/lib/roles";
+import { restrictedRouteAllowed } from "@/lib/role-routes";
 import { ReceiptCorrectionLauncher } from "../ReceiptCorrectionLauncher";
 import { ReceiptProvenance } from "../ReceiptProvenance";
 import { receiptDocumentTitle, receiptProvenanceFor } from "@/lib/receipt-provenance";
@@ -153,6 +156,10 @@ export function CashShiftTab({
   closing,
   setClosing,
 }: CashShiftTabProps) {
+  const session = useSession();
+  const canViewFullReconciliation = canViewFinancialReports(session?.role)
+    && restrictedRouteAllowed(session?.role, "/finance/reconciliation", "GET", session?.permissions?.financeAccess);
+
   // نماذج الإدخال
   const [opening, setOpening] = useState(emptyAmounts);
   const [counted, setCounted] = useState(emptyAmounts);
@@ -843,12 +850,14 @@ export function CashShiftTab({
             <h3 className="text-xs font-black text-navy-900">
               سجل الورديات السابقة المغلقة
             </h3>
-            <Link
-              href="/finance/reconciliation"
-              className="text-xs font-bold text-brand-blue hover:underline"
-            >
-              سجل المطابقة الكامل والتسويات ↗
-            </Link>
+            {canViewFullReconciliation ? (
+              <Link
+                href="/finance/reconciliation"
+                className="text-xs font-bold text-brand-blue hover:underline"
+              >
+                سجل المطابقة الكامل والتسويات ↗
+              </Link>
+            ) : null}
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2">
