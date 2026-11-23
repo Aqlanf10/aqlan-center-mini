@@ -9,6 +9,7 @@ import { isAdmin } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, isDocumentKind, validateUpload } from "@/lib/storage";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { projectUploadedClinicalDocument } from "@/lib/clinical-document-upload-receipt";
 import { bodyErrorResponse, readBoundedFormData } from "@/lib/http-body";
 import { UPLOAD_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { contentMatchesMimeType, SIGNATURE_MISMATCH_MESSAGE } from "@/lib/magic-bytes";
@@ -189,7 +190,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       actor: session.username,
       actorRole: session.role,
     });
-    return NextResponse.json(document, { status: 201 });
+    // Upload-only reception sees neither the saved document ID nor storage metadata.
+    // Never let clinical POST responses persist in browser or shared intermediary caches.
+    return NextResponse.json(projectUploadedClinicalDocument(session.role, document), {
+      status: 201,
+      headers: { "Cache-Control": "private, no-store" },
+    });
   } catch (error) {
     if (error instanceof DocumentAssociationError) {
       return NextResponse.json({ message: error.message }, { status: 400 });
