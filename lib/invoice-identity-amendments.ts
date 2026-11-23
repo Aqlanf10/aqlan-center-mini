@@ -27,6 +27,9 @@ export async function validateInvoiceIdentityAmendments(client:DbClient,invoice:
     if(serviceId===old.serviceId&&doctorId===old.doctorId&&toothCode===(old.toothCode??null)&&surfaces===(old.surfaces??null))continue;
     const linked=work.find(row=>row.id===old.planItemId);
     if(!available||linked&&(linked.clinical_locked||linked.legacy)||old.financialReviewRequired)refuse("لا يمكن تغيير الخدمة أو الطبيب أو الموضع بعد تحصيل أو عمل/مسودة سريرية أو اعتماد عمولة؛ أبقِ الهوية وصحّح المبلغ فقط.");
+    // The linked plan doctor also determines the performer on covered visit work.
+    // A financial revision is not a clinical reassignment, even before treatment.
+    if(old.planItemId!=null&&doctorId!==old.doctorId)refuse("لا يمكن تغيير طبيب بند مرتبط بخطة من تصحيح الفاتورة؛ لم يتغيّر الطبيب أو الملف السريري.");
     const {rows:[service]}=await client.query<{id:number;name:string;category:string|null}>("SELECT id,name,category FROM services WHERE id=$1 AND is_active FOR SHARE NOWAIT",[serviceId]);
     const {rows:[prior]}=await client.query<{category:string|null}>("SELECT category FROM services WHERE id=$1 FOR SHARE NOWAIT",[old.serviceId]);
     if(serviceId!==null&&!service||doctorId!==null&&!(await client.query("SELECT id FROM parties WHERE id=$1 AND kind='doctor' FOR SHARE NOWAIT",[doctorId])).rowCount)refuse("الخدمة أو الطبيب لم يعد متاحًا؛ حدّث التصحيح.");

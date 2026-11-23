@@ -4,12 +4,12 @@ import {Client} from "pg";
 import {mkdirSync} from "node:fs";
 import {authedMutation,baseUrl,harness} from "./_server";
 import type {Currency} from "../../lib/money";
-let h:Awaited<ReturnType<typeof harness>>,db:Client,browser:Browser,service:number,nextService:number,doctor:number,nextDoctor:number,serial=0;
+let h:Awaited<ReturnType<typeof harness>>,db:Client,browser:Browser,service:number,nextService:number,doctor:number,serial=0;
 const evidence="artifacts/invoice-identity-correction";
 beforeAll(async()=>{
   h=await harness();db=new Client({connectionString:h.seeded.dbUrl,ssl:false});await db.connect();
   browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE||undefined});mkdirSync(evidence,{recursive:true});
-  [doctor,nextDoctor]=(await db.query("SELECT party_id FROM users WHERE username IN ('secdoctora','secdoctorb') ORDER BY username")).rows.map(row=>Number(row.party_id));
+  doctor=Number((await db.query("SELECT party_id FROM users WHERE username='secdoctora'")).rows[0].party_id);
   const services=await db.query("INSERT INTO services(name,category,price_minor,price_sar_minor,price_usd_minor,price_configured,is_active) VALUES('Synthetic original identity service','rct',1000,100000,100000,TRUE,TRUE),('Synthetic corrected identity service','rct',1000,100000,100000,TRUE,TRUE) RETURNING id");
   [service,nextService]=services.rows.map(row=>Number(row.id));
 },240000);
@@ -26,14 +26,14 @@ async function fixture(currency:Currency,width:number){
 }
 const scenarios=(["YER","SAR","USD"] as Currency[]).flatMap(currency=>[390,1440].map(width=>({currency,width})));
 describe("real safe clinical identity amendment and native currencies",()=>{
-  it.each(scenarios)("amends service/provider/tooth in $currency at $width with original evidence retained",async({currency,width})=>{
+  it.each(scenarios)("amends service/tooth with provider held in $currency at $width with original evidence retained",async({currency,width})=>{
     const {patientId,invoice,context,open}=await fixture(currency,width),page=await context.newPage(),errors:string[]=[],bodies:string[]=[];
     page.on("pageerror",error=>errors.push(error.message));page.on("dialog",dialog=>void dialog.accept());
     try{
       await open(page);const form=page.getByTestId("invoice-correction-editor");
       await form.getByText("تصحيح الخدمة والطبيب والموضع",{exact:true}).click();
       await form.getByLabel("خدمة التصحيح 1",{exact:true}).selectOption(String(nextService));
-      await form.getByLabel("طبيب التصحيح 1",{exact:true}).selectOption(String(nextDoctor));
+      expect(await form.getByLabel("طبيب التصحيح 1",{exact:true}).isDisabled()).toBe(true);
       await form.getByLabel("سن التصحيح 1",{exact:true}).fill("46");
       await form.getByLabel("سعر التصحيح 1",{exact:true}).fill("900");
       await form.getByLabel("سبب التصحيح",{exact:true}).fill("تصحيح موثق قبل بدء العلاج الاصطناعي");
@@ -53,11 +53,11 @@ describe("real safe clinical identity amendment and native currencies",()=>{
       }
       await page.getByText(/حُفظ التصحيح في/).waitFor();
       expect(bodies).toHaveLength(lost?2:1);if(lost)expect(bodies[1]).toBe(bodies[0]);
-      expect(JSON.parse(bodies[0]).lines[0]).toMatchObject({serviceId:nextService,doctorId:nextDoctor,toothCode:46});
+      expect(JSON.parse(bodies[0]).lines[0]).toMatchObject({serviceId:nextService,doctorId:doctor,toothCode:46});
       const ledger=await page.request.get(`${baseUrl}/api/patients/${patientId}/ledger`);expect(ledger.status()).toBe(200);
       const data=await ledger.json(),old=data.invoices.find((row:{id:number})=>row.id===invoice.id),current=data.invoices.find((row:{status:string})=>row.status!=="cancelled");
       expect(old.items[0]).toMatchObject({serviceId:service,doctorId:doctor,toothCode:36});
-      expect(current.items[0]).toMatchObject({serviceId:nextService,doctorId:nextDoctor,toothCode:46,unitPriceMinor:currency==="YER"?900:90000,financialReviewRequired:false});
+      expect(current.items[0]).toMatchObject({serviceId:nextService,doctorId:doctor,toothCode:46,unitPriceMinor:currency==="YER"?900:90000,financialReviewRequired:false});
       expect((await db.query("SELECT id FROM invoice_corrections WHERE patient_id=$1",[patientId])).rows).toHaveLength(1);
       expect((await db.query("SELECT id FROM plan_items WHERE plan_id IN(SELECT id FROM treatment_plans WHERE patient_id=$1)",[patientId])).rows).toHaveLength(1);
       expect((await db.query("SELECT id FROM clinical_cases WHERE patient_id=$1",[patientId])).rows).toHaveLength(1);

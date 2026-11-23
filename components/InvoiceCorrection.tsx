@@ -170,9 +170,10 @@ export function InvoiceCorrection({patientId,invoiceId,recovery,onRecoveryChange
               {!choices.some(row=>String(row.id)===draft?.serviceId)?<option value={draft?.serviceId??""}>{item.description}</option>:null}
               {choices.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}
             </select></label>
-            <label>الطبيب المعالج<select aria-label={`طبيب التصحيح ${index+1}`} className={input} value={draft?.doctorId??""} disabled={!canAmend} onChange={event=>change({doctorId:event.target.value})}>
+            <label>الطبيب المعالج<select aria-label={`طبيب التصحيح ${index+1}`} className={input} value={draft?.doctorId??""} disabled={!canAmend||item.planItemId!=null} onChange={event=>change({doctorId:event.target.value})}>
               <option value="">دون طبيب</option>{view.identityCatalog?.doctors.map(row=><option key={row.id} value={row.id}>{row.name}</option>)}
             </select></label>
+            {item.planItemId!=null?<p className="text-xs leading-6">هذا البند مرتبط بخطة علاج؛ لا يمكن تغيير طبيبه من تصحيح الفاتورة.</p>:null}
             {item.toothCode?<><label>السن<input aria-label={`سن التصحيح ${index+1}`} className={input} inputMode="numeric" value={draft?.tooth??""} disabled={!canAmend} onChange={event=>change({tooth:event.target.value})}/></label>
               <label>الأسطح (MODBL)<input aria-label={`أسطح التصحيح ${index+1}`} className={input} value={draft?.surfaces??""} disabled={!canAmend} onChange={event=>change({surfaces:event.target.value})}/></label></>:null}
           </div>

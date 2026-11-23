@@ -217,9 +217,11 @@ export async function reviseInvoice(invoiceId: number, source: Record<string, un
       if (line) {
         const identity=amendments.get(original.id);
         if(identity){
-          await client.query("UPDATE plan_items SET service_id=$2,doctor_id=$3,service_name=$4,category=$5,tooth_code=$6,surfaces=$7 WHERE id=$1",
-            [work.id,identity.serviceId,identity.doctorId,identity.description,identity.category,identity.toothCode,identity.surfaces]);
-          if(work.case_id!==null)await client.query("UPDATE clinical_cases SET site=$2,responsible_party_id=$3 WHERE id=$1",[work.case_id,identity.caseSite,identity.doctorId]);
+          await client.query("UPDATE plan_items SET service_id=$2,service_name=$3,category=$4,tooth_code=$5,surfaces=$6 WHERE id=$1",
+            [work.id,identity.serviceId,identity.description,identity.category,identity.toothCode,identity.surfaces]);
+          // Keep the existing explicit tooth correction, never copy a financial doctor to a case.
+          if(work.case_id!==null && identity.toothCode!==(original.toothCode??null) && identity.caseSite!==work.case_site)
+            await client.query("UPDATE clinical_cases SET site=$2 WHERE id=$1",[work.case_id,identity.caseSite]);
         }
         await client.query("UPDATE plan_items SET quantity=$2,unit_price_minor=$3,billed_invoice_id=$4,billing_status='billed' WHERE id=$1",
           [work.id,line.quantity,line.unitPriceMinor,result.correctedId]);

@@ -27,10 +27,10 @@ beforeAll(async () => {
 },180_000);
 afterAll(async () => { await db.resetPoolForTesting(); });
 const terms = (amount: number):DebtRepaymentTerms => amount > 0 ? { mode:"installments",installments:[{dueDate:"2026-11-14",kind:"installment",amountMinor:amount}] } : { mode:"full",installments:[] };
-async function fixture(paid = 0, currency: Currency = "YER") {
+async function fixture(paid = 0, currency: Currency = "YER", financialDoctorId: number|null = null) {
   const patientId = (await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic correction') RETURNING id",[`INV-REV-${++serial}`]))[0].id;
   const invoice = await db.createInvoice({patientId,baseCurrency:currency,discountMinor:0,note:null,createdBy:session.username,
-    items:[{serviceId:null,doctorId:null,description:"Synthetic financial item",quantity:1,unitPriceMinor:10000}]});
+    items:[{serviceId:null,doctorId:financialDoctorId,description:"Synthetic financial item",quantity:1,unitPriceMinor:10000}]});
   if (!invoice) throw new Error("fixture invoice missing");
   if (paid) {
     const receipt = await db.recordPayment({patientId,invoiceId:invoice.id,kind:"payment",amountMinor:paid,currency,baseCurrency:currency,
@@ -210,51 +210,100 @@ describe("immutable invoice replacement and original receipt settlement", () => 
 
 
 describe("safe pre-treatment clinical identity correction",()=>{
-  async function identityFixture(){
+  async function identityFixture(explicitCaseOwner=false){
     const patientId=(await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic identity correction') RETURNING id",[`IDENTITY-${++serial}`]))[0].id;
     const doctor=(await q("INSERT INTO parties(name,kind) VALUES('Synthetic original doctor','doctor') RETURNING id"))[0].id;
     const nextDoctor=(await q("INSERT INTO parties(name,kind) VALUES('Synthetic corrected doctor','doctor') RETURNING id"))[0].id;
     const service=(await q("INSERT INTO services(name,category,price_minor,price_configured,is_active) VALUES('Synthetic original root canal','rct',10000,TRUE,TRUE) RETURNING id"))[0].id;
     const nextService=(await q("INSERT INTO services(name,category,price_minor,price_configured,is_active) VALUES('Synthetic corrected root canal','rct',10000,TRUE,TRUE) RETURNING id"))[0].id;
+    const clinical=explicitCaseOwner?await db.createClinicalCase({patientId,specialty:"endodontics",title:"Synthetic separately assigned case",
+      site:"36",responsiblePartyId:nextDoctor,problem:null,orthoCaseId:null,actor:session.username,actorRole:session.role}):null;
+    if(clinical && !clinical.ok)throw new Error("Synthetic explicit clinical case creation failed");
     const issued=await linked.createLinkedInvoice({patientId,baseCurrency:"YER",discountMinor:0,note:null,createdBy:session.username,actorRole:"admin",
-      items:[{serviceId:service,category:"rct",doctorId:doctor,description:"Synthetic original root canal",quantity:1,unitPriceMinor:10000,toothCode:36,caseId:null,sessions:null}],
+      items:[{serviceId:service,category:"rct",doctorId:doctor,description:"Synthetic original root canal",quantity:1,unitPriceMinor:10000,toothCode:36,caseId:clinical?.ok?clinical.case.id:null,sessions:null}],
       templates:DEFAULT_SPECIALTY_TEMPLATES,idempotencyKey:null,requestHash:null,auditDetails:{}});
     if(!issued.ok)throw new Error("Fixture linked invoice");
     return {patientId,doctor,nextDoctor,service,nextService,issued};
   }
-  it("amends service/provider/tooth once, retaining original print identity and one canonical item/case",async()=>{
-    const {patientId,doctor,nextDoctor,service,nextService,issued}=await identityFixture();
+  it("amends service/tooth without overwriting a separately assigned case doctor, retaining original print identity and one canonical item/case",async()=>{
+    const {patientId,doctor,nextDoctor,service,nextService,issued}=await identityFixture(true);
     const input=await command(issued.invoice.id,12000);
-    const change={...input,lines:[{...input.lines[0],serviceId:nextService,doctorId:nextDoctor,toothCode:46,surfaces:null}]};
+    const change={...input,lines:[{...input.lines[0],serviceId:nextService,doctorId:doctor,toothCode:46,surfaces:null}]};
     const result=await revision.reviseInvoice(issued.invoice.id,change,session);
-    expect(result).toMatchObject({original:{items:[{serviceId:service,doctorId:doctor,toothCode:36}]},corrected:{items:[{serviceId:nextService,doctorId:nextDoctor,toothCode:46,planItemId:issued.links[0].planItemId,caseId:issued.links[0].caseId,financialReviewRequired:false}]}});
+    expect(result).toMatchObject({original:{items:[{serviceId:service,doctorId:doctor,toothCode:36}]},corrected:{items:[{serviceId:nextService,doctorId:doctor,toothCode:46,planItemId:issued.links[0].planItemId,caseId:issued.links[0].caseId,financialReviewRequired:false}]}});
     expect((await db.getInvoice(issued.invoice.id))?.items[0]).toMatchObject({serviceId:service,doctorId:doctor,toothCode:36});
     expect(await q("SELECT id,site,responsible_party_id FROM clinical_cases WHERE patient_id=$1",[patientId])).toEqual([{id:issued.links[0].caseId,site:"46",responsible_party_id:nextDoctor}]);
     expect(await q("SELECT id FROM plan_items WHERE plan_id=$1",[issued.planId])).toEqual([{id:issued.links[0].planItemId}]);
-    const expectedLine={...issued.invoice.items[0],serviceId:nextService,doctorId:nextDoctor,toothCode:46,description:"Synthetic corrected root canal",unitPriceMinor:12000,totalMinor:12000};
+    const expectedLine={...issued.invoice.items[0],serviceId:nextService,doctorId:doctor,toothCode:46,description:"Synthetic corrected root canal",unitPriceMinor:12000,totalMinor:12000};
     const lease:InvoiceRevisionCommand={key:change.idempotencyKey,actor:session.username,patientId,invoiceId:issued.invoice.id,body:JSON.stringify(change),
       expected:{original:issued.invoice,lines:[expectedLine],discountMinor:0,settledMinor:0,accountDueMinor:10000,terms:input.repaymentTerms},outcome:"pending",message:""};
     expect(readInvoiceRevisionReceipt(result,lease)).not.toBeNull();
     expect(restoreInvoiceRevision(durableInvoiceRevision(lease),patientId,session.username).body).toBe(lease.body);
-    const altered={...lease,body:JSON.stringify({...change,lines:[{...change.lines[0],doctorId:doctor}]})};
+    const altered={...lease,body:JSON.stringify({...change,lines:[{...change.lines[0],doctorId:nextDoctor}]})};
     expect(()=>restoreInvoiceRevision(durableInvoiceRevision(altered),patientId,session.username)).toThrow();
     expect(await revision.reviseInvoice(issued.invoice.id,change,session)).toEqual({...result,replayed:true});
     expect(await q("SELECT id FROM payments WHERE patient_id=$1",[patientId])).toEqual([]);
   });
-  it("keeps an unstarted whole-mouth scope singular while correcting its provider/service",async()=>{
-    const {patientId,doctor,nextDoctor}=await identityFixture();
+  it("keeps an unstarted whole-mouth scope singular while correcting only its service",async()=>{
+    const {patientId,doctor}=await identityFixture();
     const [service,nextService]=(await q("INSERT INTO services(name,category,price_minor,price_configured,is_active) VALUES('Synthetic region one','cleaning',10000,TRUE,TRUE),('Synthetic region two','cleaning',10000,TRUE,TRUE) RETURNING id")).map(row=>row.id);
     const source={patientId,baseCurrency:"YER" as const,discountMinor:0,note:null,createdBy:session.username,actorRole:"admin",templates:DEFAULT_SPECIALTY_TEMPLATES,idempotencyKey:null,requestHash:null,auditDetails:{},
       items:[{serviceId:service,category:"cleaning",doctorId:doctor,description:"Synthetic region one",quantity:1,unitPriceMinor:10000,toothCode:null,scope:"full_mouth" as const,caseId:null,sessions:null}]};
     const invalid=await linked.createLinkedInvoice({...source,items:[{...source.items[0],quantity:2}]});expect(invalid).toMatchObject({ok:false,reason:"shape_mismatch"});
     const issued=await linked.createLinkedInvoice(source);if(!issued.ok)throw new Error("Fixture region");
     const input=await command(issued.invoice.id,10000);
-    const result=await revision.reviseInvoice(issued.invoice.id,{...input,lines:[{...input.lines[0],serviceId:nextService,doctorId:nextDoctor,toothCode:null,surfaces:null}]},session);
-    expect(result).toMatchObject({corrected:{items:[{serviceId:nextService,doctorId:nextDoctor,toothCode:null}]}});
+    const result=await revision.reviseInvoice(issued.invoice.id,{...input,lines:[{...input.lines[0],serviceId:nextService,doctorId:doctor,toothCode:null,surfaces:null}]},session);
+    expect(result).toMatchObject({corrected:{items:[{serviceId:nextService,doctorId:doctor,toothCode:null}]}});
     expect(await q("SELECT site FROM clinical_cases WHERE id=$1",[issued.links[0].caseId])).toEqual([{site:"كامل الفم"}]);
   });
+  it.each([false,true])("holds an unpaid linked doctor change without a clinical side effect (mixed=%s)",async mixed=>{
+    const {patientId,doctor,nextDoctor,nextService,issued}=await identityFixture();
+    const input=await command(issued.invoice.id,10000);
+    const before=async()=>({
+      plans:await q("SELECT to_jsonb(p) AS value FROM treatment_plans p WHERE patient_id=$1",[patientId]),
+      work:await q("SELECT to_jsonb(i) AS value FROM plan_items i WHERE plan_id=$1",[issued.planId]),
+      cases:await q("SELECT to_jsonb(c) AS value FROM clinical_cases c WHERE patient_id=$1",[patientId]),
+      access:await Promise.all([doctor,nextDoctor].map(d=>db.doctorOwnsPatient(d,patientId))),
+      invoice:await db.getInvoice(issued.invoice.id),
+      receipts:await q("SELECT id FROM payments WHERE patient_id=$1",[patientId]),
+    });
+    const snapshot=await before();
+    expect((await revision.readInvoiceRevision(issued.invoice.id,session)).work[0]).toMatchObject({clinical_locked:false,legacy:false});
+    const body={...input,lines:[{...input.lines[0],doctorId:nextDoctor,...(mixed?{serviceId:nextService,toothCode:46}:{})}]};
+    await expect(revision.reviseInvoice(issued.invoice.id,body,session)).rejects.toMatchObject({code:"conflict",message:expect.stringContaining("طبيب بند مرتبط")});
+    expect(await before()).toEqual(snapshot);
+    expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[patientId])).toEqual([]);
+    expect(await q("SELECT id FROM audit_log WHERE action='invoice.correct' AND entity_id=$1",[String(issued.invoice.id)])).toEqual([]);
+  });
+  it("retains the eligible unlinked financial doctor correction, immutable acknowledgement and exact retry",async()=>{
+    const [oldDoctor,nextDoctor]=await q("INSERT INTO parties(name,kind) VALUES('Synthetic original financial doctor','doctor'),('Synthetic replacement financial doctor','doctor') RETURNING id");
+    const invoice=await fixture(0,"YER",oldDoctor.id);
+    const source=await command(invoice.id,10000),line=invoice.items[0];
+    const body={...source,lines:[{...source.lines[0],doctorId:nextDoctor.id}]};
+    const saved=await revision.reviseInvoice(invoice.id,body,session);
+    expect(saved).toMatchObject({original:{id:invoice.id,items:[{doctorId:oldDoctor.id}]},
+      corrected:{items:[{doctorId:nextDoctor.id,planItemId:null,unitPriceMinor:10000}]},beforeMinor:10000,afterMinor:10000,settledMinor:0});
+    expect((await db.getInvoice(invoice.id))?.items[0]).toMatchObject({doctorId:oldDoctor.id});
+    expect(await revision.reviseInvoice(invoice.id,body,session)).toEqual({...saved,replayed:true});
+    expect(await q("SELECT a.actor,a.details FROM audit_log a WHERE action='invoice.correct' AND entity_id=$1",[String(invoice.id)]))
+      .toEqual([expect.objectContaining({actor:session.username,details:expect.objectContaining({reason:body.reason,identityAmendments:[
+        expect.objectContaining({itemId:line.id,before:expect.objectContaining({doctorId:oldDoctor.id}),after:expect.objectContaining({doctorId:nextDoctor.id})})]})})]);
+    expect(await q("SELECT r.correction_id FROM invoice_correction_receipts r JOIN invoice_corrections c ON c.id=r.correction_id WHERE c.original_invoice_id=$1",[invoice.id])).toHaveLength(1);
+    expect(await db.doctorOwnsPatient(nextDoctor.id,invoice.patientId)).toBe(false);
+    for(const table of ["payments","treatment_plans","clinical_cases"])
+      expect(await q(`SELECT id FROM ${table} WHERE patient_id=$1`,[invoice.patientId])).toEqual([]);
+  });
+  it("continues to hold unlinked doctor changes once a payment exists",async()=>{
+    const invoice=await fixture(1000);
+    const [doctor]=await q("INSERT INTO parties(name,kind) VALUES('Synthetic post-collection financial doctor','doctor') RETURNING id");
+    const source=await command(invoice.id,10000);
+    await expect(revision.reviseInvoice(invoice.id,{...source,lines:[{...source.lines[0],doctorId:doctor.id}]},session))
+      .rejects.toMatchObject({code:"conflict"});
+    expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[invoice.patientId])).toEqual([]);
+    expect((await db.getInvoice(invoice.id))?.items[0].doctorId).toBeNull();
+  });
   it.each(["assessment","payment","commission","overlap","problem-link","referral","dependency","case-outcome"])("refuses %s identity changes atomically, preserving all evidence",async mode=>{
-    const {patientId,nextDoctor,nextService,issued}=await identityFixture();
+    const {patientId,doctor,nextService,issued}=await identityFixture();
     if(mode==="assessment")await q("UPDATE clinical_cases SET problem='Synthetic saved assessment' WHERE id=$1",[issued.links[0].caseId]);
     if(mode==="payment")await db.recordPayment({patientId,invoiceId:issued.invoice.id,kind:"payment",amountMinor:1000,currency:"YER",baseCurrency:"YER",exchangeRate:1,method:"cash",note:null,createdBy:session.username,idempotencyKey:`identity-paid-${++serial}`});
     if(mode==="commission")await q("INSERT INTO commission_case_overrides(doctor_id,case_id,percent,reason,effective_from,created_by) VALUES($1,$2,20,'Synthetic preserved commission',CURRENT_DATE,'test')",[issued.invoice.items[0].doctorId,issued.links[0].caseId]);
@@ -267,7 +316,7 @@ describe("safe pre-treatment clinical identity correction",()=>{
       await q("INSERT INTO plan_item_dependencies(item_id,requires_item_id,created_by) VALUES($1,$2,'test')",[other.id,issued.links[0].planItemId]);
     }
     const input=await command(issued.invoice.id,12000),before=await q("SELECT to_jsonb(i) AS value FROM plan_items i WHERE plan_id=$1 ORDER BY id",[issued.planId]);
-    await expect(revision.reviseInvoice(issued.invoice.id,{...input,lines:[{...input.lines[0],serviceId:nextService,doctorId:nextDoctor,toothCode:46,surfaces:null}]},session)).rejects.toMatchObject({code:"conflict"});
+    await expect(revision.reviseInvoice(issued.invoice.id,{...input,lines:[{...input.lines[0],serviceId:nextService,doctorId:doctor,toothCode:46,surfaces:null}]},session)).rejects.toMatchObject({code:"conflict"});
     expect(await q("SELECT to_jsonb(i) AS value FROM plan_items i WHERE plan_id=$1 ORDER BY id",[issued.planId])).toEqual(before);
     expect(await q("SELECT id FROM invoice_corrections WHERE patient_id=$1",[patientId])).toEqual([]);
     expect((await db.getInvoice(issued.invoice.id))?.status).toBe("open");

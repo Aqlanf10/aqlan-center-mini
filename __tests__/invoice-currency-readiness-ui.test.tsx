@@ -107,6 +107,15 @@ beforeEach(() => {
 afterEach(() => { hooks.effects.forEach(effect => effect.cleanup?.()); vi.unstubAllGlobals(); });
 
 describe("real editor currency readiness and retained write boundaries", () => {
+  it.each([false,true])("edits the financial doctor only on an eligible unlinked line (linked=%s)",async linked=>{
+    const view=fixture();view.identityAmendmentAvailable=true;
+    view.identityCatalog={services:[],doctors:[{id:26,name:"Synthetic doctor"}]};
+    if(linked){view.invoice.items[0].planItemId=28;view.work=[{id:28,clinical_locked:false}];}
+    get=async()=>json(view);render();await settle();
+    expect(label("طبيب التصحيح 1")?.props.disabled).toBe(linked);
+    expect(label("خدمة التصحيح 1")?.props.disabled).toBe(false);
+    expect(posts()).toHaveLength(0);
+  });
   it.each(CURRENCIES)("shows all currencies from %s with exact existing eligibility", async currency => {
     get = async () => json(fixture(currency)); render(); await settle();
     expect(options().map(node => node.props.value)).toEqual(CURRENCIES);
