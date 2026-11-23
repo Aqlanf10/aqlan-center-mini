@@ -108,6 +108,15 @@ describe("بطاقة المريض A6 (P0.11)", () => {
     },
   );
 
+  it("البطاقة الإدارية لا تدعو لاستخدام بوابة المرضى قبل اعتمادها", async () => {
+    const card = await PatientCardPage({ params: Promise.resolve({ id: "77" }) });
+    const html = renderToStaticMarkup(card);
+    expect(html).toContain("P-00077");
+    expect(html).toContain("وقدّم رقم الملف للاستقبال");
+    expect(html).not.toContain("بوّابة المرضى");
+    expect(html).not.toContain("بوابة المرضى");
+  });
+
   it("الاستقبال يفتح بطاقة أي مريض (سياسة المركز) — السلوك الطبيعي", async () => {
     mocks.requireSession.mockResolvedValue({ userId: 3, username: "reception1", role: "reception" });
     const result = await PatientCardPage({ params: Promise.resolve({ id: "77" }) });
