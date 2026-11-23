@@ -6,6 +6,7 @@ const harness = vi.hoisted(() => ({
   query: vi.fn(async () => ({ rows: [] })),
   ensureSchema: vi.fn(async () => {}),
   listParties: vi.fn(async () => []),
+  getSettingsSafe: vi.fn(async () => ({})),
 }));
 vi.mock("../lib/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/db")>();
@@ -13,6 +14,7 @@ vi.mock("../lib/db", async (importOriginal) => {
     ...actual,
     ensureSchema: harness.ensureSchema,
     listParties: harness.listParties,
+    getSettingsSafe: harness.getSettingsSafe,
     getPool: () => ({ query: harness.query,connect:async()=>({query:harness.query,release:vi.fn()}) }),
   };
 });
@@ -22,6 +24,7 @@ vi.mock("../lib/session", () => ({
 
 const { buildReport, parseFilters, ReportInputError, validateAnnualReportRange } = await import("../lib/reports");
 const { GET } = await import("../app/api/reports/route");
+const { default: printReport } = await import("../app/print/report/page");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -53,7 +56,9 @@ describe("annual technical request-size and calendar validation", () => {
     const from = "2016-12-31";
     const to = "2026-12-01";
     expect(() => validateAnnualReportRange(from, to)).toThrow(ReportInputError);
-    expect(() => validateAnnualReportRange(to, from)).toThrow("120");
+    expect(() => validateAnnualReportRange(to, from)).toThrow(
+      "التقرير السنوي يدعم حتى 120 شهرًا في الطلب الواحد. اختر فترة أقصر، ويمكن عرض التاريخ الأطول على فترات منفصلة.",
+    );
     await expect(buildReport("annual", filters(from, to))).rejects.toThrow(ReportInputError);
     expectNoFinancialLoad();
   });
@@ -76,7 +81,9 @@ describe("annual technical request-size and calendar validation", () => {
     ["1900-02-29", "1900-03-01"],
     ["2026-01-01", "2026-02-30"],
   ])("rejects malformed or nonexistent calendar range %s to %s", (from, to) => {
-    expect(() => validateAnnualReportRange(from, to)).toThrow(ReportInputError);
+    expect(() => validateAnnualReportRange(from, to)).toThrow(
+      "أدخل تاريخي بداية ونهاية صالحين للتقرير السنوي بصيغة YYYY-MM-DD.",
+    );
     expectNoFinancialLoad();
   });
 
@@ -170,5 +177,78 @@ describe("annual raw API input validation", () => {
     const body = await response.json();
     expect(body.result.bars).toHaveLength(120);
     expect(body.result).toMatchObject({ from: "2017-01-01", to: "2026-12-31" });
+  });
+});
+
+describe("debt movement calendar and request budget", () => {
+  const movement = { report: "debt", debtMode: "movement", preset: "custom" };
+  const moving = (from: string, to: string): ReportFilters => ({ ...filters(from, to), debtMode: "movement" });
+  const budgetError = "تقرير حركة المديونية يدعم حتى 120 شهرًا في الطلب الواحد. اختر فترة أقصر، ويمكن عرض التاريخ الأطول على فترات منفصلة.";
+  const dateError = "أدخل تاريخي بداية ونهاية صالحين لتقرير حركة المديونية بصيغة YYYY-MM-DD.";
+
+  it("returns all 120 inclusive months ending in January, even when the endpoints are reversed", async () => {
+    const from = "2017-02-28";
+    const to = "2027-01-01";
+    const response = await GET(request({ ...movement, from: to, to: from }));
+    expect(response.status).toBe(200);
+    const { result } = await response.json();
+    expect(result).toMatchObject({ from, to });
+    expect(result.bars).toHaveLength(120);
+    expect(result.bars[0].label).toBe("فبراير 2017");
+    expect(result.bars.at(-1).label).toBe("يناير 2027");
+    expect(await buildReport("debt", moving(to, from))).toEqual(result);
+  });
+
+  it.each([
+    ["2017-01-31", "2027-01-01", budgetError],
+    ["2027-01-01", "2017-01-31", budgetError],
+    ["2027-02-29", "2027-01-01", dateError],
+    ["2024-02-29", "2024-04-31", dateError],
+    ["0000-12-31", "0001-01-01", dateError],
+    ["not-a-date", "2027-01-01", dateError],
+  ])("rejects %s to %s through the builder, parser, API and print before any data load", async (from, to, message) => {
+    const raw = { ...movement, from, to };
+    await expect(buildReport("debt", moving(from, to))).rejects.toThrow(message);
+    expect(() => parseFilters(new URLSearchParams(raw))).toThrow(message);
+    const response = await GET(request(raw));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ message });
+    await expect(printReport({ searchParams: Promise.resolve(raw) })).rejects.toMatchObject({
+      digest: "NEXT_HTTP_ERROR_FALLBACK;404",
+    });
+    expectNoFinancialLoad();
+    expect(harness.getSettingsSafe).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing custom bounds in a saved query before default dates can replace them", async () => {
+    for (const supplied of ["from", "to"]) {
+      const raw = { ...movement, [supplied]: "2027-01-01" };
+      expect(() => parseFilters(new URLSearchParams(raw))).toThrow(dateError);
+      const response = await GET(request(raw));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ message: dateError });
+    }
+    expectNoFinancialLoad();
+  });
+
+  it("accepts a real leap day and a preset with no explicit dates", async () => {
+    const leap = await buildReport("debt", moving("2024-02-29", "2024-02-29"));
+    expect(leap.bars).toHaveLength(1);
+    const january = parseFilters(new URLSearchParams({ ...movement, preset: "this_month" }), "2027-01-15");
+    expect(await buildReport("debt", january)).toMatchObject({
+      from: "2027-01-01", to: "2027-01-31", bars: [{ label: "يناير", minor: 0 }],
+    });
+  });
+
+  it("ignores the debtMode query parameter on other reports", async () => {
+    const response = await GET(request({ ...movement, report: "monthly", from: "2017-01-31", to: "2027-01-01" }));
+    expect(response.status).toBe(200);
+    expect(harness.listParties).toHaveBeenCalled();
+  });
+
+  it.each(["outstanding", "accrued", "collected"])("keeps the 121-month request valid for debt mode %s", async (debtMode) => {
+    const response = await GET(request({ ...movement, debtMode, from: "2017-01-31", to: "2027-01-01" }));
+    expect(response.status).toBe(200);
+    expect(harness.listParties).toHaveBeenCalled();
   });
 });
