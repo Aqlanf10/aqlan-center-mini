@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import { SETTING_DEFAULTS } from "../lib/settings";
 
 /**
  * اختبارات أمن مسارات الطباعة (P0.11/P0.12/P0.16):
@@ -48,17 +50,63 @@ beforeEach(() => {
     gender: "male", birthYear: 1985, medicalAlert: null, address: null,
     createdAt: "2026-01-15T08:00:00.000Z", note: null, altPhone: null,
   });
-  mocks.getSettingsSafe.mockResolvedValue({});
+  mocks.getSettingsSafe.mockResolvedValue(SETTING_DEFAULTS);
   mocks.patientAppointmentsFrom.mockResolvedValue([]);
 });
 
 describe("بطاقة المريض A6 (P0.11)", () => {
-  it("طبيب لا يملك المريض يفتح البطاقة بالرقم: 404 — لا هاتف ولا رقم ملف", async () => {
+  it.each(["77.0", "7.7e1", "0x4d", "+77", "077", "9007199254740993", "P-07000", "", "-77"])(
+    "معرّف رابط بطاقة غير قياسي %s: رفض قبل التفويض أو قراءة بيانات المريض",
+    async (invalidId) => {
+      await expect(
+        PatientCardPage({ params: Promise.resolve({ id: invalidId }) }),
+      ).rejects.toThrow();
+      expect(mocks.canAccessPatient).not.toHaveBeenCalled();
+      expect(mocks.getPatient).not.toHaveBeenCalled();
+      expect(mocks.patientAppointmentsFrom).not.toHaveBeenCalled();
+    },
+  );
+
+  it("الجلسة الغائبة لا تُظهر الرقم أو الاسم ولا تطلب أي بيانات", async () => {
+    mocks.requireSession.mockResolvedValue(null);
+    await expect(PatientCardPage({ params: Promise.resolve({ id: "77" }) })).rejects.toThrow();
+    expect(mocks.canAccessPatient).not.toHaveBeenCalled();
+    expect(mocks.getPatient).not.toHaveBeenCalled();
+    expect(mocks.getSettingsSafe).not.toHaveBeenCalled();
+  });
+
+  it("طبيب لا يملك المريض يفتح البطاقة بالرقم: 404 قبل قراءة الهوية أو المواعيد", async () => {
     mocks.canAccessPatient.mockResolvedValue(false);
     await expect(
       PatientCardPage({ params: Promise.resolve({ id: "77" }) }),
     ).rejects.toThrow();
+    expect(mocks.getPatient).not.toHaveBeenCalled();
+    expect(mocks.getSettingsSafe).not.toHaveBeenCalled();
+    expect(mocks.patientAppointmentsFrom).not.toHaveBeenCalled();
   });
+
+  it("فشل التحقق من النطاق لا يفتح قراءة الملف في مسار بطاقة الطباعة", async () => {
+    mocks.canAccessPatient.mockRejectedValue(new Error("synthetic scope lookup failure"));
+    await expect(
+      PatientCardPage({ params: Promise.resolve({ id: "77" }) }),
+    ).rejects.toThrow();
+    expect(mocks.getPatient).not.toHaveBeenCalled();
+    expect(mocks.patientAppointmentsFrom).not.toHaveBeenCalled();
+  });
+
+  it.each(["P-00042", "P-07000", "P-07001"])(
+    "بطاقة الأرشفة تطبع رقم الملف الأصلي كما في القاعدة دون قصّ أو إعادة ترقيم: %s",
+    async (patientNumber) => {
+      mocks.getPatient.mockResolvedValue({
+        id: 77, fullName: "SYNTHETIC PRINT FILE", patientNumber, phone: "700000000",
+        createdAt: "2026-11-22T08:00:00.000Z", medicalAlert: null,
+      });
+      const page = await PatientCardPage({ params: Promise.resolve({ id: "77" }) });
+      const html = renderToStaticMarkup(page);
+      expect(html).toContain(`>${patientNumber}</p>`);
+      expect(html).not.toContain("undefined");
+    },
+  );
 
   it("الاستقبال يفتح بطاقة أي مريض (سياسة المركز) — السلوك الطبيعي", async () => {
     mocks.requireSession.mockResolvedValue({ userId: 3, username: "reception1", role: "reception" });
