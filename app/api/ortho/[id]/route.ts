@@ -113,7 +113,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   // Front desk may link an agreement, but must not change clinical phase,
   // retainer or closure state merely because it can access the patient.
-  if (!("planId" in source) && session.role !== "admin" && session.role !== "doctor") {
+  if (!Object.prototype.hasOwnProperty.call(source, "planId") && session.role !== "admin" && session.role !== "doctor") {
     return forbidden("تعديل حالة التقويم السريرية للطبيب المخوّل أو الإدارة فقط.");
   }
 
