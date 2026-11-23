@@ -84,6 +84,17 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
     await q("UPDATE patients SET id=900000,phone='999900000',national_id='SYNTHETIC-ID-900000',note='external legacy reference 900000' WHERE patient_number='P-00042'");
     await restart();expect((await db.createPatient(input('HIGH METADATA'))).patientNumber).toBe('P-07000');
   });
+  it('keeps six-digit patient archive numbers intact in storage and search', async () => {
+    // Canonical numbers must remain printable beyond the five-character padding floor.
+    await q("SELECT setval('patient_number_seq',99999,true)");
+    await restart();
+    const first=await db.createPatient(input('SIX DIGIT BOUNDARY'));
+    const second=await db.createPatient(input('SIX DIGIT NEXT'));
+    expect([first.patientNumber,second.patientNumber]).toEqual(['P-100000','P-100001']);
+    expect((await db.getPatient(first.id))?.patientNumber).toBe('P-100000');
+    expect((await db.searchPatients('P-100000')).map(p=>p.patientNumber)).toContain('P-100000');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
   it('genuinely filed higher canonical number prevents collision', async () => {
     await q("INSERT INTO patients(patient_number,full_name) VALUES('P-900000','SYNTHETIC CANONICAL HIGH')");
     await restart();expect((await db.createPatient(input('AFTER HIGH'))).patientNumber).toBe('P-900001');
