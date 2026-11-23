@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSetting } from "@/components/SettingsProvider";
 import type { Patient } from "@/lib/patient";
+import { readAdministrativePatientChange, type AdministrativePatientChange } from "@/lib/patient-administrative-edit";
 import {
   CONSENT_CHANNELS, CONSENT_CHANNEL_LABEL, CONSENT_SOURCE_LABEL, MANUAL_CONSENT_SOURCES, PREFERRED_CHANNELS,
   PREFERRED_CHANNEL_LABEL, flagClass, parseFlagList,
@@ -51,9 +52,10 @@ export function PatientFlagChips({ flags }: { flags: readonly string[] | undefin
   );
 }
 
-export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
+export function PatientContactPanel({ patient, canEdit, onAdministrativeChange, onPatientChange }: {
   patient: Patient;
   canEdit: boolean;
+  onAdministrativeChange?: (change: AdministrativePatientChange) => void;
   onPatientChange: (patient: Patient) => void;
 }) {
   const flagList = parseFlagList(useSetting("patients.flags"));
@@ -63,6 +65,8 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
   const [email, setEmail] = useState(patient.email ?? "");
   const [source, setSource] = useState<ConsentSource>("in_person");
   const [showHistory, setShowHistory] = useState(false);
+  const pendingPatch = useRef<AbortController | null>(null);
+  useLayoutEffect(() => () => { pendingPatch.current?.abort(); pendingPatch.current = null; }, [patient.id]);
 
   useEffect(() => { setEmail(patient.email ?? ""); }, [patient.email]);
 
@@ -80,19 +84,32 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
   useEffect(() => { void loadConsent(); }, [loadConsent]);
 
   const patch = async (body: Record<string, unknown>) => {
+    if (!canEdit || busy || pendingPatch.current) return;
+    const request = new AbortController();
+    pendingPatch.current = request;
     setBusy(true);
     try {
       const response = await fetch(`/api/patients/${patient.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: request.signal,
       });
       const payload = await response.json().catch(() => ({}));
+      if (request.signal.aborted || pendingPatch.current !== request) return;
       if (!response.ok) throw new Error(payload.message ?? "تعذّر الحفظ.");
-      onPatientChange(payload as Patient);
+      if (onAdministrativeChange) {
+        const confirmed = readAdministrativePatientChange(payload, patient.id, body);
+        if (!confirmed) throw new Error("لم يمكن تأكيد بيانات التواصل المحفوظة.");
+        onAdministrativeChange(confirmed);
+      } else {
+        onPatientChange(payload as Patient);
+      }
       setError(null);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "تعذّر الحفظ.");
+      if (!request.signal.aborted) setError(saveError instanceof Error ? saveError.message : "تعذّر الحفظ.");
     } finally {
-      setBusy(false);
+      if (pendingPatch.current === request) {
+        pendingPatch.current = null;
+        setBusy(false);
+      }
     }
   };
 
@@ -158,14 +175,15 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
         <label className="min-w-0 text-xs font-bold text-slate-600">
           البريد الإلكتروني
           <div className="mt-1 flex gap-1.5">
-            <input type="email" dir="ltr" value={email} disabled={!canEdit || busy} onChange={(event) => setEmail(event.target.value)}
+            <input type="email" dir="ltr" value={email} disabled={!canEdit || !!onAdministrativeChange || busy} onChange={(event) => setEmail(event.target.value)}
               placeholder="name@example.com"
               className="min-w-0 w-full flex-1 rounded-xl border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-brand-blue" />
-            {canEdit && email.trim() !== (patient.email ?? "") ? (
+            {canEdit && !onAdministrativeChange && email.trim() !== (patient.email ?? "") ? (
               <button type="button" disabled={busy} onClick={() => void patch({ email: email.trim() })}
                 className="rounded-xl bg-navy-800 px-3 text-xs font-bold text-white disabled:opacity-50">حفظ</button>
             ) : null}
           </div>
+          {onAdministrativeChange ? <span className="mt-1 block font-normal">لتغيير البريد، افتح «تعديل البيانات الإدارية».</span> : null}
         </label>
         <label className="min-w-0 text-xs font-bold text-slate-600">
           القناة المفضّلة

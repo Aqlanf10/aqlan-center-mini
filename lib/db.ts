@@ -5417,6 +5417,7 @@ export async function mergeDuplicatePatient(
 export async function updatePatient(
   id: number,
   input: Partial<PatientInput>,
+  options?: { reconcileYearOnlyBirthDate?: boolean },
 ): Promise<Patient | null> {
   await ensureSchema();
   // التحديث الجزئي بعلَم لكل حقل: `COALESCE` وحده لا يفرّق بين «لم يُرسَل» و«أُرسل
@@ -5432,7 +5433,10 @@ export async function updatePatient(
        address       = CASE WHEN $10::boolean THEN $11::text ELSE address       END,
        medical_alert = CASE WHEN $12::boolean THEN $13::text ELSE medical_alert END,
        note          = CASE WHEN $14::boolean THEN $15::text ELSE note          END,
-       birth_date     = CASE WHEN $16::boolean THEN $17::date ELSE birth_date     END,
+       birth_date     = CASE WHEN $16::boolean THEN $17::date
+                             WHEN $34::boolean AND $8::boolean
+                               AND (EXTRACT(YEAR FROM birth_date)::int IS DISTINCT FROM $9::int) THEN NULL
+                             ELSE birth_date END,
        guardian_name  = CASE WHEN $18::boolean THEN $19::text ELSE guardian_name  END,
        guardian_phone = CASE WHEN $20::boolean THEN $21::text ELSE guardian_phone END,
        national_id    = CASE WHEN $22::boolean THEN $23::text ELSE national_id    END,
@@ -5462,6 +5466,7 @@ export async function updatePatient(
       has("email"), has("email") ? input.email : null,
       has("preferredChannel"), has("preferredChannel") ? input.preferredChannel : null,
       has("flags"), has("flags") ? input.flags : null,
+      options?.reconcileYearOnlyBirthDate === true,
     ],
   );
   return rows[0] ? toPatient(rows[0]) : null;

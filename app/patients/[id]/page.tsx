@@ -47,6 +47,10 @@ import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
 import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
 import { PatientContactPanel, PatientFlagChips } from "@/components/PatientContactPanel";
+import { ReceptionPatientEditor } from "@/components/patient/ReceptionPatientEditor";
+import {
+  makeReceptionPatientForm, patientIdentityEditMode, type AdministrativePatientChange,
+} from "@/lib/patient-administrative-edit";
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
@@ -131,6 +135,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const router = useRouter();
   const session = useSession();
   const admin = isAdmin(session?.role);
+  const identityEditMode = patientIdentityEditMode(session);
+  const canViewContact = session?.role === "doctor" || admin || session?.role === "reception";
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
 
@@ -324,7 +330,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     onOpenPlans: (context: ClinicalNavigationContext) => openClinicalContext(context, "plans"),
     onOpenAccount: summary?.canSeeFinancial ? (context: ClinicalNavigationContext) => openClinicalContext(context, "account") : undefined,
   };
-  const [editing, setEditing] = useState(false);
+  const [editingOwner, setEditingOwner] = useState<typeof alertOwner | null>(null);
+  const editing = editingOwner === alertOwner;
 
   /** طلبان لا خمسة: ملخص الرحلة يغني عن تحميل كل وحدة بكامل تفاصيلها (§٤٨). */
   const load = useCallback(async (workflowOnly = false) => {
@@ -414,6 +421,15 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       if (current()) setLoading(false);
     }
   }, [id, alertOwner]);
+
+  const applyAdministrativeChange = (change: AdministrativePatientChange) => {
+    if (!alertOwner.active || acceptedFileOwner.current !== alertOwner) return false;
+    setFile((previous) => previous?.patient.id === Number(id)
+      ? { ...previous, patient: { ...previous.patient, ...change } } : previous);
+    // Supersede any older full-file read without requesting a new full file.
+    void load(true);
+    return true;
+  };
 
   const refreshWorkflow = useCallback(() => {
     if (alertOwner.active && acceptedFileOwner.current === alertOwner) void load(true);
@@ -897,10 +913,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-emerald-800 hover:bg-emerald-50">
                   📋 إرشادات العناية بعد العلاج
                 </button>
-                <button type="button" onClick={() => setEditing((open) => !open)}
-                  className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
-                  ✏️ تعديل بيانات الملف
-                </button>
+                {identityEditMode ? (
+                  <button type="button" onClick={() => setEditingOwner((owner) =>
+                    owner === alertOwner && identityEditMode === "clinical" ? null : alertOwner)}
+                    className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
+                    ✏️ {identityEditMode === "administrative" ? "تعديل البيانات الإدارية" : "تعديل بيانات الملف"}
+                  </button>
+                ) : null}
                 {summary?.canSeeFinancial ? (
                   <a href={`/print/statement/${patient.id}`} target="_blank" rel="noopener"
                     className="block rounded-lg px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
@@ -1043,15 +1062,27 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         </p>
       ) : null}
 
-      {editing ? (
+      {editing && identityEditMode === "administrative" ? (
+        <ReceptionPatientEditor
+          patientId={patient.id}
+          initial={makeReceptionPatientForm(patient)}
+          onSaved={(change) => {
+            if (!applyAdministrativeChange(change)) return;
+            setEditingOwner(null);
+          }}
+          onCancel={() => setEditingOwner(null)}
+        />
+      ) : editing && identityEditMode === "clinical" ? (
         <PatientEditor
           patient={patient}
           onSaved={(medicalAlert) => {
             if (!confirmPatientAlert(medicalAlert)) return;
-            setEditing(false);
+            setEditingOwner(null);
             void load();
           }}
-          onError={setError}
+          onError={(message) => {
+            if (alertOwner.active && acceptedFileOwner.current === alertOwner) setError(message);
+          }}
         />
       ) : null}
 
@@ -1141,11 +1172,15 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
           {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
           {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
-          {!isRestrictedRole(session?.role) ? (
+          {canViewContact ? (
             <PatientContactPanel
               patient={patient}
-              canEdit
-              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
+              canEdit={identityEditMode !== null}
+              onAdministrativeChange={identityEditMode === "administrative" ? applyAdministrativeChange : undefined}
+              onPatientChange={(updated) => {
+                if (!alertOwner.active || acceptedFileOwner.current !== alertOwner) return;
+                setFile((prev) => prev?.patient.id === updated.id ? { ...prev, patient: updated } : prev);
+              }}
             />
           ) : null}
           {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
