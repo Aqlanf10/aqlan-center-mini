@@ -67,6 +67,19 @@ describe("بطاقة المريض A6 (P0.11)", () => {
     },
   );
 
+  it.each(["assistant", "cashier", "accountant"])(
+    "الدور %s لا يطبع بطاقة إدارية حتى لو كان التفويض السريري الواسع يجيز زيارة اليوم",
+    async (role) => {
+      mocks.requireSession.mockResolvedValue({ userId: 9, username: "SYNTHETIC-NONCLINICAL", role });
+      mocks.canAccessPatient.mockResolvedValue(true); // legacy broad check must not bypass role gate
+      await expect(PatientCardPage({ params: Promise.resolve({ id: "77" }) })).rejects.toThrow();
+      expect(mocks.canAccessPatient).not.toHaveBeenCalled();
+      expect(mocks.getPatient).not.toHaveBeenCalled();
+      expect(mocks.getSettingsSafe).not.toHaveBeenCalled();
+      expect(mocks.patientAppointmentsFrom).not.toHaveBeenCalled();
+    },
+  );
+
   it("الجلسة الغائبة لا تُظهر الرقم أو الاسم ولا تطلب أي بيانات", async () => {
     mocks.requireSession.mockResolvedValue(null);
     await expect(PatientCardPage({ params: Promise.resolve({ id: "77" }) })).rejects.toThrow();
