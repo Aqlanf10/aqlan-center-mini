@@ -69,7 +69,9 @@ describe("P0 orthodontic clinical mutation role boundary (synthetic-only)", () =
   ])("prevents reception PATCH clinical action %j despite operational patient scope", async (body) => {
     const response = await call("PATCH", body);
     expect(response.status).toBe(403);
-    expect(canAccessPatient).toHaveBeenCalled();
+    // Deny before even resolving clinical case existence or patient scope.
+    expect(getOrthoCase).not.toHaveBeenCalled();
+    expect(canAccessPatient).not.toHaveBeenCalled();
     noClinicalWrites();
     expect(linkOrthoCasePlan).not.toHaveBeenCalled();
   });
@@ -103,6 +105,23 @@ describe("P0 orthodontic clinical mutation role boundary (synthetic-only)", () =
     );
     expect(response.status).toBe(403);
     for (const writer of writers) expect(writer).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed clinician PATCH bodies with 400 and no case query or write", async () => {
+    useRole("doctor");
+    for (const body of [null, [], "unexpected", 42]) {
+      vi.mocked(getOrthoCase).mockClear();
+      const response = await PATCH(
+        new Request("https://synthetic.invalid/api/ortho/41", {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        context,
+      );
+      expect(response.status).toBe(400);
+      expect(getOrthoCase).not.toHaveBeenCalled();
+      for (const writer of writers) expect(writer).not.toHaveBeenCalled();
+    }
   });
 
   it("keeps the patient-ownership gate for an authorized doctor", async () => {
