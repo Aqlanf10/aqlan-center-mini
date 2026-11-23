@@ -77,7 +77,8 @@ it('actual restore-full CLI restores synthetic PostgreSQL 18 invoice currencies,
     },
   });
   expect(stderr).not.toContain('RESTORE_FULL_UNSAFE_TARGET');
-  expect(stdout).toContain('READY FOR CUTOVER'); // documented only, not an actual cutover
+  expect(stdout).toContain('لم يُتحقق مستقلاً من آخر رقم ملف');
+  expect(stdout).not.toContain('READY FOR CUTOVER');
 
   const source=await fixture.source.query(
     "SELECT i.base_currency AS currency, SUM(ii.total_minor)::bigint AS amount FROM invoices i JOIN invoice_items ii ON ii.invoice_id=i.id WHERE i.invoice_number LIKE 'SYN-%' GROUP BY i.base_currency ORDER BY currency"

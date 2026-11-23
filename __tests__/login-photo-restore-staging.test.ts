@@ -41,7 +41,7 @@ it("rejects restored photo metadata before commit or any staged filesystem write
 it("keeps legacy backups with no photo setting compatible", async () => {
   const result = await stagedRestore(options);
   expect(result.ok).toBe(true);
-  expect(result.readyForCutover).toBe(true);
+  expect(result).toMatchObject({readyForCutover:false, cutoverBlocker:"patient-number-freshness-unverified", cutoverSteps:[]});
   expect(state.calls).toContain("COMMIT");
   expect(state.calls).not.toContain("ROLLBACK");
   expect(state.mkdir).toHaveBeenCalledOnce();

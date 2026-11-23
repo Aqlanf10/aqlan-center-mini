@@ -160,6 +160,10 @@ beforeAll(async () => {
   };
   expect(dataset.wacBefore.qty).toBe(43); // 50 داخل - 7 خارج
 
+  // Synthetic high-water evidence: a consumed sequence position with no patient row.
+  // The ordinary legacy archive does not carry this standalone sequence.
+  await pool.query("SELECT setval('public.patient_number_seq', 88002, true)");
+
   // ── النسخة الاحتياطية الكاملة (تدفق fullBackup الحقيقي + gzip كما في مسار API)
   archivePath = path.join(await mkdtemp(path.join(tmpdir(), "aqlan-drill-archive-")), "backup.tar.gz");
   await pipeline(
@@ -187,7 +191,7 @@ afterAll(async () => {
 });
 
 describe("تدريب الاستعادة الكامل (قاعدة معزولة + دليل مستندات معزول)", () => {
-  it("الاستعادة تنجح وتنتج READY FOR CUTOVER", async () => {
+  it("الاستعادة المعزولة تنجح ولا تصادق على التحويل دون شاهد حديث مستقل", async () => {
     const { stagedRestore } = await import("../../lib/restore/staging");
     const result = await stagedRestore({
       archivePath, targetUrl, stagingDir,
@@ -195,12 +199,21 @@ describe("تدريب الاستعادة الكامل (قاعدة معزولة + 
     expect(result.validationErrors).toEqual([]);
     if (!result.ok) console.error("STAGED RESTORE ERRORS:", JSON.stringify(result.errors, null, 2));
     expect(result.ok).toBe(true);
-    expect(result.readyForCutover).toBe(true);
+    expect(result).toMatchObject({readyForCutover:false, cutoverBlocker:"patient-number-freshness-unverified"});
     expect(result.documentsRestored).toBe(1);
     expect(result.documentsVerified).toBe(1);
     expect(result.verification.criticalProbeOk).toBe(true);
     expect(result.verification.migrationConsistent).toBe(true);
-    expect(result.cutoverSteps.length).toBeGreaterThan(3);
+    expect(result.cutoverSteps).toEqual([]);
+    const readOnlyTarget = new Client({ connectionString: targetUrl, ssl: false });
+    try {
+      await readOnlyTarget.connect();
+      const cursor = "SELECT last_value::text,is_called FROM public.patient_number_seq";
+      expect((await getPool().query(cursor)).rows).toEqual([{last_value:"88002",is_called:true}]);
+      expect((await readOnlyTarget.query(cursor)).rows).not.toEqual([{last_value:"88002",is_called:true}]);
+    } finally {
+      await readOnlyTarget.end();
+    }
   });
 
   it("عدد المرضى والمواعيد والفواتير مطابق للمصدر", async () => {

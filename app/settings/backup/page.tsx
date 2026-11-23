@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/PageHeader";
+import { PATIENT_NUMBER_CUTOVER_HOLD_TEXT } from "@/lib/restore/readiness-hold";
 
 interface BackupRecord {
   backupId: string;
@@ -25,7 +26,8 @@ interface RestoreDrillSummary {
   documentsVerified: number;
   tablesCount: number;
   durationMs: number | null;
-  readyForCutover: boolean;
+  readyForCutover: false;
+  cutoverBlocker: string | null;
   errorCode: string | null;
 }
 
@@ -160,8 +162,8 @@ export default function BackupRecoveryPage() {
         body: JSON.stringify({ backupId: restoreTarget.backupId, confirmation: restoreTarget.backupId }),
       });
       const payload = await json(response);
-      if (!response.ok) throw new Error(typeof payload.message === "string" ? payload.message : "فشل اختبار الاستعادة.");
-      setSuccess("نجح Restore Drill على الهدف المعزول وأصبحت النسخة READY FOR CUTOVER.");
+      if (!response.ok || payload.ok !== true) throw new Error(typeof payload.message === "string" ? payload.message : "فشل اختبار الاستعادة.");
+      setSuccess(PATIENT_NUMBER_CUTOVER_HOLD_TEXT);
       setRestoreTarget(null);
       await load();
     } catch (e) {
@@ -190,7 +192,7 @@ export default function BackupRecoveryPage() {
           <div>
             <h2 className="text-sm font-black text-navy-950">التحكم بالطوارئ</h2>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              الاستعادة هنا لا تكتب فوق Production. تُجرَّب النسخة أولًا على قاعدة staging/test مخصصة ثم تعطي READY FOR CUTOVER.
+              الاستعادة هنا لا تكتب فوق Production. تُختبر النسخ على قاعدة staging/test معزولة، ولا يصرّح هذا الاختبار بالتحويل.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -230,10 +232,11 @@ export default function BackupRecoveryPage() {
         )}
         {data?.restore.lastDrill ? (
           <div className="mt-3 rounded-xl bg-white/80 p-3 text-xs">
-            <strong>آخر اختبار:</strong> {data.restore.lastDrill.status === "ready" ? "READY FOR CUTOVER" : data.restore.lastDrill.status}
+            <strong>آخر اختبار:</strong> {data.restore.lastDrill.status === "ready" ? "اكتمل التحقق المعزول" : data.restore.lastDrill.status}
             {" · "}{data.restore.lastDrill.documentsVerified} مستند متحقق
             {" · "}{data.restore.lastDrill.tablesCount} جدول
             {typeof data.restore.lastDrill.durationMs === "number" ? ` · ${(data.restore.lastDrill.durationMs / 1000).toFixed(1)} ث` : ""}
+            {data.restore.lastDrill.status === "ready" ? <p className="mt-1 text-amber-900">{PATIENT_NUMBER_CUTOVER_HOLD_TEXT}</p> : null}
           </div>
         ) : null}
       </section>

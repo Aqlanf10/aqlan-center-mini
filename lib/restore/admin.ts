@@ -12,6 +12,7 @@ import {
   verifyBackupArchiveFile,
 } from "../backupVolume";
 import { stagedRestore } from "./staging";
+import { PATIENT_NUMBER_CUTOVER_HOLD } from "./readiness-hold";
 
 export const RESTORE_DRILL_STATE_FILE = "restore-drill-state.json";
 
@@ -41,7 +42,8 @@ export interface RestoreDrillState {
   documentsVerified: number;
   tablesCount: number;
   durationMs: number | null;
-  readyForCutover: boolean;
+  readyForCutover: false;
+  cutoverBlocker: typeof PATIENT_NUMBER_CUTOVER_HOLD.cutoverBlocker | null;
   errorCode: string | null;
 }
 
@@ -90,7 +92,13 @@ export async function readRestoreDrillState(backupDir: string): Promise<RestoreD
   const read = await readJsonFile<RestoreDrillState>(
     path.join(backupStateDir(backupDir), RESTORE_DRILL_STATE_FILE),
   );
-  return read.ok ? read.data : null;
+  if (!read.ok || !read.data || !["running", "ready", "failed"].includes(read.data.status)) return null;
+  // Old persisted "ready" rows certified only isolated verification. Never re-serve stale cutover claims.
+  return {
+    ...read.data,
+    readyForCutover: false,
+    cutoverBlocker: read.data.status === "ready" ? PATIENT_NUMBER_CUTOVER_HOLD.cutoverBlocker : null,
+  };
 }
 
 async function writeRestoreDrillState(backupDir: string, state: RestoreDrillState): Promise<void> {
@@ -113,7 +121,8 @@ async function resetDedicatedTarget(targetUrl: string): Promise<void> {
 export type AdminRestoreDrillResult =
   | {
       ok: true;
-      readyForCutover: true;
+      readyForCutover: false;
+      cutoverBlocker: typeof PATIENT_NUMBER_CUTOVER_HOLD.cutoverBlocker;
       backupId: string;
       archiveSha256: string;
       documentsVerified: number;
@@ -194,6 +203,7 @@ export async function runAdminRestoreDrill(input: {
     tablesCount: 0,
     durationMs: null,
     readyForCutover: false,
+    cutoverBlocker: null,
     errorCode: null,
   };
   await writeRestoreDrillState(input.backupDir, running);
@@ -209,7 +219,7 @@ export async function runAdminRestoreDrill(input: {
     });
     const durationMs = Date.now() - startedAt.getTime();
 
-    if (!result.ok || !result.readyForCutover) {
+    if (!result.ok) {
       await writeRestoreDrillState(input.backupDir, {
         ...running,
         completedAt: new Date().toISOString(),
@@ -229,11 +239,11 @@ export async function runAdminRestoreDrill(input: {
       documentsVerified: result.documentsVerified,
       tablesCount: result.verification.tablesCount,
       durationMs,
-      readyForCutover: true,
+      ...PATIENT_NUMBER_CUTOVER_HOLD,
     });
     return {
       ok: true,
-      readyForCutover: true,
+      ...PATIENT_NUMBER_CUTOVER_HOLD,
       backupId: input.backupId,
       archiveSha256: record.archiveSha256,
       documentsVerified: result.documentsVerified,

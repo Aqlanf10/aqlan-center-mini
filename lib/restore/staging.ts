@@ -9,6 +9,7 @@ import { readTarGzEntries } from "./archive";
 import { validateBackupArchive, type ValidationOk } from "./validate";
 import { prepareBackupSql } from "./sql.mjs";
 import { loginPhotoRestoreProblem } from "./login-photo";
+import { PATIENT_NUMBER_CUTOVER_HOLD } from "./readiness-hold";
 
 /**
  * الاستعادة بإعداد Staging/Cutover (P1.15) — لا حالة نصف مستعادة أبدًا.
@@ -20,7 +21,7 @@ import { loginPhotoRestoreProblem } from "./login-photo";
  *   → استعد القاعدة إلى هدف معزول (ليس إنتاجًا)
  *   → استعد المستندات إلى دليل staging (ليس دليل الإنتاج)
  *   → تحقق من الاثنين تحققًا مستقلًا
- *   → أنتج حالة READY FOR CUTOVER مع خطوات التبديل موثَّقة.
+ *   → سجّل نجاح الاستعادة المعزولة. لا تصادق على التحويل دون إثبات مستقل لأحدث رقم ملف.
  *
  * التبديل الفعلي (إيقاف التطبيق → تبديل القاعدة → نقل دليل staging إلى
  * DOCUMENTS_DIR → إقلاع → تحقق) **لا يُنفَّذ في P1** — موثَّق فقط في
@@ -45,7 +46,8 @@ export interface StagedRestoreResult {
   migrationsApplied: string[];
   sqlRowsStatementLines: number;
   skippedMigrationRecordLines: number;
-  readyForCutover: boolean;
+  readyForCutover: false;
+  cutoverBlocker: typeof PATIENT_NUMBER_CUTOVER_HOLD.cutoverBlocker | null;
   verification: {
     criticalProbeOk: boolean;
     migrationConsistent: boolean;
@@ -135,6 +137,7 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     sqlRowsStatementLines: 0,
     skippedMigrationRecordLines: 0,
     readyForCutover: false,
+    cutoverBlocker: null,
     verification: { criticalProbeOk: false, migrationConsistent: false, tablesCount: 0 },
     cutoverSteps: [],
     errors: [],
@@ -259,24 +262,9 @@ export async function stagedRestore(options: StagedRestoreOptions): Promise<Stag
     }
 
     result.ok = true;
-    result.readyForCutover = true;
-    result.cutoverSteps = cutoverStepsFor(options, result);
+    Object.assign(result, PATIENT_NUMBER_CUTOVER_HOLD);
     return result;
   } finally {
     await client.end().catch(() => {});
   }
-}
-
-/** خطوات التبديل موثَّقة لا منفَّذة (P1.15: لا Production Cutover في هذه المرحلة). */
-function cutoverStepsFor(options: StagedRestoreOptions, result: StagedRestoreResult): string[] {
-  return [
-    "⚠️ هذه الخطوات توثيقٌ للتبديل فقط — لا تُنفَّذ آليًا، والقرار تشغيلي بعد مراجعة مستقلة.",
-    `١) أوقف تطبيق الإنتاج (Railway: إيقاف الخدمة) حتى لا تُكتب بيانات جديدة أثناء التبديل.`,
-    `٢) خذ نسخة احتياطية من قاعدة الإنتاج الحالية قبل أي تبديل (خطة رجوع).`,
-    `٣) استبدل قاعدة الإنتاج بالهدف المعزول المُستعاد: ${result.targetIdentity ? `${result.targetIdentity.database} على ${result.targetIdentity.host}:${result.targetIdentity.port}` : "(هدف غير معروف)"}.`,
-    `٤) انقل محتوى دليل staging ${options.stagingDir} إلى DOCUMENTS_DIR النهائي (rsync/ mv مع إبقاء التصاريح).`,
-    `٥) أعد تشغيل التطبيق وشغّل npm run db:status — يجب أن يظهر consistent.`,
-    `٦) تحقق بصريًا: عدد المرضى، آخر الدفعات، عينة أشعة تُفتح من ملفاتها.`,
-    `٧) وثّق التبديل في سجل الحوادث مع SHA الأرشيف وطابع الزمن ومن أذن به.`,
-  ];
 }

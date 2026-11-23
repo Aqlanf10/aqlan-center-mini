@@ -8,7 +8,7 @@
  *  ٢) أي فشل تحقق ⇒ **لا استعادة قاعدة أصلًا** (لم يعد اللمس يسبق التحقق).
  *  ٣) الهدف يجب أن يكون فارغًا (رفض غير الفارغ افتراضيًا).
  *  ٤) المستندات تُستعاد إلى دليل staging معزول — لا إلى دليل الإنتاج مباشرة.
- *  ٥) بعد كل شيء: READY FOR CUTOVER مع الخطوات موثَّقة لا منفَّذة.
+ *  ٥) بعد كل شيء: نتيجة التحقق المعزول ومنع التحويل دون إثبات الحد الأحدث لأرقام الملفات.
  *
  * الاستعمال:
  *   DATABASE_URL=postgres://…(هدف فارغ) DOCUMENTS_DIR=…(staging) \
@@ -57,6 +57,7 @@ async function main(): Promise<number> {
   }
 
   const { stagedRestore } = await import("../lib/restore/staging");
+  const { PATIENT_NUMBER_CUTOVER_HOLD_TEXT } = await import("../lib/restore/readiness-hold");
   const result = await stagedRestore({
     archivePath,
     targetUrl: checkedTarget.connectionString,
@@ -90,12 +91,7 @@ async function main(): Promise<number> {
   console.log(`✔ مستندات: ${result.documentsRestored} مستعادًا و${result.documentsVerified} متحققًا منه بعد الكتابة`);
   console.log(`✔ تحقق الهدف: فحص حرج=${result.verification.criticalProbeOk ? "سليم" : "فشل"}، جداول=${result.verification.tablesCount}`);
 
-  if (result.readyForCutover) {
-    console.log("\n═".repeat(60));
-    console.log("READY FOR CUTOVER — التبديل إلى الإنتاج قرار بشري، خطواته:");
-    for (const step of result.cutoverSteps) console.log(`  ${step}`);
-    console.log("═".repeat(60));
-  }
+  if (result.cutoverBlocker) console.log(`⚠ ${PATIENT_NUMBER_CUTOVER_HOLD_TEXT}`);
   return 0;
 }
 
