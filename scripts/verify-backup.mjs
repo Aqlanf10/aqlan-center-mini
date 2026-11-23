@@ -103,6 +103,7 @@ const SEQUENCES = [
 
 const admin = new Client({ connectionString: source, ssl: sslFor(source) });
 let sourceClient = null;
+let db = null;
 // Own only databases whose CREATE completed in this invocation. A name
 // collision or a failed CREATE must never authorize dropping an existing DB.
 const ownedDatabases = [];
@@ -116,7 +117,7 @@ try {
 
   /* ── ١+٢: قاعدة المصدر بمخطط البرنامج الحالي وببذره، ثم صفوفٌ معلومة ── */
   process.env.DATABASE_URL = withDatabase(source, sourceDb);
-  const db = await import("../lib/db.ts");
+  db = await import("../lib/db.ts");
   await db.ensureSchema();
 
   // P0-A: preserve a historical paper-file number and the new canonical floor.
@@ -263,12 +264,17 @@ try {
   const next = await db.createPatient({ fullName: "SYNTHETIC AFTER ARCHIVE RESTORE", phone: null, altPhone: null, gender: "unknown", birthYear: null, address: null, medicalAlert: null, note: null });
   check("P0-A: first new file after restore is P-07002", next.patientNumber === "P-07002");
   check("P0-A: restored file is searchable by canonical number", (await db.searchPatients("P-07000")).some(row => row.patientNumber === "P-07000"));
-  await db.resetPoolForTesting();
 } catch (error) {
   console.error(`  ✗ سقط التمرين: ${error.message}`);
   failed = true;
 } finally {
-  await sourceClient?.end().catch(() => {});
+  await sourceClient?.end().catch(() => { check("close source fixture client", false); });
+  // Release application pool even when seeding, restore or assertions throw.
+  // Otherwise cleanup may race still-open connections and leave a fixture alive.
+  if (db) {
+    try { await db.resetPoolForTesting(); }
+    catch { check("close application fixture pool", false); }
+  }
   try { rmSync(dumpFile, { force: true }); } catch {}
   for (const name of ownedDatabases.reverse()) {
     try {
