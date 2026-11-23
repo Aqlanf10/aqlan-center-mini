@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { decryptArchiveBuffer, encryptionKeyFingerprint } from "./backupEncryption";
 import { S3_BACKUP_PREFIX } from "./backupDestinations";
+import { PATIENT_NUMBER_CUTOVER_HOLD, PATIENT_NUMBER_CUTOVER_HOLD_TEXT } from "./restore/readiness-hold";
 import { stagedRestore } from "./restore/staging";
 import { type S3Client, sha256Hex } from "./s3-client";
 
@@ -21,6 +22,8 @@ import { type S3Client, sha256Hex } from "./s3-client";
 
 export interface DrillReport {
   ok: boolean;
+  readyForCutover: false;
+  cutoverBlocker: typeof PATIENT_NUMBER_CUTOVER_HOLD.cutoverBlocker | null;
   witness: string;
   operator: string;
   startedAt: string;
@@ -91,7 +94,7 @@ export async function runOffsiteRestoreDrill(opts: {
     ok: false, witness: opts.witness, operator: opts.operator, startedAt: now().toISOString(), finishedAt: "",
     objectKey: null, encryptedBytes: 0, archiveSha256: null,
     checks: { encryptedHashMatches: false, keyFingerprintMatches: false, archiveHashMatches: false },
-    restore: null, errors: [],
+    readyForCutover: false, cutoverBlocker: null, restore: null, errors: [],
   };
   const finish = () => { report.finishedAt = now().toISOString(); return report; };
 
@@ -159,6 +162,8 @@ export async function runOffsiteRestoreDrill(opts: {
     };
     report.errors.push(...restored.validationErrors, ...restored.errors);
     report.ok = restored.ok && restored.validationErrors.length === 0 && restored.verification.criticalProbeOk;
+    // Only the detached drill was verified; never pass through arbitrary upstream readiness or reasons.
+    if (report.ok) Object.assign(report, PATIENT_NUMBER_CUTOVER_HOLD);
   } finally {
     await rm(workDir, { recursive: true, force: true });
   }
@@ -179,6 +184,7 @@ export function drillReportText(report: DrillReport): string {
     report.restore
       ? `الاستعادة: ${report.restore.tablesCount} جدولًا، فحص حرج ${yes(report.restore.criticalProbeOk)}، هجرات متسقة ${yes(report.restore.migrationConsistent)}، مستندات ${report.restore.documentsRestored} مستعادة و${report.restore.documentsVerified} متحققًا منها`
       : "الاستعادة: لم تُنفَّذ",
+    ...(report.cutoverBlocker === PATIENT_NUMBER_CUTOVER_HOLD.cutoverBlocker ? [PATIENT_NUMBER_CUTOVER_HOLD_TEXT] : []),
     ...report.errors.map((error) => `  • ${error}`),
   ].join("\n");
 }
