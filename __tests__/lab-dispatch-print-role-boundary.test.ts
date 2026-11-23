@@ -57,7 +57,8 @@ describe("P0-B laboratory-dispatch print confidentiality", () => {
 
   it("keeps the doctor's per-patient authorization and withholds settings on denial", async () => {
     await expect(LabOrderPrintPage(params)).rejects.toThrow();
-    expect(mocks.getLabOrderById).toHaveBeenCalledExactlyOnceWith(321);
+    expect(mocks.getLabOrderById).toHaveBeenCalledTimes(1);
+    expect(mocks.getLabOrderById).toHaveBeenCalledWith(321);
     expect(mocks.canAccessPatient).toHaveBeenCalledWith(
       expect.objectContaining({ role: "doctor" }), 77,
     );
@@ -76,6 +77,7 @@ describe("P0-B laboratory-dispatch print confidentiality", () => {
     });
     mocks.getLabOrderById.mockResolvedValue(null);
     await expect(LabOrderPrintPage(params)).rejects.toThrow();
-    expect(mocks.getLabOrderById).toHaveBeenCalledExactlyOnceWith(321);
+    expect(mocks.getLabOrderById).toHaveBeenCalledTimes(1);
+    expect(mocks.getLabOrderById).toHaveBeenCalledWith(321);
   });
 });
