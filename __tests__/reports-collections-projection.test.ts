@@ -177,7 +177,7 @@ describe("collections native money and explicit settlement presentation", () => 
     expect(result.kpis.slice(0, 3).map((item) => item.key)).toEqual(["cur-YER", "cur-SAR", "cur-USD"]);
     expect(kpi(result, "refunds-SAR")).toMatchObject({ minor: 250, currency: "SAR" });
     expect(result.rows?.find((row) => row.receiptId === 2)).toMatchObject({ nativeMinor: -250,
-      settlementText: formatMoney(-375, "YER"), kindLabel: "استرداد" });
+      settlementText: formatMoney(-375, "YER"), kindLabel: "استرداد / عكس" });
     const rendered = outputs(result);
     for (const output of [rendered.screen, rendered.print]) expect(output).toContain(formatMoney(-250, "SAR"));
     for (const output of [rendered.csv, rendered.excel]) expect(output).toContain("-2.50 SAR");
@@ -250,6 +250,28 @@ describe("collections native money and explicit settlement presentation", () => 
     expect(applyReportView(other, [{ date: "synthetic", baseMinor: 100 }], {
       ...EMPTY_REPORT_VIEW, columns: ["baseMinor"],
     }, "YER").columns.map((column) => column.key)).toEqual(["baseMinor"]);
+  });
+
+  it.each(["collections", "debt"])("does not claim the correction is a cash refund in %s", (report) => {
+    const result = collectionsReport(context([
+      payment(),
+      payment({ id: 2, kind: "refund", amountMinor: 250, baseMinor: 375,
+        settlementMinor: 375, note: "تصحيح السند SYN-NO-CASH: قيد مكرر" }),
+    ]), report);
+    expect(result.rows?.find(row => row.receiptId === 2)).toMatchObject({
+      kindLabel: "استرداد / عكس", nativeMinor: -250, currency: "SAR",
+      settlementText: formatMoney(-375, "YER"),
+    });
+    expect(result.rows?.find(row => row.receiptId === 1)).toMatchObject({ kindLabel: "قبض", nativeMinor: 1250 });
+    expect(kpi(result, "cur-SAR")).toMatchObject({ minor: 1000, currency: "SAR" });
+    expect(kpi(result, "refunds-SAR")).toMatchObject({ minor: 250, currency: "SAR" });
+    const rendered = outputs(result);
+    for (const output of [rendered.screen, rendered.print, rendered.csv, rendered.excel]) {
+      expect(output).toContain("استرداد / عكس");
+      expect(output).toContain(formatMoney(-375, "YER"));
+    }
+    for (const output of [rendered.csv, rendered.excel]) expect(output).toContain("-2.50 SAR");
+    expect(rendered.print).toContain("لا تُثبت وحدها أن نقدًا دخل الدرج أو خرج منه");
   });
 
   it("retains visible zero native movement after full reversal", () => {

@@ -41,7 +41,7 @@ interface WitnessRow {
   targetLabel: string;
   settlementText: string;
   receiver: string;
-  kindLabel: "قبض" | "استرداد";
+  kindLabel: "قبض" | "استرداد / عكس";
 }
 const rows: WitnessRow[] = [];
 const allKpis = [
@@ -112,7 +112,7 @@ beforeAll(async () => {
       nativeText: data.nativeText, exportText: data.exportText,
       targetLabel: data.unlinked ? "غير محدد في السند" : `فاتورة #${p.invoiceId}`,
       settlementText: data.settlementText ?? "—", receiver: data.receiver ?? receiverA,
-      kindLabel: data.refund ? "استرداد" : "قبض" });
+      kindLabel: data.refund ? "استرداد / عكس" : "قبض" });
     return payment.id;
   }
 

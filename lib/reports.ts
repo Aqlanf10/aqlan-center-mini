@@ -3022,7 +3022,8 @@ export function collectionsReport(ctx: ReportContext, caller = "collections"): R
         patientId: patient.patientId,
         patientName: patient.name,
         patientNumber: patient.patientNumber,
-        kindLabel: payment.kind === "refund" ? "استرداد" : "قبض",
+        // The stored refund kind also covers accounting reversals of wrong receipts.
+        kindLabel: payment.kind === "refund" ? "استرداد / عكس" : "قبض",
         currency: payment.currency,
         nativeMinor,
         // Legacy payload compatibility only. Not an available report column:
