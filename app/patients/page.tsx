@@ -10,6 +10,7 @@ import { PatientFlagChips } from "@/components/PatientContactPanel";
 import { useSetting } from "@/components/SettingsProvider";
 import { parseFlagList } from "@/lib/patient-identity";
 import { FamilyLinkSuggestion, linkNewPatientToFamily, type FamilyLinkChoice } from "@/components/FamilyLinkSuggestion";
+import { createPatientDuplicateWarningGuard, PATIENT_CREATE_RECHECK, PATIENT_CREATE_UNCERTAIN, type PatientCreateAttempt } from "@/lib/patient-create-warning";
 
 /**
  * المرضى: بحث، وتصفّح، وإنشاء.
@@ -275,41 +276,75 @@ function NewPatientForm({ onCreated, onCancel }: {
   const [previous, setPrevious] = useState(EMPTY_PREVIOUS_BALANCE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
+  const [duplicates, setDuplicates] = useState<{ matches: DuplicateMatch[]; attempt: PatientCreateAttempt } | null>(null);
   /* (PAT-4) «ربط بعائلة …» — اقتراحٌ من الجوال، لا يُربط إلا باختيار. */
   const [familyChoice, setFamilyChoice] = useState<FamilyLinkChoice | null>(null);
 
-  const send = async (confirmDuplicate: boolean) => {
-    if (busy) return;
+  const warningGuard = useRef(createPatientDuplicateWarningGuard());
+  const nameInput = useRef<HTMLInputElement>(null);
+  const invalidateWarning = useCallback(() => {
+    warningGuard.current.edit();
+    setDuplicates(null);
+    setError(null);
+  }, []);
+  const changeFamily = useCallback((choice: FamilyLinkChoice | null) => {
+    invalidateWarning();
+    setFamilyChoice(choice);
+  }, [invalidateWarning]);
+  const reviewName = () => {
+    invalidateWarning();
+    nameInput.current?.focus();
+  };
+
+  const send = async (confirmDuplicate: boolean, reviewed?: PatientCreateAttempt) => {
+    const fields = { fullName, phone, gender, birthYear, medicalAlert, ...previousBalancePayload(previous) };
+    const family = familyChoice && { ...familyChoice };
+    const started = warningGuard.current.begin(JSON.stringify([fields, family]), confirmDuplicate, reviewed);
+    if (started.kind === "busy") return;
+    if (started.kind === "stale") {
+      reviewName();
+      setError(PATIENT_CREATE_RECHECK);
+      return;
+    }
+    const { attempt } = started;
+    setDuplicates(null);
+    setError(null);
     setBusy(true);
     try {
       const response = await fetch("/api/patients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fullName, phone, gender, birthYear, medicalAlert, confirmDuplicate, ...previousBalancePayload(previous) }),
+        body: JSON.stringify({ ...fields, confirmDuplicate }),
       });
       const payload = await response.json().catch(() => null);
-      if (response.status === 409 && Array.isArray(payload?.duplicates)) {
-        setDuplicates(payload.duplicates as DuplicateMatch[]);
-        setError(payload?.message ?? null);
+      if (response.status === 409 && Array.isArray(payload?.duplicates) && payload.duplicates.length > 0) {
+        if (warningGuard.current.warn(attempt)) {
+          setDuplicates({ matches: payload.duplicates as DuplicateMatch[], attempt });
+          setError(payload?.message ?? null);
+        } else {
+          setError(PATIENT_CREATE_RECHECK);
+        }
         return;
       }
       if (!response.ok) { setError(payload?.message ?? "تعذّر الحفظ."); return; }
+      if (!Number.isSafeInteger(payload?.id) || payload.id <= 0) {
+        setError(PATIENT_CREATE_UNCERTAIN);
+        return;
+      }
       if (typeof payload?.warning === "string") window.alert(payload.warning);
-      const familyWarning = await linkNewPatientToFamily((payload as { id: number }).id, familyChoice);
+      const familyWarning = await linkNewPatientToFamily(payload.id, family);
       if (familyWarning) window.alert(familyWarning);
       onCreated(payload as { id: number });
     } catch {
-      setError("تعذّر الاتصال بالخادم.");
+      setError(PATIENT_CREATE_UNCERTAIN);
     } finally {
+      warningGuard.current.finish(attempt);
       setBusy(false);
     }
   };
 
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    // الاسم أو الهاتف تغيّر بعد التحذير: يُعاد الفحص بدل أن يمرّ التأكيد القديم.
-    setDuplicates([]);
     void send(false);
   };
 
@@ -324,13 +359,13 @@ function NewPatientForm({ onCreated, onCancel }: {
         لا زرًّا. وكلٌّ منهم رابطٌ يُفتح — لأن القرار يحتاج النظر في الملف نفسه، لا
         في سطر يقول «قد يكون مكررًا».
       */}
-      {duplicates.length > 0 ? (
+      {duplicates ? (
         <div className="mb-3 rounded-xl border-2 border-warning-300 bg-warning-50 p-3">
           <p className="mb-2 text-xs font-bold text-warning-900">
             {error ?? "قد يكون هذا المريض مسجّلًا سلفًا."}
           </p>
           <ul className="mb-3 space-y-1.5">
-            {duplicates.map((match) => (
+            {duplicates.matches.map((match) => (
               <li key={match.patient.id}>
                 <a href={`/patients/${match.patient.id}`} target="_blank" rel="noopener"
                   className="flex flex-wrap items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs hover:bg-slate-50">
@@ -347,11 +382,11 @@ function NewPatientForm({ onCreated, onCancel }: {
             ))}
           </ul>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => void send(true)} disabled={busy}
+            <button type="button" onClick={() => void send(true, duplicates.attempt)} disabled={busy}
               className="rounded-xl bg-warning-500 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">
               ليس أحدهم — أضف مريضًا جديدًا
             </button>
-            <button type="button" onClick={() => { setDuplicates([]); setError(null); }}
+            <button type="button" onClick={reviewName} disabled={busy}
               className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-navy-800">
               تراجع
             </button>
@@ -359,8 +394,9 @@ function NewPatientForm({ onCreated, onCancel }: {
         </div>
       ) : null}
       <input
+        ref={nameInput}
         value={fullName}
-        onChange={(event) => setFullName(event.target.value)}
+        onChange={(event) => { invalidateWarning(); setFullName(event.target.value); }}
         placeholder="الاسم الكامل"
         aria-label="الاسم الكامل"
         autoFocus
@@ -369,7 +405,7 @@ function NewPatientForm({ onCreated, onCancel }: {
       <div className="mb-2 flex flex-wrap gap-2">
         <input
           value={phone}
-          onChange={(event) => setPhone(event.target.value)}
+          onChange={(event) => { invalidateWarning(); setPhone(event.target.value); setFamilyChoice(null); }}
           placeholder="رقم الجوال"
           aria-label="رقم الجوال"
           dir="ltr"
@@ -378,7 +414,7 @@ function NewPatientForm({ onCreated, onCancel }: {
         />
         <input
           value={birthYear}
-          onChange={(event) => setBirthYear(event.target.value)}
+          onChange={(event) => { invalidateWarning(); setBirthYear(event.target.value); }}
           placeholder="سنة الميلاد"
           aria-label="سنة الميلاد"
           dir="ltr"
@@ -387,14 +423,14 @@ function NewPatientForm({ onCreated, onCancel }: {
         />
       </div>
       <div className="mb-2">
-        <FamilyLinkSuggestion phone={phone} value={familyChoice} onChange={setFamilyChoice} />
+        <FamilyLinkSuggestion phone={phone} value={familyChoice} onChange={changeFamily} />
       </div>
       <div className="mb-2 flex gap-2">
         {(["male", "female", "unknown"] as Gender[]).map((option) => (
           <button
             key={option}
             type="button"
-            onClick={() => setGender(option)}
+            onClick={() => { invalidateWarning(); setGender(option); }}
             className={`flex-1 rounded-xl border px-3 py-2 text-sm font-bold ${
               gender === option ? "border-brand-blue bg-brand-blue text-white" : "border-slate-200 bg-white text-slate-600"
             }`}
@@ -405,13 +441,13 @@ function NewPatientForm({ onCreated, onCancel }: {
       </div>
       <input
         value={medicalAlert}
-        onChange={(event) => setMedicalAlert(event.target.value)}
+        onChange={(event) => { invalidateWarning(); setMedicalAlert(event.target.value); }}
         placeholder="تنبيه طبي (اختياري) — حساسية، سكري، مميعات دم"
         aria-label="تنبيه طبي"
         className="mb-3 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-brand-blue"
       />
       <div className="mb-3">
-        <PreviousBalanceFields value={previous} onChange={setPrevious} />
+        <PreviousBalanceFields value={previous} onChange={(next) => { invalidateWarning(); setPrevious(next); }} />
       </div>
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
