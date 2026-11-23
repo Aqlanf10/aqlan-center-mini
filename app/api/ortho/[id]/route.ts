@@ -30,6 +30,11 @@ const forbidden = (msg = "غير مصرّح لك بالوصول لهذه الح�
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  // Reception handles appointments, collection and plan linkage, not clinical adjustments.
+  // This gate runs before fetching case details; patient scope remains a second gate.
+  if (session.role !== "admin" && session.role !== "doctor") {
+    return forbidden("تسجيل جلسات التقويم السريرية للطبيب المخوّل أو الإدارة فقط.");
+  }
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
@@ -105,6 +110,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+
+  // Front desk may link an agreement, but must not change clinical phase,
+  // retainer or closure state merely because it can access the patient.
+  if (!("planId" in source) && session.role !== "admin" && session.role !== "doctor") {
+    return forbidden("تعديل حالة التقويم السريرية للطبيب المخوّل أو الإدارة فقط.");
+  }
 
   try {
     /* (P1-B) ربط الحالة باتفاقها المالي أو فكّه — يغيّر مصدر فوترة الشدّات القادمة، فلمن يملك الخطط. */
