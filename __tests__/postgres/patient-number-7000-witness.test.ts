@@ -49,6 +49,21 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
   it('the demo reset sequence plan does not reset the patient high-water counter', () => {
     expect(RESET_SEQUENCES).toEqual(['invoice_number_seq','receipt_number_seq','voucher_number_seq']);
   });
+  it('a financial counter restart cannot rewind an already issued patient archive number', async () => {
+    // Isolated fixture only. This exercises the reset sequence allowlist, not
+    // the destructive clinic-data reset workflow or a physical backup restore.
+    const issued = await db.createPatient(input('BEFORE COUNTER MAINTENANCE'));
+    expect(issued.patientNumber).toBe('P-07000');
+    for (const sequence of RESET_SEQUENCES) {
+      await q(`ALTER SEQUENCE "${sequence}" RESTART WITH 1`);
+    }
+    await restart();
+    expect((await db.getPatient(issued.id))?.patientNumber).toBe('P-07000');
+    const next = await db.createPatient(input('AFTER COUNTER MAINTENANCE'));
+    expect(next.patientNumber).toBe('P-07001');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
+
   it('ordinary creation after startup yields P-07000 then P-07001 and keeps the historical file', async () => {
     await restart();
     const a=await db.createPatient(input('A'));const b=await db.createPatient(input('B'));
