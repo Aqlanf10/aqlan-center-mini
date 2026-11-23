@@ -80,6 +80,38 @@ describe("بطاقة المريض A6 (P0.11)", () => {
     },
   );
 
+  it.each(["2147483648", "9007199254740991"])(
+    "لا تصل معرّفات البطاقة خارج نطاق INTEGER إلى التحقق من النطاق أو قراءة المريض: %s",
+    async (id) => {
+      mocks.requireSession.mockResolvedValue({ userId: 3, username: "synthetic-reception", role: "reception" });
+      await expect(PatientCardPage({ params: Promise.resolve({ id }) })).rejects.toMatchObject({
+        digest: "NEXT_HTTP_ERROR_FALLBACK;404",
+      });
+      expect(mocks.canAccessPatient).not.toHaveBeenCalled();
+      expect(mocks.getPatient).not.toHaveBeenCalled();
+      expect(mocks.getSettingsSafe).not.toHaveBeenCalled();
+      expect(mocks.patientAppointmentsFrom).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([["1", 1], ["2147483647", 2_147_483_647]] as const)(
+    "يقبل معرّف البطاقة القياسي ضمن نطاق INTEGER ويطبع رقم الملف المخزّن كما هو: %s",
+    async (id, expectedId) => {
+      const session = { userId: 3, username: "synthetic-reception", role: "reception" };
+      mocks.requireSession.mockResolvedValue(session);
+      mocks.getPatient.mockResolvedValue({
+        id: expectedId, fullName: "SYNTHETIC CARD ID BOUNDARY", patientNumber: "P-07000",
+        createdAt: "2026-11-22T08:00:00.000Z", phone: null,
+      });
+      const page = await PatientCardPage({ params: Promise.resolve({ id }) });
+      expect(mocks.canAccessPatient).toHaveBeenCalledExactlyOnceWith(session, expectedId);
+      expect(mocks.getPatient).toHaveBeenCalledExactlyOnceWith(expectedId);
+      expect(mocks.canAccessPatient.mock.invocationCallOrder[0]).toBeLessThan(mocks.getPatient.mock.invocationCallOrder[0]);
+      expect(mocks.patientAppointmentsFrom).toHaveBeenCalledExactlyOnceWith(expectedId, expect.any(String));
+      expect(renderToStaticMarkup(page)).toContain(">P-07000</p>");
+    },
+  );
+
   it("الجلسة الغائبة لا تُظهر الرقم أو الاسم ولا تطلب أي بيانات", async () => {
     mocks.requireSession.mockResolvedValue(null);
     await expect(PatientCardPage({ params: Promise.resolve({ id: "77" }) })).rejects.toThrow();

@@ -9,6 +9,7 @@ import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { parseClinicalId } from "@/lib/patient-navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -39,13 +40,10 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
   if (session.role !== "admin" && session.role !== "reception" && session.role !== "doctor") notFound();
 
   const { id: rawId } = await params;
-  // This route accepts only canonical database IDs. A patient file number
+  // This route accepts only canonical PostgreSQL int4 patient IDs. A file number
   // (e.g. P-07000) is printed from storage, never parsed as the URL ID.
-  // Reject exponent/hex/leading-zero aliases and unsafe integers before
-  // any patient-scope check or private data read.
-  if (!/^[1-9]\d*$/.test(rawId)) notFound();
-  const id = Number(rawId);
-  if (!Number.isSafeInteger(id)) notFound();
+  const id = parseClinicalId(rawId);
+  if (id === null) notFound();
 
   /* حرس الباب (P0.12): تحقق من نطاق المريض قبل جلب الاسم والرقم والهاتف
    * والإعدادات أو المواعيد؛ إخفاء الصفحة بعد القراءة ليس حدّ خصوصية.
