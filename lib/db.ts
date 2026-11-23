@@ -16297,17 +16297,18 @@ export async function* backupSqlLines(source?: Queryable): AsyncGenerator<string
 export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<string> {
 
   const { rows: tableRows } = (await pool.query(
-    `WITH exported AS (
-       SELECT table_name FROM information_schema.tables
-       WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-     )
-     SELECT table_name::text AS table_name, false AS uncaptured_patients FROM exported
+    `SELECT table_name::text AS table_name, false AS uncaptured_patients
+     FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
      UNION ALL
      SELECT NULL::text, true
      WHERE EXISTS (
        SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
        WHERE n.nspname='public' AND c.relname='patients'
-     ) AND NOT EXISTS (SELECT 1 FROM exported WHERE table_name='patients')
+     ) AND NOT EXISTS (
+       SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name = 'patients'
+     )
      ORDER BY table_name`,
   )) as { rows: { table_name: string | null; uncaptured_patients?: boolean }[] };
   const tables = tableRows.map((row) => {
