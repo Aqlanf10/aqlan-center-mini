@@ -93,6 +93,18 @@ describe("P0 orthodontic clinical mutation role boundary (synthetic-only)", () =
     );
   });
 
+  it("rejects primitive PATCH JSON for front desk without throwing or invoking a writer", async () => {
+    const response = await PATCH(
+      new Request("https://synthetic.invalid/api/ortho/41", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify("synthetic unexpected payload"),
+      }),
+      context,
+    );
+    expect(response.status).toBe(403);
+    for (const writer of writers) expect(writer).not.toHaveBeenCalled();
+  });
+
   it("keeps the patient-ownership gate for an authorized doctor", async () => {
     useRole("doctor");
     vi.mocked(canAccessPatient).mockResolvedValue(false);
