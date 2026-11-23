@@ -36,7 +36,7 @@ afterAll(async () => { await resetPoolForTesting(); });
 const newPatient = async (n: string) => (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ($1, $1) RETURNING id`, [n]))[0].id;
 const line = (serviceId: number, category: string, price: number, toothCode: number | null = null, caseId: number | null = null, scope: string | null = null) =>
   ({ serviceId, category, doctorId: doctor, description: category, quantity: 1, unitPriceMinor: price, toothCode, caseId, scope, sessions: null });
-const create = (patientId: number, items: ReturnType<typeof line>[]) => createLinkedInvoice({
+const create = (patientId: number, items: Parameters<typeof createLinkedInvoice>[0]["items"]) => createLinkedInvoice({
   patientId, baseCurrency: "YER", discountMinor: 0, note: null, createdBy: "reception", actorRole: "reception",
   items, templates: DEFAULT_SPECIALTY_TEMPLATES, idempotencyKey: null, requestHash: null, auditDetails: {},
 });
@@ -255,18 +255,15 @@ describe("unknown site and provider are never treated as clinical/financial appr
     expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patient])).toEqual([]);
   });
 
-  it("missing provider remains explicit financial review; preview stays read-only and the invoice invents no clinical consent", async () => {
+  it("missing provider blocks new invoices; preview stays read-only", async () => {
     const patient = await newPatient("PRE-UNKNOWN-PROVIDER");
     const items = [{ ...line(rct, "rct", 80000, 36), doctorId: null }];
     const [preview] = await previewInvoiceLinkage({ patientId: patient, baseCurrency: "YER", items });
-    expect(preview).toMatchObject({ financialReviewRequired: true, refusal: null });
+    expect(preview).toMatchObject({ financialReviewRequired: true, refusal: "provider_required" });
     expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patient])).toEqual([]);
-    const created = await createLinkedInvoice({ patientId: patient, baseCurrency: "YER", discountMinor: 0, note: null,
-      createdBy: "reception", actorRole: "reception", items, templates: DEFAULT_SPECIALTY_TEMPLATES,
-      idempotencyKey: null, requestHash: null, auditDetails: {} });
-    if (!created.ok) throw new Error(created.reason);
-    expect((await q(`SELECT doctor_id, billing_status FROM plan_items WHERE id = $1`, [created.links[0].planItemId]))[0])
-      .toEqual({ doctor_id: null, billing_status: "needs_financial_review" });
-    expect((await q(`SELECT consent_at FROM treatment_plans WHERE id = $1`, [created.planId]))[0]).toEqual({ consent_at: null });
+    expect(await create(patient, items)).toEqual({ ok: false, reason: "provider_required", line: 0 });
+    expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patient])).toEqual([]);
+    expect(await q(`SELECT id FROM treatment_plans WHERE patient_id = $1`, [patient])).toEqual([]);
+    expect(await q(`SELECT id FROM clinical_cases WHERE patient_id = $1`, [patient])).toEqual([]);
   });
 });

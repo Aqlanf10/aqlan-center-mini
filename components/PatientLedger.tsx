@@ -1863,8 +1863,12 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
                   </select>
                 ) : null}
                 {preview.refusalMessage ? <p>{preview.refusalMessage}</p> : null}
-                {evidence.status === "ready" && (preview.financialReviewRequired || !row.doctorId) ? <p data-testid={`invoice-provider-review-${index}`}
-                  className="mt-1 text-amber-900">نسبة هذا الالتزام للطبيب غير محسومة؛ تُحفظ الفاتورة، وتبقى المراجعة المالية مطلوبة قبل التوقيع.</p> : null}
+                {evidence.status === "ready" && (preview.financialReviewRequired === true
+                  || (preview.financialReviewRequired === undefined && !row.doctorId)) ? <p data-testid={`invoice-provider-review-${index}`}
+                  className="mt-1 text-amber-900">المراجعة المالية مطلوبة: لم تؤكّد المعاينة إسناد هذا البند إلى طبيب. اختر الطبيب المكلّف ثم راجع المعاينة.</p> : null}
+                {evidence.status === "ready" && !row.doctorId && preview.item?.mode === "existing"
+                  && preview.financialReviewRequired === false ? <p data-testid={`invoice-provider-from-plan-${index}`}
+                  className="mt-1 text-slate-700">سيُسند هذا البند إلى طبيب بند الخطة المطابق.</p> : null}
               </div></details>
             );
           })()}

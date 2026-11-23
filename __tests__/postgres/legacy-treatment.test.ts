@@ -234,7 +234,7 @@ describe("validation, duplicates and concurrency", () => {
     const invoiced = await newPatient("LEG-INVOICED");
     const invoice = await createLinkedInvoice({
       patientId: invoiced, baseCurrency: "YER", discountMinor: 0, note: null, createdBy: "reception", actorRole: "reception",
-      items: [{ serviceId: services.rct, category: "rct", doctorId: null, description: "عصب", quantity: 1, unitPriceMinor: 80_000, toothCode: 36, caseId: null, sessions: null }],
+      items: [{ serviceId: services.rct, category: "rct", doctorId: doctor, description: "عصب", quantity: 1, unitPriceMinor: 80_000, toothCode: 36, caseId: null, sessions: null }],
       templates: DEFAULT_SPECIALTY_TEMPLATES, idempotencyKey: null, requestHash: null, auditDetails: {},
     });
     expect(invoice.ok).toBe(true);

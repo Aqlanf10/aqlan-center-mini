@@ -30,7 +30,7 @@ import { lockDebtAccountForSchedule } from "./debt-account-position";
 import {InvoiceVisitContextError,lockInvoiceVisitContext,readInvoiceVisitContext} from "./invoice-visit-context";
 import {
   LINKAGE_SPECIALTY_LABEL, caseSiteFits, caseSiteOverlaps, lineLinkage, scopeNote, sessionsFor, shellCaseTitleFor, siteGroupKey, siteText,
-  validateLineSite, invoiceQuantityAllowed, type InvoiceLinkageRefusal, type LineSite, type LinkageSpecialty,
+  validateLineSite, resolveInvoiceLineDoctor, invoiceQuantityAllowed, type InvoiceLinkageRefusal, type LineSite, type LinkageSpecialty,
 } from "./invoice-clinical-linkage";
 
 export interface LinkedInvoiceLineInput {
@@ -391,13 +391,40 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       return checked.site;
     });
 
-    const clinicalDoctorIds = input.items.flatMap((item, line) => scheduled[line] && item.doctorId !== null ? [item.doctorId] : []);
-    const doctors = await lockClinicalDoctors(client, [], clinicalDoctorIds);
     input.items.forEach((item, line) => {
-      if (scheduled[line] && item.doctorId !== null && !doctors.has(item.doctorId)) throw new Refusal("bad_provider", line);
       if (!invoiceQuantityAllowed(item.category,item.quantity) || !Number.isSafeInteger(item.unitPriceMinor) || item.unitPriceMinor < 0) {
         throw new Refusal("shape_mismatch", line);
       }
+    });
+    // Resolve every scheduled line under the existing patient/plan locks before
+    // allocating an invoice number or writing any patient/financial history.
+    const financialDoctors = input.items.map((item) => item.doctorId);
+    const claimed: number[] = [];
+    const fresh: number[] = [];
+    const matched = new Map<number, ExistingWork>();
+    const requestedWork: { serviceId: number | null; site: LineSite }[] = [];
+    for (const [line, item] of input.items.entries()) {
+      if (!scheduled[line]) continue;
+      const site = sites[line]!;
+      if (requestedWork.some((prior) => prior.serviceId === item.serviceId && (
+        (prior.site.toothCode === site.toothCode && prior.site.scope === site.scope) || ((prior.site.scope !== null || site.scope !== null)
+          && caseSiteOverlaps(siteText(prior.site), site))))) throw new Refusal("existing_work", line);
+      requestedWork.push({ serviceId: item.serviceId, site });
+      const inspection = await inspectExistingWork(client, input.patientId, input.baseCurrency, item, sites[line]!, claimed, input.existingPlanId ?? null);
+      if (inspection.refusal) throw new Refusal(inspection.refusal, line);
+      const match = inspection.item;
+      // A template must never replace an existing item's clinical schedule.
+      if (match && item.templatePlan) throw new Refusal("shape_mismatch", line);
+      const attribution = resolveInvoiceLineDoctor(linkages[line].kind, item.doctorId, match?.doctor_id ?? null);
+      if (!attribution.ok) throw new Refusal(attribution.reason, line);
+      financialDoctors[line] = attribution.doctorId;
+      if (!match) { fresh.push(line); continue; }
+      matched.set(line, match);
+      claimed.push(match.id);
+    }
+    const doctors = await lockClinicalDoctors(client, [], financialDoctors.filter((_, line) => scheduled[line]));
+    financialDoctors.forEach((doctor, line) => {
+      if (scheduled[line] && doctor !== null && !doctors.has(doctor)) throw new Refusal("bad_provider", line);
     });
     const total = input.items.reduce((sum, item) => sum + Math.max(0, item.quantity) * Math.max(0, item.unitPriceMinor), 0);
     const discount = Math.min(Math.max(0, input.discountMinor), total);
@@ -416,29 +443,8 @@ async function writeLinkedInvoice(input: Parameters<typeof createLinkedInvoice>[
       planItemId: null, planItemCreated: false, caseId: null, caseCreated: false,
       ...(scheduled[line] ? { scheduled: true } : {}),
     }));
-    const financialDoctors = input.items.map((item) => item.doctorId);
-    const claimed: number[] = [];
-    const fresh: number[] = [];
-    const requestedWork: { serviceId: number | null; site: LineSite }[] = [];
-    for (const [line, item] of input.items.entries()) {
-      if (!scheduled[line]) continue;
-      const site = sites[line]!;
-      if (requestedWork.some((prior) => prior.serviceId === item.serviceId && (
-        (prior.site.toothCode === site.toothCode && prior.site.scope === site.scope) || ((prior.site.scope !== null || site.scope !== null)
-          && caseSiteOverlaps(siteText(prior.site), site))))) throw new Refusal("existing_work", line);
-      requestedWork.push({ serviceId: item.serviceId, site });
-      const inspection = await inspectExistingWork(client, input.patientId, input.baseCurrency, item, sites[line]!, claimed, input.existingPlanId ?? null);
-      if (inspection.refusal) throw new Refusal(inspection.refusal, line);
-      const match = inspection.item;
-      if (!match) { fresh.push(line); continue; }
-      // A template must never silently replace an existing item's clinical schedule.
-      if (item.templatePlan) throw new Refusal("shape_mismatch", line);
-      if (match.doctor_id !== null && item.doctorId !== null && match.doctor_id !== item.doctorId) throw new Refusal("bad_provider", line);
-      financialDoctors[line] = match.doctor_id ?? item.doctorId;
-      if (financialDoctors[line] !== null && !(await lockClinicalDoctors(client, [], [financialDoctors[line]])).has(financialDoctors[line]!)) {
-        throw new Refusal("bad_provider", line);
-      }
-      claimed.push(match.id);
+    for (const [line, match] of matched) {
+      const item = input.items[line];
       links[line].planItemId = match.id;
       links[line].caseId = match.case_id;
       await client.query(
@@ -726,9 +732,6 @@ export async function previewInvoiceLinkage(input: {
       (prior.site.toothCode === site.toothCode && prior.site.scope === site.scope) || ((prior.site.scope !== null || site.scope !== null)
         && caseSiteOverlaps(siteText(prior.site), site))))) preview.refusal = "existing_work";
     requestedWork.push({ serviceId: item.serviceId, site });
-    const { rows: [doctor] } = await pool.query(`SELECT id FROM parties WHERE id = $1 AND kind = 'doctor'`, [item.doctorId ?? null]);
-    if (item.doctorId != null && !doctor) preview.refusal = "bad_provider";
-    preview.financialReviewRequired = item.doctorId == null;
     const inspected = await inspectExistingWork(pool, input.patientId, input.baseCurrency, item, site, claimed, input.existingPlanId ?? null);
     preview.itemCandidates = inspected.candidates ?? [];
     preview.refusal = inspected.refusal ?? preview.refusal;
@@ -740,17 +743,19 @@ export async function previewInvoiceLinkage(input: {
         previews.push(preview);
         continue;
       }
-      if (match.doctor_id !== null && item.doctorId != null && item.doctorId !== match.doctor_id) preview.refusal = "bad_provider";
-      preview.financialReviewRequired = (match.doctor_id ?? item.doctorId) == null;
-      if (match.doctor_id !== null) {
-        const { rows: [assigned] } = await pool.query(`SELECT id FROM parties WHERE id = $1 AND kind = 'doctor'`, [match.doctor_id]);
-        if (!assigned) preview.refusal = "bad_provider";
-      }
       claimed.push(match.id);
       preview.item = { mode: "existing", id: match.id };
       linkedCase = match.case_id;
     } else if (!preview.refusal && await reusableMaster(pool, input.patientId, input.baseCurrency, input.existingPlanId ?? null) === false) {
       preview.refusal = "incompatible_plan";
+    }
+    const attribution = resolveInvoiceLineDoctor(linkage.kind, item.doctorId ?? null, match?.doctor_id ?? null);
+    preview.financialReviewRequired = !attribution.ok || attribution.doctorId === null;
+    if (!attribution.ok) {
+      preview.refusal = preview.refusal ?? attribution.reason;
+    } else if (attribution.doctorId !== null && !preview.refusal) {
+      const { rows: [doctor] } = await pool.query(`SELECT id FROM parties WHERE id = $1 AND kind = 'doctor'`, [attribution.doctorId]);
+      if (!doctor) { preview.refusal = "bad_provider"; preview.financialReviewRequired = true; }
     }
     if (linkage.kind === "clinical" && linkage.needsCase) {
       const { rows: sameSpecialty } = await pool.query<{ id: number; title: string; site: string | null }>(

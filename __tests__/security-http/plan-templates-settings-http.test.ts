@@ -62,11 +62,13 @@ describe("(SPEC-T2) editing specialty templates", () => {
     const { rows: [service] } = await db.query<{ id: number }>(
       `INSERT INTO services (name, category, price_minor, is_active, price_configured) VALUES ($1, 'cleaning', 12000, TRUE, TRUE) RETURNING id`,
       [`تنظيف اختبار ${Date.now()}`]);
+    const { rows: [{ party_id: doctorId }] } = await db.query<{ party_id: number }>(
+      "SELECT party_id FROM users WHERE username = 'secdoctora'");
     const body = {
       patientId, currency: "YER", items: [],
       idempotencyKey: `template-settings-adapter:${randomUUID()}`,
       templateSelection: {
-        templateId: "cleaning", teeth: [], doctorId: null,
+        templateId: "cleaning", teeth: [], doctorId,
         steps: [{ key: (cleaning.steps as { key: string }[])[0].key, include: true, serviceId: service.id }],
         sites: [{ stepKey: (cleaning.steps as { key: string }[])[0].key, toothCode: null, scope: "full_mouth" }],
       },
@@ -85,7 +87,8 @@ describe("(SPEC-T2) editing specialty templates", () => {
     const id = created.clinical.planId;
     const { rows: links } = await db.query(
       `SELECT t.patient_id, t.base_currency, t.consent_at, i.service_id, i.billing_status,
-         i.origin_invoice_id, c.patient_id AS case_patient_id, c.specialty, c.site,
+         i.origin_invoice_id, i.doctor_id AS plan_doctor_id, ii.doctor_id AS invoice_doctor_id,
+         c.patient_id AS case_patient_id, c.specialty, c.site,
          ii.plan_item_id = i.id AS invoice_item_linked
        FROM treatment_plans t JOIN plan_items i ON i.plan_id = t.id
        JOIN clinical_cases c ON c.id = i.case_id
@@ -94,7 +97,7 @@ describe("(SPEC-T2) editing specialty templates", () => {
     );
     expect(links).toEqual([{
       patient_id: patientId, base_currency: "YER", consent_at: null, service_id: service.id,
-      billing_status: "needs_financial_review", origin_invoice_id: created.id,
+      billing_status: "billed", origin_invoice_id: created.id, plan_doctor_id: doctorId, invoice_doctor_id: doctorId,
       case_patient_id: patientId, specialty: "periodontics", site: "كامل الفم", invoice_item_linked: true,
     }]);
     expect((await db.query(`SELECT id FROM payments WHERE patient_id = $1`, [patientId])).rows).toEqual([]);

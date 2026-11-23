@@ -192,6 +192,7 @@ beforeEach(() => {
         planChoices: offerExistingPlan ? [{ id: 801, compatible: true }] : [], lines: request.items.map((item, line) => ({
         line, kind: "clinical", specialty: item.serviceId === 33 ? "endodontics" : item.serviceId === 34 ? "restorative" : "prosthodontics", specialtyLabel: "Synthetic specialty",
         item: item.planItemId ? { mode: "existing", id: item.planItemId } : { mode: "new", id: null },
+        ...(offerExistingPlan ? { financialReviewRequired: !item.planItemId && !item.doctorId } : {}),
         itemCandidates: offerExistingPlan ? [{ id: 800 + item.toothCode, planId: 801, clinicalCaseId: null }] : [],
         case: { mode: item.caseId ? "existing" : "new", id: item.caseId ?? null, title: item.caseId ? "Synthetic retained case" : null,
           options: offerCaseChoices ? [{ id: 501, title: "Synthetic case one" }, { id: 502, title: "Synthetic case two" }] : [] },
@@ -325,6 +326,22 @@ describe("InvoiceForm grouped tooth editing", () => {
     expect(elements(renderForm()).some(one => one.type === ToothSelectionDialog)).toBe(false);
     click(input("حذف البند 2", node("invoice-row-1"))); renderForm();
     expect(elements(renderForm()).some(one => one.props["data-testid"] === "invoice-split-notice")).toBe(false);
+  });
+
+  it("shows the exact plan doctor evidence without guessing or putting a doctor ID in the request", async () => {
+    offerExistingPlan = true;
+    await openForm(); selectService("filling"); confirmTeeth([16]); await preview();
+    const unresolved = text(node("invoice-provider-review-0"));
+    change(node("invoice-plan-item-0"), "816"); const selected = await preview();
+    expect(selected.items[0]).toMatchObject({ planItemId: 816 });
+    expect(selected.items[0]).not.toHaveProperty("doctorId");
+    expect(input("الطبيب المكلّف بالبند").props.value).toBe("");
+    expect(elements(renderForm()).some(one => one.props["data-testid"] === "invoice-provider-review-0")).toBe(false);
+    expect(text(node("invoice-provider-from-plan-0"))).toContain("طبيب بند الخطة المطابق");
+    expect(unresolved).toContain("اختر الطبيب");
+    expect(unresolved).not.toContain("تُحفظ الفاتورة");
+    expect(saveButton().props.disabled).toBe(false);
+    expect(calls("/api/invoices")).toHaveLength(0);
   });
 
   it("preserves explicit filling plan choices on display split but clears all choices after a surface edit", async () => {

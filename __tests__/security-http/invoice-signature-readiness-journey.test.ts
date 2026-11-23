@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { Client } from "pg";
 import { authedGet, authedMutation, baseUrl, harness } from "./_server";
+import { insertPlanV2InTx, type DbClient } from "../../lib/db";
 
 /** Built-browser signature controls backed by real persisted invoice/plan/visit state.
  * Negative transport fixtures alter only an already-validated real GET response. They
@@ -49,17 +50,63 @@ async function mutation<T>(who: "reception" | "doctorA", path: string, body: unk
 async function consent(f: Fixture) {
   await mutation("reception", `/api/plans/${f.planId}/consent`, { note: "موافقة سريرية صريحة للاختبار" }, 201);
 }
+/** A pre-FIN01 historical obligation, never a new blank-provider HTTP command. */
+async function seedHistoricalUnknownProvider(patientId: number) {
+  const target = new URL(h.seeded.dbUrl);
+  expect(target.hostname).toBe("127.0.0.1");
+  expect(target.pathname).toBe("/aqlan_sec_http");
+  const client: DbClient = {
+    query: async <T>(sql: string, values?: unknown[]) => {
+      const result = await db.query(sql, values);
+      return { rows: result.rows as T[], rowCount: result.rowCount ?? 0 };
+    },
+    release: () => {},
+  };
+  const price = 6_000_000;
+  const name = "علاج جذور تاريخي اصطناعي";
+  await db.query("BEGIN");
+  try {
+    const plan = await insertPlanV2InTx(client, {
+      patientId, title: "خطة مرتبطة بفاتورة تاريخية اصطناعية", primaryDoctorId: null, specialty: "endodontics",
+      billingMode: "per_procedure", baseCurrency: "YER", startDate: "2026-10-07", note: null,
+      createdBy: "synthetic-pre-fin01", installments: [],
+      items: [{ serviceId, serviceName: name, category: "rct", toothCode: 36, surfaces: null,
+        quantity: 1, unitPriceMinor: price, billingRule: "on_completion", sessionCount: 3, note: null }],
+    });
+    if (!plan.ok) throw new Error(plan.message);
+    const itemId = plan.itemIds[0];
+    const { rows: [{ id: invoiceId }] } = await db.query<{ id: number }>(
+      `INSERT INTO invoices(invoice_number,patient_id,total_minor,created_by,created_at)
+       VALUES($1,$2,$3,'synthetic-pre-fin01','2026-10-07T09:00:00Z') RETURNING id`,
+      [`SYNTHETIC-SIGNATURE-HISTORY-${patientId}`, patientId, price]);
+    const { rows: [{ id: caseId }] } = await db.query<{ id: number }>(
+      `INSERT INTO clinical_cases(patient_id,specialty,title,site,created_by,origin,origin_invoice_id)
+       VALUES($1,'endodontics',$2,'36','synthetic-pre-fin01','invoice',$3) RETURNING id`, [patientId, name, invoiceId]);
+    await db.query(`UPDATE plan_items SET case_id=$1, billing_status='needs_financial_review',
+      origin='invoice', origin_invoice_id=$2, billed_invoice_id=$2 WHERE id=$3`, [caseId, invoiceId, itemId]);
+    await db.query(
+      `INSERT INTO invoice_items(invoice_id,service_id,description,quantity,unit_price_minor,total_minor,
+        doctor_id,plan_item_id,source_type,source_id) VALUES($1,$2,$3,1,$4,$4,NULL,$5,'plan_item',$6)`,
+      [invoiceId, serviceId, name, price, itemId, itemId]);
+    await db.query("COMMIT");
+    return { invoiceId, planId: plan.planId, itemId };
+  } catch (error) {
+    await db.query("ROLLBACK");
+    throw error;
+  }
+}
 async function fixture(label: string, knownProvider: boolean, withConsent: boolean): Promise<Fixture> {
   const { rows: [{ id: patientId }] } = await db.query<{ id: number }>(`INSERT INTO patients
     (patient_number, full_name, primary_doctor_id) VALUES ($1, $2, $3) RETURNING id`, [`ISR-${stamp}-${label}`, `مريض قبول التوقيع ${label}`, doctorId]);
-  const invoice = await mutation<{ id: number; clinical: { planId: number; links: { planItemId: number }[] } }>("reception", "/api/invoices", {
-    patientId, currency: "YER", items: [{ serviceId, toothCode: 36, ...(knownProvider ? { doctorId } : {}) }],
-  }, 201);
-  const itemId = invoice.clinical.links[0].planItemId;
+  const linked = knownProvider
+    ? await mutation<{ id: number; clinical: { planId: number; links: { planItemId: number }[] } }>("reception", "/api/invoices", {
+        patientId, currency: "YER", items: [{ serviceId, toothCode: 36, doctorId }],
+      }, 201).then(invoice => ({ invoiceId: invoice.id, planId: invoice.clinical.planId, itemId: invoice.clinical.links[0].planItemId }))
+    : await seedHistoricalUnknownProvider(patientId);
   const { rows: [{ planned_visit_id: plannedVisitId }] } = await db.query<{ planned_visit_id: number }>(
-    `SELECT planned_visit_id FROM treatment_sessions WHERE plan_item_id = $1 ORDER BY sequence LIMIT 1`, [itemId]);
+    `SELECT planned_visit_id FROM treatment_sessions WHERE plan_item_id = $1 ORDER BY sequence LIMIT 1`, [linked.itemId]);
   const visit = await mutation<{ id: number }>("reception", "/api/visits", { plannedVisitId }, 201);
-  const f = { patientId, itemId, planId: invoice.clinical.planId, invoiceId: invoice.id, visitId: visit.id };
+  const f = { patientId, ...linked, visitId: visit.id };
   if (withConsent) await consent(f);
   return f;
 }

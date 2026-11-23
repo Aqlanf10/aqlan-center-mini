@@ -113,21 +113,29 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
     expect(lines[1].refusal).toBeNull();
   });
 
-  it.each(["omitted", "null"] as const)("%s financial provider creates explicit review without inventing clinical consent or a treating doctor", async (provider) => {
+  it.each(["omitted", "null"] as const)("%s doctor is refused before any new clinical invoice obligation", async (provider) => {
     const { rows: [{ id: fresh }] } = await db.query<{ id: number }>(
-      `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'طبيب مالي غير محدد') RETURNING id`, [`IL-NOPROV-${provider}-${stamp}`]);
+      `INSERT INTO patients (patient_number, full_name, primary_doctor_id)
+       VALUES ($1, 'حالة اختبار اصطناعية غير مسندة', $2) RETURNING id`, [`IL-NOPROV-${provider}-${stamp}`, doctorId]);
     const body = { patientId: fresh, currency: "YER", items: [{ serviceId: rctService, toothCode: 46, ...(provider === "null" ? { doctorId: null } : {}) }] };
+    const snapshot = async () => ({
+      invoices: (await db.query("SELECT id FROM invoices WHERE patient_id=$1", [fresh])).rows,
+      plans: (await db.query("SELECT id FROM treatment_plans WHERE patient_id=$1", [fresh])).rows,
+      cases: (await db.query("SELECT id FROM clinical_cases WHERE patient_id=$1", [fresh])).rows,
+      payments: (await db.query("SELECT id FROM payments WHERE patient_id=$1", [fresh])).rows,
+      number: (await db.query("SELECT last_value,is_called FROM invoice_number_seq")).rows,
+    });
+    const before = await snapshot();
     const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify(body));
     expect(preview.status).toBe(200);
-    expect((await preview.json() as { lines: unknown[] }).lines[0]).toMatchObject({ financialReviewRequired: true, refusal: null });
-    expect((await db.query(`SELECT id FROM invoices WHERE patient_id = $1`, [fresh])).rows).toEqual([]);
-    const created = await post("reception", body);
-    expect(created.status).toBe(201);
-    const result = await created.json() as { id: number; clinical: { planId: number; links: { planItemId: number }[] } };
-    expect((await db.query(`SELECT doctor_id, billing_status FROM plan_items WHERE id = $1`, [result.clinical.links[0].planItemId])).rows)
-      .toEqual([{ doctor_id: null, billing_status: "needs_financial_review" }]);
-    expect((await db.query(`SELECT consent_at FROM treatment_plans WHERE id = $1`, [result.clinical.planId])).rows).toEqual([{ consent_at: null }]);
-    expect((await db.query(`SELECT doctor_id FROM invoice_items WHERE invoice_id = $1`, [result.id])).rows).toEqual([{ doctor_id: null }]);
+    expect((await preview.json() as { lines: unknown[] }).lines[0]).toMatchObject({
+      financialReviewRequired: true, refusal: "provider_required", refusalMessage: expect.stringContaining("اختر الطبيب"),
+    });
+    expect(await snapshot()).toEqual(before);
+    const refused = await post("reception", body);
+    expect(refused.status).toBe(400);
+    expect((await json(refused)).message).toContain("البند 1: اختر الطبيب");
+    expect(await snapshot()).toEqual(before);
   });
 
   it.each(["price", "quantity", "toothCode", "caseId", "doctorId", "sessions"] as const)(

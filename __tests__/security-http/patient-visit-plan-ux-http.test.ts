@@ -15,6 +15,7 @@ let ownedVisit = 0;
 let otherVisit = 0;
 let itemId = 0;
 let serviceId = 0;
+let treatingDoctorId = 0;
 const stamp = Date.now();
 
 type Who = "admin" | "reception" | "doctorA" | "doctorB" | "cashier" | "accountant";
@@ -32,11 +33,11 @@ beforeAll(async () => {
   h = await harness();
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
-  const { rows: [doctor] } = await db.query<{ party_id: number }>(`SELECT party_id FROM users WHERE username = 'secdoctora'`);
+  ({ rows: [{ party_id: treatingDoctorId }] } = await db.query<{ party_id: number }>(`SELECT party_id FROM users WHERE username = 'secdoctora'`));
   const insert = async (suffix: string, primary: number | null) => (await db.query<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ($1, $2, $3) RETURNING id`,
     [`UXH-${suffix}-${stamp}`, `مريض ${suffix}`, primary])).rows[0].id;
-  ownedId = await insert("A", doctor.party_id);
+  ownedId = await insert("A", treatingDoctorId);
   otherId = await insert("B", null);
   const visit = async (patientId: number) => (await db.query<{ id: number }>(
     `INSERT INTO visits (patient_id, patient_name, status) VALUES ($1, 'م', 'waiting') RETURNING id`, [patientId])).rows[0].id;
@@ -123,7 +124,7 @@ describe("(P2) treatment entry creates the plan through the canonical invoice an
   it("the catalog price creates a linked plan; a lower price from reception without a reason is refused", async () => {
     const plan = (unitPriceMinor: number) => post("reception", "/api/invoices", {
       patientId: ownedId, currency: "YER",
-      items: [{ serviceId, quantity: 1, toothCode: 16, price: String(unitPriceMinor), sessions: 1 }],
+      items: [{ serviceId, quantity: 1, toothCode: 16, price: String(unitPriceMinor), sessions: 1, doctorId: treatingDoctorId }],
     });
     // Check price refusal before any invoice exists, so duplicate-work refusal cannot mask it.
     await expectArabic(await plan(1000), 400);
