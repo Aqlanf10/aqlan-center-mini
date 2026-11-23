@@ -95,6 +95,8 @@ try {
   const db = await import("../lib/db.ts");
   await db.ensureSchema();
 
+  // P0-A: preserve a historical paper-file number and the new canonical floor.
+  await db.getPool().query("INSERT INTO patients(patient_number,full_name) VALUES ('P-00042','SYNTHETIC HISTORICAL ARCHIVE')");
   const patient = await db.createPatient({
     fullName: "مريض تمرين الاستعادة", phone: "770001122", altPhone: null,
     gender: "male", birthYear: 1990, address: null, medicalAlert: null, note: null,
@@ -135,6 +137,13 @@ try {
   if (payment.payment == null) gaps.push(`الدفعة (${payment.reason ?? "؟"})`);
   if (expense.expense == null) gaps.push(`سند الصرف (${expense.reason ?? "؟"})`);
   check("قاعدة مصدر مؤقتة بمخطط البرنامج وصفوفٍ معلومة", gaps.length === 0, gaps.join("، "));
+
+  // A consumed value without a surviving row must not be reissued after restore.
+  // This is deliberately a synthetic sequence allocation, not a patient deletion.
+  const { rows: [retired] } = await db.getPool().query("SELECT nextval('patient_number_seq')::text AS number");
+  check("P0-A: synthetic archive starts at P-07000", patient.patientNumber === "P-07000");
+  check("P0-A: synthetic retired allocation is 7001", retired.number === "7001");
+  const { rows: [archiveBefore] } = await db.getPool().query("SELECT last_value::text, is_called FROM patient_number_seq");
 
   /* ── ٣: النسخة ── */
   sourceClient = new Client({ connectionString: process.env.DATABASE_URL, ssl: sslFor(source) });
@@ -194,7 +203,7 @@ try {
 
   /* المريض المزروع بعينه — لا عدّ صفوفٍ فقط: العدّ يتساوى ولو استُعيد غيرُ ما نُسخ. */
   const { rows: restoredPatient } = await db.getPool().query(
-    `SELECT full_name, phone, photo_document_id FROM patients WHERE id = $1`, [patient.id],
+    `SELECT full_name, phone, photo_document_id, patient_number FROM patients WHERE id = $1`, [patient.id],
   );
   check("المريض المزروع عاد باسمه ورقمه", restoredPatient[0]?.full_name === patient.fullName
     && restoredPatient[0]?.phone === patient.phone);
@@ -219,6 +228,17 @@ try {
     }
   }
   check("العدّادات مضبوطة فوق أكبر رقمٍ مستعاد", badSequences.length === 0, badSequences.join(" | "));
+  // Exercise startup reconciliation on the restored schema, not just row counts.
+  check("P0-A: restored canonical patient number is unchanged", restoredPatient[0]?.patient_number === patient.patientNumber);
+  const { rows: [archiveRestored] } = await db.getPool().query("SELECT last_value::text, is_called FROM patient_number_seq");
+  check("P0-A: restore retains the consumed archive high-water", archiveRestored.last_value === archiveBefore.last_value && archiveRestored.is_called === archiveBefore.is_called);
+  db.schemaReadyReset();
+  await db.ensureSchema();
+  const { rows: [historical] } = await db.getPool().query("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL ARCHIVE'");
+  check("P0-A: historical P-00042 survives restore and startup", historical?.patient_number === "P-00042");
+  const next = await db.createPatient({ fullName: "SYNTHETIC AFTER ARCHIVE RESTORE", phone: null, altPhone: null, gender: "unknown", birthYear: null, address: null, medicalAlert: null, note: null });
+  check("P0-A: first new file after restore is P-07002", next.patientNumber === "P-07002");
+  check("P0-A: restored file is searchable by canonical number", (await db.searchPatients("P-07000")).some(row => row.patientNumber === "P-07000"));
   await db.resetPoolForTesting();
 } catch (error) {
   console.error(`  ✗ سقط التمرين: ${error.message}`);
