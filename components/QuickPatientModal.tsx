@@ -1,12 +1,13 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { Modal } from "./Modal";
 import { useRouter } from "next/navigation";
 import { GENDER_LABEL, type Gender } from "@/lib/patient";
 import type { DuplicateMatch } from "@/lib/duplicates";
 import { EMPTY_PREVIOUS_BALANCE, PreviousBalanceFields, previousBalancePayload } from "./PreviousBalanceFields";
 import { FamilyLinkSuggestion, linkNewPatientToFamily, type FamilyLinkChoice } from "./FamilyLinkSuggestion";
+import { createPatientDuplicateWarningGuard, PATIENT_CREATE_RECHECK, PATIENT_CREATE_UNCERTAIN, type PatientCreateAttempt } from "@/lib/patient-create-warning";
 
 export function QuickPatientModal({
   isOpen,
@@ -34,13 +35,47 @@ export function QuickPatientModal({
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [duplicates, setDuplicates] = useState<DuplicateMatch[] | null>(null);
+  const [duplicates, setDuplicates] = useState<{ matches: DuplicateMatch[]; attempt: PatientCreateAttempt } | null>(null);
+
+  const warningGuard = useRef(createPatientDuplicateWarningGuard());
+  const nameInput = useRef<HTMLInputElement>(null);
+  const invalidateWarning = useCallback(() => {
+    warningGuard.current.edit();
+    setDuplicates(null);
+    setError(null);
+  }, []);
+  const changeFamily = useCallback((choice: FamilyLinkChoice | null) => {
+    invalidateWarning();
+    setFamilyChoice(choice);
+  }, [invalidateWarning]);
+  const reviewName = () => {
+    invalidateWarning();
+    nameInput.current?.focus();
+  };
+  const close = () => {
+    invalidateWarning();
+    onClose();
+  };
 
   if (!isOpen) return null;
 
-  const handleSubmit = async (e: React.FormEvent, confirmDuplicate = false) => {
+  const handleSubmit = async (e: React.FormEvent, confirmDuplicate = false, reviewed?: PatientCreateAttempt) => {
     e.preventDefault();
-    if (busy) return;
+    const fields = {
+      fullName, phone: phone || null, altPhone: altPhone || null, gender,
+      birthYear: birthYear ? Number(birthYear) : null, address: address || null,
+      medicalAlert: medicalAlert || null, note: note || null, ...previousBalancePayload(previous),
+    };
+    const family = familyChoice && { ...familyChoice };
+    const started = warningGuard.current.begin(JSON.stringify([fields, family]), confirmDuplicate, reviewed);
+    if (started.kind === "busy") return;
+    if (started.kind === "stale") {
+      reviewName();
+      setError(PATIENT_CREATE_RECHECK);
+      return;
+    }
+    const { attempt } = started;
+    setDuplicates(null);
     setBusy(true);
     setError(null);
 
@@ -48,33 +83,28 @@ export function QuickPatientModal({
       const res = await fetch("/api/patients", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fullName,
-          phone: phone || null,
-          altPhone: altPhone || null,
-          gender,
-          birthYear: birthYear ? Number(birthYear) : null,
-          address: address || null,
-          medicalAlert: medicalAlert || null,
-          note: note || null,
-          confirmDuplicate,
-          ...previousBalancePayload(previous),
-        }),
+        body: JSON.stringify({ ...fields, confirmDuplicate }),
       });
-
-      const payload = await res.json();
-      if (res.status === 409 && Array.isArray(payload.duplicates)) {
-        setDuplicates(payload.duplicates);
-        setError(payload.message);
-        setBusy(false);
+      const payload = await res.json().catch(() => null);
+      if (res.status === 409 && Array.isArray(payload?.duplicates) && payload.duplicates.length > 0) {
+        if (warningGuard.current.warn(attempt)) {
+          setDuplicates({ matches: payload.duplicates, attempt });
+          setError(payload.message);
+        } else {
+          setError(PATIENT_CREATE_RECHECK);
+        }
+        return;
+      }
+      if (!res.ok) {
+        setError(payload?.message || "تعذّر إضافة المريض.");
+        return;
+      }
+      if (!Number.isSafeInteger(payload?.id) || payload.id <= 0) {
+        setError(PATIENT_CREATE_UNCERTAIN);
         return;
       }
 
-      if (!res.ok) {
-        throw new Error(payload.message || "تعذّر إضافة المريض.");
-      }
-
-      const familyWarning = await linkNewPatientToFamily(payload.id, familyChoice);
+      const familyWarning = await linkNewPatientToFamily(payload.id, family);
       setFamilyChoice(null);
       if (familyWarning) window.alert(familyWarning);
       setFullName("");
@@ -94,15 +124,16 @@ export function QuickPatientModal({
       } else {
         router.push(`/patients/${payload.id}`);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "حدث خطأ أثناء الحفظ.");
+    } catch {
+      setError(PATIENT_CREATE_UNCERTAIN);
     } finally {
+      warningGuard.current.finish(attempt);
       setBusy(false);
     }
   };
 
   return (
-    <Modal onClose={onClose} labelledBy={`${formId}-title`} busy={busy} initialFocus="input">
+    <Modal onClose={close} labelledBy={`${formId}-title`} busy={busy} initialFocus="input">
 
       <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
@@ -117,7 +148,7 @@ export function QuickPatientModal({
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={close}
               disabled={busy}
             aria-label="إغلاق"
             className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-700 transition-colors"
@@ -136,7 +167,7 @@ export function QuickPatientModal({
           <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             <p className="font-bold mb-1">يوجد مرضى مسجلون ببيانات مشابهة:</p>
             <ul className="list-disc pr-4 space-y-1">
-              {duplicates.map((d) => (
+              {duplicates.matches.map((d) => (
                 <li key={d.patient.id}>
                   {d.patient.fullName} — ملف #{d.patient.patientNumber}{" "}
                   {d.patient.phone ? `(${d.patient.phone})` : ""}
@@ -146,7 +177,7 @@ export function QuickPatientModal({
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
-                onClick={(e) => handleSubmit(e, true)}
+                onClick={(e) => handleSubmit(e, true, duplicates.attempt)}
                 disabled={busy}
                 className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-bold text-white shadow-xs hover:bg-amber-700"
               >
@@ -154,7 +185,7 @@ export function QuickPatientModal({
               </button>
               <button
                 type="button"
-                onClick={() => setDuplicates(null)}
+                onClick={reviewName} disabled={busy}
                 className="rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-bold text-amber-800"
               >
                 مراجعة وتعديل الاسم
@@ -170,10 +201,11 @@ export function QuickPatientModal({
             </label>
             <input
               id={`${formId}-name`}
+              ref={nameInput}
               type="text"
               required
               value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
+              onChange={(e) => { invalidateWarning(); setFullName(e.target.value); }}
               placeholder="مثال: أحمد محمد علي السعدي"
               className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-navy-900 outline-none focus:border-navy-800"
             />
@@ -187,7 +219,7 @@ export function QuickPatientModal({
                 type="tel"
                 dir="ltr"
                 value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                onChange={(e) => { invalidateWarning(); setPhone(e.target.value); setFamilyChoice(null); }}
                 placeholder="770000000"
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
@@ -199,14 +231,14 @@ export function QuickPatientModal({
                 type="tel"
                 dir="ltr"
                 value={altPhone}
-                onChange={(e) => setAltPhone(e.target.value)}
+                onChange={(e) => { invalidateWarning(); setAltPhone(e.target.value); }}
                 placeholder="730000000"
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
             </div>
           </div>
 
-          <FamilyLinkSuggestion phone={phone} value={familyChoice} onChange={setFamilyChoice} />
+          <FamilyLinkSuggestion phone={phone} value={familyChoice} onChange={changeFamily} />
 
           <div className="grid grid-cols-2 gap-2">
             <div>
@@ -214,7 +246,7 @@ export function QuickPatientModal({
               <select
               id={`${formId}-gender`}
                 value={gender}
-                onChange={(e) => setGender(e.target.value as Gender)}
+                onChange={(e) => { invalidateWarning(); setGender(e.target.value as Gender); }}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold outline-none focus:border-navy-800 bg-white"
               >
                 {(Object.keys(GENDER_LABEL) as Gender[]).map((g) => (
@@ -230,7 +262,7 @@ export function QuickPatientModal({
               id={`${formId}-birthYear`}
                 type="number"
                 value={birthYear}
-                onChange={(e) => setBirthYear(e.target.value)}
+                onChange={(e) => { invalidateWarning(); setBirthYear(e.target.value); }}
                 placeholder="مثال: 1995"
                 min="1900"
                 max={new Date().getFullYear()}
@@ -247,7 +279,7 @@ export function QuickPatientModal({
               id={`${formId}-medicalAlert`}
               type="text"
               value={medicalAlert}
-              onChange={(e) => setMedicalAlert(e.target.value)}
+              onChange={(e) => { invalidateWarning(); setMedicalAlert(e.target.value); }}
               placeholder="مثال: حساسية بنسلين، مريض سكري نوع 2"
               className="w-full rounded-xl border border-rose-200 bg-rose-50/50 px-3 py-2 text-xs font-bold text-rose-900 outline-none focus:border-rose-600 placeholder:text-rose-700"
             />
@@ -260,7 +292,7 @@ export function QuickPatientModal({
               id={`${formId}-address`}
                 type="text"
                 value={address}
-                onChange={(e) => setAddress(e.target.value)}
+                onChange={(e) => { invalidateWarning(); setAddress(e.target.value); }}
                 placeholder="صنعاء - شارع الستين"
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
@@ -271,14 +303,14 @@ export function QuickPatientModal({
               id={`${formId}-note`}
                 type="text"
                 value={note}
-                onChange={(e) => setNote(e.target.value)}
+                onChange={(e) => { invalidateWarning(); setNote(e.target.value); }}
                 placeholder="تفضيلات المريض..."
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs outline-none focus:border-navy-800"
               />
             </div>
           </div>
 
-          <PreviousBalanceFields value={previous} onChange={setPrevious} />
+          <PreviousBalanceFields value={previous} onChange={(next) => { invalidateWarning(); setPrevious(next); }} />
 
           <div className="mt-5 flex gap-2 pt-2 border-t border-slate-100">
             <button
@@ -290,7 +322,7 @@ export function QuickPatientModal({
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={close}
               disabled={busy}
               className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50"
             >
