@@ -64,6 +64,13 @@ describe("backup drill cleanup ownership (source contract)", () => {
     expect(source).not.toContain("for (const name of [sourceDb, restoreDb])");
   });
 
+  it("closes the application pool in finally before dropping fixture databases", () => {
+    const cleanup = source.slice(source.lastIndexOf("} finally {"));
+    expect(cleanup).toContain("await db.resetPoolForTesting()");
+    expect(cleanup).toContain('check("close application fixture pool", false)');
+    expect(cleanup.indexOf("await db.resetPoolForTesting()")).toBeLessThan(cleanup.indexOf("for (const name of ownedDatabases.reverse())"));
+  });
+
   it("cleans only registered databases and fails the drill if both drops fail", () => {
     expect(source).toContain("for (const name of ownedDatabases.reverse())");
     expect(source).toContain("check(`cleanup of owned fixture ${name}`, false);");
