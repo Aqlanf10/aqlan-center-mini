@@ -36,7 +36,7 @@ afterAll(async () => { await resetPoolForTesting(); });
 const newPatient = async (n: string) => (await q<{ id: number }>(`INSERT INTO patients (patient_number, full_name) VALUES ($1, $1) RETURNING id`, [n]))[0].id;
 const line = (serviceId: number, category: string, price: number, toothCode: number | null = null, caseId: number | null = null, scope: string | null = null) =>
   ({ serviceId, category, doctorId: doctor, description: category, quantity: 1, unitPriceMinor: price, toothCode, caseId, scope, sessions: null });
-const create = (patientId: number, items: ReturnType<typeof line>[]) => createLinkedInvoice({
+const create = (patientId: number, items: Parameters<typeof createLinkedInvoice>[0]["items"]) => createLinkedInvoice({
   patientId, baseCurrency: "YER", discountMinor: 0, note: null, createdBy: "reception", actorRole: "reception",
   items, templates: DEFAULT_SPECIALTY_TEMPLATES, idempotencyKey: null, requestHash: null, auditDetails: {},
 });
