@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { RESET_SEQUENCES } from "../lib/clinic-reset";
 import { PATIENT_NUMBER_SQL, paddedSequenceSql } from "../lib/document-numbers";
 
@@ -24,5 +26,27 @@ describe("patient archive IDs survive clinic reset", () => {
     expect(paddedSequenceSql("patient_number_seq")).toContain("regexp_replace");
     expect(paddedSequenceSql("patient_number_seq")).toContain("LPAD(nextval('patient_number_seq')::text, 20, '0')");
     expect(paddedSequenceSql("patient_number_seq")).not.toContain("LPAD(nextval('patient_number_seq')::text, 5,");
+  });
+});
+
+describe("direct backup drill target fence", () => {
+  const script = fileURLToPath(new URL("../scripts/verify-backup.mjs", import.meta.url));
+  const local = "postgresql://fixture:fixture@127.0.0.1:1/postgres?sslmode=disable";
+
+  it.each([
+    ["remote source", { SOURCE_DATABASE_URL: "postgresql://fixture:fixture@synthetic.invalid:1/postgres" }, /loopback PostgreSQL only/],
+    ["production marker", { DATABASE_ENVIRONMENT: "production" }, /production environment is forbidden/],
+    ["ambient host override", { PGHOST: "synthetic.invalid" }, /Legacy restore refused/],
+  ] as const)("rejects %s before database I/O", (_label, overrides, expected) => {
+    // No real DB credentials, and port 1 is deliberately not the CI database.
+    const result = spawnSync(process.execPath, [script], {
+      env: { PATH: process.env.PATH, NODE_ENV: "test", DATABASE_ENVIRONMENT: "test",
+        DATABASE_URL: local, SOURCE_DATABASE_URL: local, TEST_DATABASE_URL: local, ...overrides },
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.status).toBe(2);
+    expect(result.stderr).toMatch(expected);
   });
 });
