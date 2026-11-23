@@ -130,6 +130,31 @@ describe("بطاقة المريض A6 (P0.11)", () => {
     expect(html).not.toContain("بوابة المرضى");
   });
 
+  it("بطاقة أرشفة الاستقبال تعرض الهوية والرقم دون أن تسرب ملاحظات أو معرفات سريرية مخفية", async () => {
+    mocks.requireSession.mockResolvedValue({ userId: 3, username: "synthetic-reception", role: "reception" });
+    mocks.getPatient.mockResolvedValue({
+      id: 77, fullName: "SYNTHETIC ARCHIVE CARD", patientNumber: "P-07000",
+      phone: "700000000", createdAt: "2026-11-22T08:00:00.000Z",
+      medicalAlert: "SYNTHETIC_PRIVATE_MEDICAL_ALERT",
+      note: "SYNTHETIC_PRIVATE_CLINICAL_NOTE",
+      nationalId: "SYNTHETIC_PRIVATE_NATIONAL_ID",
+      photoDocumentId: "SYNTHETIC_PRIVATE_PHOTO_ID",
+    });
+    const html = renderToStaticMarkup(
+      await PatientCardPage({ params: Promise.resolve({ id: "77" }) }),
+    );
+    expect(html).toContain("P-07000");
+    expect(html).toContain("SYNTHETIC ARCHIVE CARD");
+    for (const privateValue of [
+      "SYNTHETIC_PRIVATE_MEDICAL_ALERT",
+      "SYNTHETIC_PRIVATE_CLINICAL_NOTE",
+      "SYNTHETIC_PRIVATE_NATIONAL_ID",
+      "SYNTHETIC_PRIVATE_PHOTO_ID",
+    ]) {
+      expect(html).not.toContain(privateValue);
+    }
+  });
+
   it("الاستقبال يفتح بطاقة أي مريض (سياسة المركز) — السلوك الطبيعي", async () => {
     mocks.requireSession.mockResolvedValue({ userId: 3, username: "reception1", role: "reception" });
     const result = await PatientCardPage({ params: Promise.resolve({ id: "77" }) });
