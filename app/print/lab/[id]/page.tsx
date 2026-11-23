@@ -34,10 +34,16 @@ export default async function LabOrderPrintPage({
 }) {
   const session = await requireSession();
   if (!session) notFound();
+  // A laboratory dispatch is a clinical document. Reception may process
+  // patient payments and upload external records, not print tooth-level orders.
+  // Deny nonclinical roles before resolving even the order identifier in DB.
+  if (session.role !== "admin" && session.role !== "doctor") notFound();
 
   const { id: rawId } = await params;
+  // Do not accept hex, exponent, or rounded aliases for a clinical print ID.
+  if (!/^[1-9]\d*$/.test(rawId)) notFound();
   const orderId = Number(rawId);
-  if (!Number.isInteger(orderId) || orderId <= 0) notFound();
+  if (!Number.isSafeInteger(orderId)) notFound();
 
   const internalOrder = await getLabOrderById(orderId);
   if (!internalOrder) notFound();
