@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedGet, authedMutation, harness } from "./_server";
+import { authedGet, authedMutation, grantReceptionCollection, harness } from "./_server";
 
 /**
  * (P1-5b) Opening balances in their own currency, through the real routes: the admin
@@ -48,6 +48,7 @@ describe("P1-5b — an old balance stays in its currency", () => {
   });
 
   it("reception collects the SAR opening in SAR; a USD payment against it is refused in Arabic", async () => {
+    await grantReceptionCollection(h, patientId);
     const paid = await authedMutation("/api/payments", h.sessions.reception, "POST",
       JSON.stringify({ patientId, amount: "300", currency: "SAR", openingCurrency: "SAR", method: "cash" }), { "Idempotency-Key": `opening-paid-${patientId}` });
     expect(paid.status).toBe(201);
