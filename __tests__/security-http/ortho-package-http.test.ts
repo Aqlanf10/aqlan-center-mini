@@ -69,7 +69,7 @@ describe("(P1-B) linking an orthodontic case to its agreement over HTTP", () => 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, changed: true, funded: true });
     expect((await db.query(`SELECT plan_id FROM ortho_cases WHERE id = $1`, [caseId])).rows[0].plan_id).toBe(planId);
-    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'ortho.plan_link' AND entity_id = $1`,
+    expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'ortho.plan_link' AND entity = 'ortho_cases' AND entity_id = $1`,
       [String(caseId)])).rows[0].n).toBe(1);
   });
 });
