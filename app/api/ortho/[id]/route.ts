@@ -30,6 +30,11 @@ const forbidden = (msg = "غير مصرّح لك بالوصول لهذه الح�
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  // Reception handles appointments, collection and plan linkage, not clinical adjustments.
+  // This gate runs before fetching case details; patient scope remains a second gate.
+  if (session.role !== "admin" && session.role !== "doctor") {
+    return forbidden("تسجيل جلسات التقويم السريرية للطبيب المخوّل أو الإدارة فقط.");
+  }
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
@@ -93,18 +98,30 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
+  // A front-desk caller must not probe orthodontic case existence or clinical
+  // data by submitting a clinical PATCH. Read/authorize the action before SQL.
+  let body: unknown;
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  const source = (body ?? {}) as Record<string, unknown>;
+
+  // Front desk may link an agreement, but must not change clinical phase,
+  // retainer or closure state merely because it can access the patient.
+  if (!Object.prototype.hasOwnProperty.call(source, "planId") && session.role !== "admin" && session.role !== "doctor") {
+    return forbidden("تعديل حالة التقويم السريرية للطبيب المخوّل أو الإدارة فقط.");
+  }
+  // Malformed JSON must not be interpreted as a clinical action or leak a 500.
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const found = await getOrthoCase(caseId, today);
   if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
   if (!(await canAccessPatient(session, found.patientId))) {
     return forbidden("غير مصرّح لك بتعديل هذه الحالة.");
   }
-
-  let body: unknown;
-  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
-    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
-  }
-  const source = (body ?? {}) as Record<string, unknown>;
 
   try {
     /* (P1-B) ربط الحالة باتفاقها المالي أو فكّه — يغيّر مصدر فوترة الشدّات القادمة، فلمن يملك الخطط. */
