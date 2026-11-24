@@ -5,7 +5,7 @@ import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {usesSharedLocalDatabaseConnection,type DbClient,type DbPool} from "./db";
 import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
-import { isDisbursementReport } from "./report-access";
+import { isDisbursementReport, type DisbursementReportId } from "./report-access";
 import { loadDisbursementReport } from "./report-disbursements";
 /**
  * محرك التقارير — كل الحساب يجري هنا على الخادم.
@@ -1201,7 +1201,7 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
   switch (report) {
     case "daily-outflow":
     case "expense-payees":
-      validateDisbursementDays(filters.from, filters.to);
+      validateDisbursementDays(report, filters.from, filters.to);
       return withFinancialReadSnapshot(getPool(), runner =>
         loadDisbursementReport(report, filters, CLINIC_TIME_ZONE, runner), usesSharedLocalDatabaseConnection());
   }
@@ -6128,7 +6128,7 @@ function validateReportMonthRange(
 }
 
 const EXPENSE_SELECTOR = /^[0-9a-f]{64}$/;
-function validateDisbursementDays(from: string | null, to: string | null): void {
+function validateDisbursementDays(report: DisbursementReportId, from: string | null, to: string | null): void {
   const date = (value: string | null) => {
     if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) return NaN;
     const instant = toUTC(value);
@@ -6138,8 +6138,12 @@ function validateDisbursementDays(from: string | null, to: string | null): void 
   if (!Number.isFinite(first) || !Number.isFinite(last) || first > last) {
     throw new ReportInputError("اختر تاريخي بداية ونهاية صحيحين بالترتيب.");
   }
-  if ((last - first) / 86_400_000 >= 366) {
-    throw new ReportInputError("اختر فترة لا تتجاوز ٣٦٦ يومًا. يمكنك تصدير فترات أطول على دفعات.");
+  // Count both clinic dates; two calendar years can include one leap day.
+  const inclusiveDays = (last - first) / 86_400_000 + 1;
+  const maxDays = report === "expense-payees" ? 731 : 366;
+  if (inclusiveDays > maxDays) {
+    const limit = maxDays.toLocaleString("ar-YE-u-nu-arab", { useGrouping: false });
+    throw new ReportInputError(`اختر فترة لا تتجاوز ${limit} يومًا. يمكنك تصدير فترات أطول على دفعات.`);
   }
 }
 
@@ -6159,7 +6163,7 @@ export function validateCustomReportRange(params: URLSearchParams) {
         if (value !== null && !EXPENSE_SELECTOR.test(value)) throw new ReportInputError("اختيار المستفيد أو البند غير صالح.");
       }
     }
-    if (params.get("preset") === "custom") validateDisbursementDays(params.get("from"), params.get("to"));
+    if (params.get("preset") === "custom") validateDisbursementDays(report, params.get("from"), params.get("to"));
     return;
   }
 
