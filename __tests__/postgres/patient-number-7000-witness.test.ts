@@ -4,6 +4,7 @@ import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { stubPostgresEnv } from './_setup';
 import { validatePostgresTestTarget } from './_safe-target';
 import { PATIENT_NUMBER_SQL } from '../../lib/document-numbers';
+import { patientNumberBackupSql } from '../../lib/patient-number-backup-sql';
 import { RESET_SEQUENCES } from '../../lib/clinic-reset';
 import { parseCsv } from '../../lib/patient-import';
 
@@ -258,6 +259,26 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
     await restart();
     expect((await db.getPatient(issued.id))?.patientNumber).toBe('P-07000');
     expect((await db.createPatient(input('AFTER DUPLICATE CONFLICT'))).patientNumber).toBe('P-07001');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
+  it('older backup cursor cannot rewind a newer consumed archive number on the same target', async () => {
+    // Cursor replay only, against the owned synthetic database. An old full
+    // backup restored to an empty target still needs an external high-water.
+    const first=await db.createPatient(input('BEFORE OLD CURSOR SNAPSHOT'));
+    expect(first.patientNumber).toBe('P-07000');
+    const old=(await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0];
+    const newer=await db.createPatient(input('AFTER OLD CURSOR SNAPSHOT'));
+    expect(newer.patientNumber).toBe('P-07001');
+    // Model another issued/reserved number without a surviving patient row.
+    expect((await q("SELECT nextval('patient_number_seq')::text AS number")).rows[0].number).toBe('7002');
+    const before=(await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0];
+    await q(patientNumberBackupSql(old.last_value,old.is_called));
+    await q(patientNumberBackupSql(before.last_value,false));
+    expect((await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0]).toEqual(before);
+    await restart();
+    expect((await db.getPatient(first.id))?.patientNumber).toBe('P-07000');
+    expect((await db.getPatient(newer.id))?.patientNumber).toBe('P-07001');
+    expect((await db.createPatient(input('AFTER OLD CURSOR REPLAY'))).patientNumber).toBe('P-07003');
     expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
   });
   it('equal and occupied unconsumed number is marked consumed, not allocated again', async () => {
