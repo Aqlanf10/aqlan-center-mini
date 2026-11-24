@@ -75,6 +75,44 @@ describe("P0 reception full patient GET boundary (synthetic data only)", () => {
     expect(deps.file).toHaveBeenCalledWith(syntheticId);
   });
 
+  it.each(["missing", "failed", "inactive", "unlinked"])(
+    "denies a doctor with %s current authority even when the session still has a partyId",
+    async mode => {
+      deps.session.mockResolvedValue({ role: "doctor", username: "synthetic-stale-doctor", partyId: 9 });
+      if (mode === "missing") deps.user.mockResolvedValue(null);
+      else if (mode === "failed") deps.user.mockRejectedValue(new Error("Synthetic lookup failure"));
+      else if (mode === "inactive") deps.user.mockResolvedValue({ isActive: false, partyId: 9, permissions: { canViewAllPatients: true } });
+      else deps.user.mockResolvedValue({ isActive: true, partyId: null, permissions: {} });
+      const result = await get();
+      expect([401, 403]).toContain(result.status);
+      expect(result.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(deps.owns).not.toHaveBeenCalled();
+      expect(deps.file).not.toHaveBeenCalled();
+      expect(deps.read).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["not owned", "lookup failed"])("denies an out-of-scope doctor (%s) before reading the dossier", async mode => {
+    deps.session.mockResolvedValue({ role: "doctor", username: "synthetic-scoped-doctor", partyId: 9 });
+    if (mode === "lookup failed") deps.owns.mockRejectedValue(new Error("Synthetic scope lookup failure"));
+    else deps.owns.mockResolvedValue(false);
+    const result = await get();
+    expect(result.status).toBe(403);
+    expect(result.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(deps.owns).toHaveBeenCalledWith(9, syntheticId);
+    expect(deps.file).not.toHaveBeenCalled();
+    expect(deps.read).not.toHaveBeenCalled();
+  });
+
+  it("preserves an active doctor's explicit current all-patient grant", async () => {
+    deps.session.mockResolvedValue({ role: "doctor", username: "synthetic-granted-doctor" });
+    deps.user.mockResolvedValue({ isActive: true, partyId: 9, permissions: { canViewAllPatients: true } });
+    const result = await get();
+    expect(result.status).toBe(200);
+    expect(deps.owns).not.toHaveBeenCalled();
+    expect(deps.file).toHaveBeenCalledWith(syntheticId);
+  });
+
   it.each(["assistant", "cashier", "accountant"])(
     "rejects nonclinical %s full-file access without querying even visit metadata",
     async role => {
