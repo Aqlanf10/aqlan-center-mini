@@ -93,6 +93,8 @@ describe("document association boundary over real authenticated HTTP", () => {
     const before = await count();
     const response = await upload({ visitId: String(ownVisit), orthoCaseId: String(ownCase), adjustmentId: String(ownAdjustment) });
     expect(response.status).toBe(201);
+    expect(response.headers.get("cache-control")).toContain("private");
+    expect(response.headers.get("cache-control")).toContain("no-store");
     const document = await response.json() as { id: number };
     expect(document).toMatchObject({
       patientId: ownPatient, visitId: ownVisit, orthoCaseId: ownCase,
@@ -139,6 +141,8 @@ describe("document association boundary over real authenticated HTTP", () => {
       { visitId: String(unlinkedVisit) }, { orthoCaseId: String(ownCase), adjustmentId: String(foreignAdjustment) }]) {
       const response = await upload(links);
       expect(response.status).toBe(400);
+      expect(response.headers.get("cache-control")).toContain("private");
+      expect(response.headers.get("cache-control")).toContain("no-store");
       expect(await response.json()).toEqual(refusal);
       expect(await count()).toBe(before);
     }
@@ -150,6 +154,8 @@ describe("document association boundary over real authenticated HTTP", () => {
       for (const value of ["abc", "0", "1.5", "2147483648"]) {
         const response = await upload({ [field]: value });
         expect(response.status).toBe(400);
+        expect(response.headers.get("cache-control")).toContain("private");
+        expect(response.headers.get("cache-control")).toContain("no-store");
         expect(await response.json()).toEqual(refusal);
       }
     }
