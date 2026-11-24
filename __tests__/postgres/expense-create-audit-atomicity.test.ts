@@ -6,6 +6,7 @@ stubPostgresEnv();
 vi.mock("@/lib/session", () => ({ requireSession: async () => ({ username: "expense-audit-ci", role: "admin" }) }));
 const db = await import("../../lib/db");
 const { POST } = await import("../../app/api/expenses/route");
+const { POST: quoteExpense } = await import("../../app/api/expenses/quote/route");
 let sequence = 0;
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
@@ -14,10 +15,27 @@ beforeAll(async () => {
 }, 180000);
 afterAll(async () => { await db.resetPoolForTesting(); });
 afterEach(() => vi.restoreAllMocks());
-function request(note: string) {
+function request(note: string, fields: Record<string, unknown> = {}) {
   return new Request("http://localhost/api/expenses", { method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ category: "other", amount: "100", currency: "YER", payee: "Synthetic recipient", note }) });
+    body: JSON.stringify({ category: "other", amount: "100", currency: "YER", payee: "Synthetic recipient", note, ...fields }) });
 }
+it.each([
+  { ownerPrivateAmount: "100", ownerPrivateReason: "Paid by owner" },
+  { ownerPrivateAmount: "25", ownerPrivateReason: "Paid partly by owner" },
+  { ownerPrivateReason: "Amount pending confirmation" },
+])("preserves the drawer when a legacy admin submits explicit owner funding %j", async (privateFields) => {
+  const note = `synthetic-owner-funding-${++sequence}`;
+  const shift = (await db.getOpenShift())!;
+  const before = await db.shiftDrawerBreakdown(shift);
+  for (const handler of [quoteExpense, POST]) {
+    const response = await handler(request(note, privateFields));
+    expect.soft(response.status).toBe(403);
+    expect.soft(await response.json()).toMatchObject({ code: "owner_private_requires_owner" });
+  }
+  expect((await db.getPool().query("SELECT id FROM expenses WHERE note = $1", [note])).rows).toHaveLength(0);
+  expect(await db.shiftDrawerBreakdown(shift)).toEqual(before);
+});
+
 async function failAudit(action: string) {
   await db.getPool().query(`CREATE FUNCTION ci_expense_audit_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.action='${action}' THEN RAISE EXCEPTION 'synthetic expense audit failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER ci_expense_audit_fail BEFORE INSERT ON audit_log FOR EACH ROW EXECUTE FUNCTION ci_expense_audit_fail()`);
 }

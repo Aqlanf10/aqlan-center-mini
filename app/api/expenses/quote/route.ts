@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   }
   const settingsRates = ratesFromSettings(await getSettings());
   const parsed = parseExpenseRequest((body ?? {}) as Record<string, unknown>, settingsRates, isAdmin(session.role));
-  if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: parsed.status });
+  if (!parsed.ok) return NextResponse.json({ message: parsed.message, code: parsed.code }, { status: parsed.status });
   const value = parsed.value;
   try {
     const { reason, quote } = await recordExpense({

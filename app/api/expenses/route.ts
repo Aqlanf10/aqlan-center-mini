@@ -64,7 +64,7 @@ export async function POST(request: Request) {
   const base = CLINIC_BASE_CURRENCY;
   const settingsRates = ratesFromSettings(await getSettings());
   const parsed = parseExpenseRequest(source, settingsRates, isAdmin(session.role));
-  if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: parsed.status });
+  if (!parsed.ok) return NextResponse.json({ message: parsed.message, code: parsed.code }, { status: parsed.status });
   const request_ = parsed.value;
 
   try {
