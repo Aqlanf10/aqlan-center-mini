@@ -40,7 +40,7 @@ describe("historical plan print parity", () => {
   });
   it("keeps authentication and the ordinary contract path while branching history before contract construction", () => {
     const source = readFileSync(new URL("../app/print/plan/[id]/page.tsx", import.meta.url), "utf8");
-    expect(source).toContain("if (!session || !canHandleMoney(session.role)) notFound()");
+    expect(source).toContain('if (!session || session.role === "reception" || !canHandleMoney(session.role)) notFound()');
     expect(source.indexOf("if (plan.items.some(hasLegacyHistory))")).toBeLessThan(source.indexOf("const agreement = buildInstallmentPlanAgreement"));
     expect(source).toContain('title="اتفاقية خطة العلاج وجدول الأقساط"');
     expect(source).toContain("<AgreementTermsAndSignatures terms={agreement.terms} note={agreement.note}");

@@ -14,7 +14,7 @@ describe("financial reference GET current session authority", () => {
     vi.resetAllMocks();
     mocks.references.mockResolvedValue({ patientId: 17, references: [], documents: [] });
   });
-  it.each(["admin", "reception", "cashier", "accountant"])("allows the canonical money reader %s", async role => {
+  it.each(["admin", "cashier", "accountant"])("allows the canonical money reader %s", async role => {
     mocks.session.mockResolvedValue({ role, financeAccess: { viewPatientLedger: true } });
     const response = await read();
     expect(response.status).toBe(200);
@@ -34,7 +34,7 @@ describe("financial reference GET current session authority", () => {
     expect((await read()).status).toBe(403);
     expect(mocks.references).not.toHaveBeenCalled();
   });
-  it.each(["doctor", "assistant"])("does not grant clinical role %s money access", async role => {
+  it.each(["doctor", "assistant", "reception"])("denies %s access to detailed treatment financial references", async role => {
     mocks.session.mockResolvedValue({ role, financeAccess: { viewPatientLedger: true } });
     expect((await read()).status).toBe(403);
     expect(mocks.references).not.toHaveBeenCalled();

@@ -20,7 +20,7 @@ const paymentRows = [
 ];
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.session.mockResolvedValue({ role: "reception", username: "synthetic", userId: 1 });
+  mocks.session.mockResolvedValue({ role: "admin", username: "synthetic", userId: 1 });
   mocks.query.mockImplementation(async (sql: string, params: unknown[]) => {
     if (/^(BEGIN|COMMIT|ROLLBACK)/.test(sql))return {rows:[]};
     if (sql.includes("FROM invoice_settlement_reclassification")) return {rows:[]};
@@ -74,6 +74,12 @@ function verifyResult(result: Awaited<ReturnType<typeof buildReport>>) {
 describe("actual patient statement movement loader and report handler", () => {
   it("does not prefilter patient movements by inherited from/doctor/service/currency/method filters", async () => {
     verifyResult(await buildReport("patient-statement", parseFilters(query, "2026-10-02")));
+  });
+  it("denies the full report to reception before any financial query", async () => {
+    mocks.session.mockResolvedValue({ role: "reception" });
+    const response = await GET(new Request(`https://synthetic.invalid/api/reports?${query}`));
+    expect(response.status).toBe(403);
+    expect(mocks.query).not.toHaveBeenCalled();
   });
   it("preserves the same whole-patient contract through the existing authorized API handler", async () => {
     const response = await GET(new Request(`https://synthetic.invalid/api/reports?${query}`));

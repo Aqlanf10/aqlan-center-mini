@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedGet, authedMutation, harness } from "./_server";
+import { authedGet, authedMutation, grantReceptionCollection, harness } from "./_server";
 
 // Browser-free witness for the hosted invoice-quote contract's saved statement.
 // Use the real invoice writer and real SSR; no invoice rows are fabricated.
@@ -33,9 +33,10 @@ async function facts(patientId: number) {
     (SELECT jsonb_agg(to_jsonb(r) ORDER BY r.id) FROM debt_repayment_revisions r JOIN debt_repayment_arrangements a ON a.id=r.arrangement_id WHERE a.patient_id=$1) AS revisions`, [patientId])).rows[0];
 }
 describe("actual saved converted-quote invoice in statement SSR", () => {
-  it.each(["admin", "reception"] as const)("%s reads the exact invoice header, amount and saved schedule without another write", async role => {
+  it.each(["admin", "reception"] as const)("%s receives only its authorized view of the committed invoice and schedule", async role => {
     const patientId = (await db.query(`INSERT INTO patients(patient_number,full_name)
       VALUES($1,'Synthetic quote statement patient') RETURNING id`, [`QUOTE-SSR-${role}-${Date.now()}`])).rows[0].id;
+    if (role === "reception") await grantReceptionCollection(h, patientId);
     const catalog = await (await authedGet("/api/services", h.sessions[role])).json();
     const quote = catalog.find((row: { id: number }) => row.id === serviceId).invoiceQuotes.SAR;
     expect(quote).toMatchObject({ source: "converted", rate: 440, minor: 500 });
@@ -56,12 +57,26 @@ describe("actual saved converted-quote invoice in statement SSR", () => {
     expect(replay.status).toBe(200); expect(await replay.json()).toMatchObject({ id: invoice.id, replayed: true });
     const ledger = await (await authedGet(`/api/patients/${patientId}/ledger`, h.sessions[role])).json();
     expect(ledger.invoices).toHaveLength(1);
-    expect(ledger.balances.SAR).toMatchObject({ billedMinor: 150000, collectedMinor: 0, dueMinor: 150000 });
-    expect(ledger.balances.YER.dueMinor).toBe(0); expect(ledger.balances.USD.dueMinor).toBe(0);
     const before = await facts(patientId);
     expect(before.invoices).toHaveLength(1); expect(before.payments).toBeNull();
     expect(before.arrangements).toHaveLength(1); expect(before.revisions).toHaveLength(1);
     const statement = await authedGet(`/print/statement/${patientId}`, h.sessions[role]);
+    if (role === "reception") {
+      expect(ledger.dueRecommendation.currencies).toContainEqual(expect.objectContaining({
+        currency: "SAR", currentBalanceMinor: 150000,
+      }));
+      expect(ledger).not.toHaveProperty("receiptProvenance");
+      expect(statement.status).toBe(404);
+      expect(await statement.text()).not.toContain(ledger.invoices[0].invoiceNumber);
+      const detail = await authedGet(`/api/invoices/${invoice.id}`, h.sessions.reception);
+      expect(detail.status).toBe(403);
+      const fullReport = await authedGet(`/api/reports?report=patient-statement&patientId=${patientId}`, h.sessions.reception);
+      expect(fullReport.status).toBe(403);
+      expect(await facts(patientId)).toEqual(before);
+      return;
+    }
+    expect(ledger.balances.SAR).toMatchObject({ billedMinor: 150000, collectedMinor: 0, dueMinor: 150000 });
+    expect(ledger.balances.YER.dueMinor).toBe(0); expect(ledger.balances.USD.dueMinor).toBe(0);
     expect(statement.status).toBe(200);
     const html = await statement.text();
     const tables = html.match(/<table\b[^>]*class="[^"]*statement-invoice[^"]*"[^>]*>[\s\S]*?<\/table>/g) ?? [];

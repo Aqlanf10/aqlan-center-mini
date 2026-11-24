@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedMutation, harness } from "./_server";
+import { grantReceptionCollection, authedMutation, harness } from "./_server";
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
@@ -16,6 +16,7 @@ afterAll(async () => { await db?.end(); });
 async function fixture() {
   const { rows: [patient] } = await db.query(`INSERT INTO patients (patient_number, full_name)
     VALUES ($1, 'Synthetic key boundary') RETURNING id`, [`SYN-KEY-${crypto.randomUUID()}`]);
+  await grantReceptionCollection(h, patient.id);
   const { rows: [plan] } = await db.query(`INSERT INTO treatment_plans
     (patient_id, title, total_minor, base_currency, status, billing_mode, consent_at)
     VALUES ($1, 'Synthetic collection plan', 1000000, 'YER', 'active', 'installments', NOW()) RETURNING id`, [patient.id]);

@@ -126,8 +126,13 @@ for (const route of ["generic", "patient"] as const) {
       expect((await get(route)).status).toBe(401);
       expect(mocks.plans).not.toHaveBeenCalled();
     });
-    it.each(["admin", "reception"])("preserves the %s financial and clinical response", async (role) => {
-      mocks.session.mockResolvedValue({ role });
+    it("denies reception before loading the full clinical plan", async () => {
+      mocks.session.mockResolvedValue({ role: "reception" });
+      expect((await get(route)).status).toBe(403);
+      expect(mocks.plans).not.toHaveBeenCalled();
+    });
+    it("preserves the admin financial and clinical response", async () => {
+      mocks.session.mockResolvedValue({ role: "admin" });
       const response = await get(route);
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ plans: [plan], canSeeFinancial: true });

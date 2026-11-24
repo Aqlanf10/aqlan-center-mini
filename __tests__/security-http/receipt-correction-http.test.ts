@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedGet, authedMutation, harness } from "./_server";
+import { grantReceptionCollection, authedGet, authedMutation, harness } from "./_server";
 
 /** (RC-1) تصحيح سند القبض عبر المسار الحقيقي: للمدير وحده، بسببٍ مكتوب، ورسائل عربية، وتدقيق. */
 
@@ -47,8 +47,7 @@ describe("POST /api/payments/[id]/correct", () => {
     for (const role of ["reception", "cashier", "accountant", "doctorA"] as const) {
       const refused = await authedMutation(path, h.sessions[role], "POST", body("مبلغ خطأ"));
       expect(refused.status).toBe(403);
-      // أدوارٌ يُوقفها الوسيط قبل المسار برسالته العامة، والاستقبال يبلغ المسار فيردّه برسالته. كلاهما عربي.
-      expect(await message(refused)).toMatch(role !== "reception" ? /[\u0600-\u06FF]/ : /^تصحيح سند القبض أو ردّه يتطلب صلاحية المدير\.$/);
+      expect(await message(refused)).toMatch(/[\u0600-\u06FF]/);
     }
 
     const noReason = await authedMutation(path, h.sessions.admin, "POST", body(" "));
@@ -112,6 +111,7 @@ describe("POST /api/payments/[id]/correct", () => {
     const adminLedger = await admin.json() as { receiptRemaining?: Record<string, number> };
     expect(adminLedger.receiptRemaining?.[paymentId]).toBe(3_000);
 
+    await grantReceptionCollection(h, patientId);
     const reception = await authedGet(`/api/patients/${patientId}/ledger`, h.sessions.reception);
     expect(reception.status).toBe(200);
     expect((await reception.json() as { receiptRemaining?: unknown }).receiptRemaining).toBeUndefined();

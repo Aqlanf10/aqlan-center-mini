@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedGet, authedMutation, baseUrl, confirmingSimilarCollection, harness } from "./_server";
+import { grantReceptionCollection, authedGet, authedMutation, baseUrl, confirmingSimilarCollection, harness } from "./_server";
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
@@ -16,6 +16,7 @@ async function fixture() {
   sequence += 1;
   const { rows: [patient] } = await db.query<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'Synthetic recovery HTTP') RETURNING id`, [`RECOVERY-HTTP-${Date.now()}-${sequence}`]);
+  await grantReceptionCollection(h, patient.id);
   const { rows: [plan] } = await db.query<{ id: number }>(
     `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, billing_mode, consent_at)
      VALUES ($1, 'Synthetic recovery agreement', 14000, 'YER', 'active', 'installments', NOW()) RETURNING id`, [patient.id]);
@@ -59,7 +60,7 @@ describe("backend-first explicit installment recovery through the real proxy and
       expect(await response.json()).toMatchObject({ reason: "issued_installment_recovery_required" });
     }
     expect(await counts(target.patientId)).toEqual(before);
-    const ledger = await authedGet(`/api/patients/${target.patientId}/ledger`, h.sessions.reception);
+    const ledger = await authedGet(`/api/patients/${target.patientId}/ledger`, h.sessions.admin);
     expect(ledger.status).toBe(200);
     expect(await ledger.json()).toMatchObject({ installmentRecovery: { recoveries: [expect.objectContaining({ invoiceId: target.invoiceId, planId: target.planId, remainingMinor: 7000 })] } });
     const key = { "Idempotency-Key": `recovery-http-explicit-${sequence}` };
@@ -106,6 +107,7 @@ describe("backend-first explicit installment recovery through the real proxy and
       VALUES ($1, 'Synthetic unaffected ordinary collection') RETURNING id`, [`RECOVERY-ORDINARY-${Date.now()}`]);
     const { rows: [invoice] } = await db.query<{ id: number }>(`INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by)
       VALUES ($1, $2, 1000, 0, 'YER', 'synthetic') RETURNING id`, [`RECOVERY-ORDINARY-INV-${Date.now()}`, patient.id]);
+    await grantReceptionCollection(h, patient.id);
     for (const invoiceId of [invoice.id, undefined]) {
       // Two deliberate equal payments (invoice, then account): the second passes the advisory review explicitly.
       const response = await confirmingSimilarCollection((extra) => authedMutation("/api/payments", h.sessions.reception, "POST",

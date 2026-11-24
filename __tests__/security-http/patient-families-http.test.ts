@@ -113,14 +113,15 @@ describe("PAT-4 — who writes", () => {
 });
 
 describe("PAT-4 — who sees members and balances", () => {
-  it("reception sees every member with per-currency balances and a per-currency total", async () => {
+  it("reception manages family membership without receiving member balances or totals", async () => {
     const response = await authedGet(`/api/patients/${ownedId}/family`, h.sessions.reception);
     expect(response.status).toBe(200);
     const { family } = await response.json() as { family: FamilyViewBody };
-    expect(family.canSeeMoney).toBe(true);
+    expect(family.canSeeMoney).toBe(false);
     expect(family.members.map((m) => m.id).sort()).toEqual([ownedId, otherId].sort());
-    expect(family.members.find((m) => m.id === ownedId)?.balances).toEqual([{ currency: "YER", balanceMinor: 40_000 }]);
-    expect(family.totals).toEqual([{ currency: "YER", balanceMinor: 55_000 }]);
+    for (const member of family.members) expect(member).not.toHaveProperty("balances");
+    expect(family).not.toHaveProperty("totals");
+    expect((await authedGet(`/print/family-statement/${familyId}`, h.sessions.reception)).status).toBe(404);
   });
 
   it("a doctor without canViewPatientPayments sees only his own patients among the members, and no money", async () => {
@@ -158,7 +159,7 @@ describe("PAT-4 — who sees members and balances", () => {
   });
 
   it("cashier and accountant print the family statement (money viewers)", async () => {
-    for (const who of ["cashier", "accountant", "reception", "admin"] as const) {
+    for (const who of ["cashier", "accountant", "admin"] as const) {
       const response = await authedGet(`/print/family-statement/${familyId}`, h.sessions[who]);
       expect(response.status).toBe(200);
       expect(await response.text()).toContain("كشف حساب العائلة");
