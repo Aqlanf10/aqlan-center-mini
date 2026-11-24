@@ -49,7 +49,7 @@ beforeEach(() => {
   ) as typeof setTimeout);
 });
 
-afterEach(() => { vi.restoreAllMocks(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 async function invokeAudit(): Promise<number> {
   try {
@@ -79,11 +79,18 @@ function expectAuditAttempts(count: number) {
 
 describe("dependency audit CLI fail-closed boundary", () => {
   it("requires both complete audits and independent verification before success", async () => {
+    const advisoryToken = "synthetic-advisory-only";
+    vi.stubEnv("AQLAN_ADVISORY_READ_TOKEN", advisoryToken);
     boundary.spawnSync.mockReturnValueOnce(auditResult(fullAudit, 1)).mockReturnValueOnce(auditResult(productionAudit));
     expect(await invokeAudit()).toBe(0);
     expect(boundary.spawnSync).toHaveBeenCalledTimes(2);
     expect(boundary.spawnSync.mock.calls[0][1]).not.toContain("--omit=dev");
     expect(boundary.spawnSync.mock.calls[1][1]).toContain("--omit=dev");
+    for (const [, , options] of boundary.spawnSync.mock.calls) {
+      expect(options.env).not.toHaveProperty("AQLAN_ADVISORY_READ_TOKEN");
+      expect(options.env.PATH).toBe(process.env.PATH);
+    }
+    expect(process.env.AQLAN_ADVISORY_READ_TOKEN).toBe(advisoryToken);
     expect(boundary.verify).toHaveBeenCalledTimes(1);
     // The installation is snapshotted BEFORE either audit runs and handed to the verifier for re-comparison.
     expect(boundary.snapshot).toHaveBeenCalledTimes(1);
@@ -91,6 +98,8 @@ describe("dependency audit CLI fail-closed boundary", () => {
     expect(boundary.verify.mock.calls[0][3]).toEqual({ installedBefore });
     expect(boundary.writeFile.mock.calls.filter(([file]) => /attempt-\d+\.json$/.test(String(file))).map(([, bytes]) => bytes)).toEqual([JSON.stringify(fullAudit), JSON.stringify(productionAudit)]);
     expect(vi.mocked(console.log).mock.calls.flat()).toContain(JSON.stringify(fullAudit));
+    expect(JSON.stringify({ logs: vi.mocked(console.log).mock.calls, warnings: vi.mocked(console.warn).mock.calls,
+      errors: vi.mocked(console.error).mock.calls, artifactWrites: boundary.writeFile.mock.calls })).not.toContain(advisoryToken);
   });
 
   const withdrawnProof = { mode: "withdrawn", advisory: "GHSA-vfj7-8cjw-p6xm", cve: "CVE-2026-93687", package: "braces", version: "3.0.3", counts: productionAudit.metadata.vulnerabilities, official: { withdrawnAt: "2026-10-23T12:53:02Z" } };

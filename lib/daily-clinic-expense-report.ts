@@ -10,7 +10,11 @@ export interface DailyClinicExpenseQuery {
 
 /** The caller owns the read-only, repeatable-read snapshot. No pool/schema side effects here. */
 export type ClinicExpenseRangeQuery = Omit<DailyClinicExpenseQuery, "date"> & { from: string; to: string };
-type ClinicExpenseRangeMovement = DailyClinicExpenseMovement & { categoryGroupKey: string };
+type ClinicExpenseRangeMovement = DailyClinicExpenseMovement & {
+  categoryGroupKey: string;
+  /** Exact old grouping key for a voucher corrected only by the proved padding join. */
+  legacyPaddedCategoryKey?: string;
+};
 export type ClinicExpenseRangeReport = Omit<DailyClinicExpenseReport, "date" | "movements"> & {
   from: string;
   to: string;
@@ -102,6 +106,7 @@ export interface DailyClinicExpenseSourceRow {
   category: unknown;
   category_name: unknown;
   resolved_category_key?: unknown;
+  padded_category_key?: unknown;
   party_id: unknown;
   party_name: unknown;
   party_kind: unknown;
@@ -217,9 +222,16 @@ function validateRange(query: ClinicExpenseRangeQuery): void {
   if (query.from > query.to) reject();
 }
 
+type CategoryReadMode = "strict" | "payee-report";
+
+// No PostgreSQL text value can contain NUL, so this grouping key cannot collide with a stored category.
+const UNCLASSIFIED_CATEGORY = "\0unclassified-expense-category";
+// The literal characters removed by the voucher writer's ECMAScript trim validation.
+const CATEGORY_TRIM_WHITESPACE = "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
+
 /** One canonical voucher projection; validate every source row before optional currency filtering. */
 export function buildClinicExpenseRangeReport(
-  rows: readonly DailyClinicExpenseSourceRow[], query: ClinicExpenseRangeQuery,
+  rows: readonly DailyClinicExpenseSourceRow[], query: ClinicExpenseRangeQuery, categoryMode: CategoryReadMode = "strict",
 ): ClinicExpenseRangeReport {
   validateRange(query);
   const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: query.timeZone, hourCycle: "h23",
@@ -271,12 +283,22 @@ export function buildClinicExpenseRangeReport(
     });
     if ((payableId !== null && allocations.length > 0) || Math.abs(allocated) > Math.abs(amountMinor)) reject();
     const supplier = recipient.partyKind === "supplier" || recipient.partyKind === "lab";
-    const categoryKey = requiredText(row.category);
+    const rawCategory = row.category;
+    const unclassified = categoryMode === "payee-report" && typeof rawCategory === "string" && !rawCategory.trim();
+    const categoryKey = unclassified ? rawCategory : requiredText(rawCategory);
+    const resolvedCategory = nullableText(row.resolved_category_key);
+    const unlinkedLegacy = categoryMode === "payee-report" && !resolvedCategory && categoryKey !== categoryKey.trim();
+    const paddedCategory = categoryMode === "payee-report" ? nullableText(row.padded_category_key) : null;
+    if (paddedCategory !== null && (paddedCategory !== "rent" || resolvedCategory !== paddedCategory
+      || categoryKey === paddedCategory || categoryKey.trim() !== paddedCategory)) reject();
     const movement: ClinicExpenseRangeMovement = {
       id: expenseId, voucherNumber, createdAt: created.toISOString(), clinicDate,
       clinicTime: `${part("hour")}:${part("minute")}:${part("second")}`,
-      shiftId: id(row.shift_id), categoryKey, categoryLabel: nullableText(row.category_name)?.trim() || categoryKey,
-      categoryGroupKey: nullableText(row.resolved_category_key) || categoryKey,
+      shiftId: id(row.shift_id), categoryKey,
+      categoryLabel: unclassified ? "بند غير مسجّل"
+        : unlinkedLegacy ? categoryKey.trim() + " (بند قديم غير مربوط)" : nullableText(row.category_name)?.trim() || categoryKey,
+      categoryGroupKey: unclassified ? UNCLASSIFIED_CATEGORY : resolvedCategory || categoryKey,
+      ...(paddedCategory !== null ? { legacyPaddedCategoryKey: categoryKey } : {}),
       recipient, amountMinor, currency, reversalOfId,
       kind: reversalOfId !== null ? "reversal" : amountMinor < 0 ? "negative_adjustment" : amountMinor > 0 ? "outflow" : "zero",
       originalVoucherNumber: nullableText(row.original_voucher_number), payableId, payableSourceType, allocations,
@@ -331,10 +353,18 @@ export function buildClinicExpenseRangeReport(
 }
 
 /** One SELECT definition, one row per voucher, no current FX conversion. */
-const CLINIC_EXPENSE_SELECT = `
+function clinicExpenseSelect(categoryMode: CategoryReadMode) {
+  const knownKey = "CASE WHEN ec.key = e.category OR ec.matches = 1 THEN ec.key END";
+  const payeeMode = categoryMode === "payee-report";
+  // Only the protected, pre-existing system Rent key has proven padding
+  // compatibility. Custom keys can be created/reused after a voucher, so
+  // a mutable catalogue match cannot give their padded history a new meaning.
+  return `
     SELECT e.id, e.voucher_number, e.created_at, e.shift_id, e.category,
-           ec.name AS category_name,
-           CASE WHEN ec.key = e.category OR ec.matches = 1 THEN ec.key END AS resolved_category_key, e.party_id, p.name AS party_name, p.kind AS party_kind,
+           ${payeeMode ? "COALESCE(ec.name, padded.name)" : "ec.name"} AS category_name,
+           ${payeeMode ? "COALESCE(" + knownKey + ", padded.key)" : knownKey} AS resolved_category_key,
+           ${payeeMode ? "padded.key AS padded_category_key," : ""}
+           e.party_id, p.name AS party_name, p.kind AS party_kind,
            e.payee_text, e.amount_minor::text, e.currency, e.reversal_of_id,
            original.voucher_number AS original_voucher_number, original.currency AS original_currency,
            e.payable_id, bill.source_type AS payable_source_type, bill.party_id AS payable_party_id,
@@ -348,6 +378,10 @@ const CLINIC_EXPENSE_SELECT = `
          WHERE c.key = e.category OR c.name = e.category
          ORDER BY (c.key = e.category) DESC, c.id LIMIT 1
       ) ec ON TRUE
+      ${payeeMode ? `LEFT JOIN expense_categories padded
+        ON ec.key IS NULL AND e.category <> BTRIM(e.category, $4::text)
+        AND padded.key = 'rent' AND padded.is_system AND padded.created_at <= e.created_at
+        AND padded.key = BTRIM(e.category, $4::text)` : ""}
       LEFT JOIN LATERAL (
         SELECT jsonb_agg(jsonb_build_object(
           'id', x.id, 'payable_id', x.payable_id, 'paid_minor', x.paid_minor::text,
@@ -357,9 +391,12 @@ const CLINIC_EXPENSE_SELECT = `
           FROM expense_payable_allocations x LEFT JOIN payables b ON b.id = x.payable_id
          WHERE x.expense_id = e.id
       ) a ON TRUE`;
+}
 
-async function expenseSource(runner: DailyClinicExpenseQueryRunner, timePredicate: string, values: string[]): Promise<DailyClinicExpenseSourceRow[]> {
-  const result = await runner.query(`${CLINIC_EXPENSE_SELECT} WHERE ${timePredicate} ORDER BY e.created_at, e.id`, values);
+async function expenseSource(
+  runner: DailyClinicExpenseQueryRunner, timePredicate: string, values: string[], categoryMode: CategoryReadMode = "strict",
+): Promise<DailyClinicExpenseSourceRow[]> {
+  const result = await runner.query(`${clinicExpenseSelect(categoryMode)} WHERE ${timePredicate} ORDER BY e.created_at, e.id`, values);
   for (const row of result.rows) {
     if (typeof row !== "object" || row === null || Array.isArray(row)) reject();
   }
@@ -385,10 +422,21 @@ export async function loadDailyClinicExpenseReport(
     onClinicDaySql("e.created_at", "$1", "$2::date"), [query.timeZone, query.date]), query);
 }
 
-export async function loadClinicExpenseRangeReport(
-  query: ClinicExpenseRangeQuery, runner: DailyClinicExpenseQueryRunner,
+async function loadExpenseRange(
+  query: ClinicExpenseRangeQuery, runner: DailyClinicExpenseQueryRunner, categoryMode: CategoryReadMode,
 ): Promise<ClinicExpenseRangeReport> {
   validateRange(query);
+  const values = [query.timeZone, query.from, query.to];
+  if (categoryMode === "payee-report") values.push(CATEGORY_TRIM_WHITESPACE);
   return buildClinicExpenseRangeReport(await expenseSource(runner,
-    onClinicDaysSql("e.created_at", "$1", "$2::date", "$3::date"), [query.timeZone, query.from, query.to]), query);
+    onClinicDaysSql("e.created_at", "$1", "$2::date", "$3::date"), values, categoryMode), query, categoryMode);
+}
+
+export function loadClinicExpenseRangeReport(query: ClinicExpenseRangeQuery, runner: DailyClinicExpenseQueryRunner) {
+  return loadExpenseRange(query, runner, "strict");
+}
+
+/** Payee view only: an exact historical match wins; only the pre-existing built-in Rent key can resolve padding. */
+export function loadPayeeExpenseRangeReport(query: ClinicExpenseRangeQuery, runner: DailyClinicExpenseQueryRunner) {
+  return loadExpenseRange(query, runner, "payee-report");
 }

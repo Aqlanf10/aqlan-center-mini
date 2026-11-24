@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { BANK_ACCOUNT, CASH_ACCOUNT, CURRENCY_CLEARING_ACCOUNT } from "./accounting";
 import { onClinicDaysSql } from "./clinic-day-sql";
-import { loadClinicExpenseRangeReport, type ClinicExpenseRangeReport, type DailyClinicExpenseMovement, type DailyClinicExpenseQueryRunner } from "./daily-clinic-expense-report";
+import { loadClinicExpenseRangeReport, loadPayeeExpenseRangeReport, type ClinicExpenseRangeReport, type DailyClinicExpenseMovement, type DailyClinicExpenseQueryRunner } from "./daily-clinic-expense-report";
 import { CLINIC_BASE_CURRENCY, CURRENCIES, isCurrency, type Currency } from "./money";
 import type { KpiItem, ReportFilters, ReportResult, ReportRow } from "./reports-types";
 
@@ -45,6 +45,12 @@ function payee(row: Voucher): Option {
   return { value: digest("payee", recipient.key), label: display };
 }
 const category = (row: Voucher): Option => ({ value: digest("category", row.categoryGroupKey), label: row.categoryLabel });
+function legacyCategory(row: Voucher): Option | null {
+  const raw = row.legacyPaddedCategoryKey;
+  return raw === undefined ? null : {
+    value: digest("category", raw), label: raw.trim() + " (مطابقة نص البند القديم)",
+  };
+}
 function optionList(options: Option[]): Option[] {
   return [...new Map(options.map(option => [option.value, option])).values()]
     .sort((a, b) => a.label.localeCompare(b.label, "ar") || a.value.localeCompare(b.value));
@@ -73,12 +79,34 @@ function addKpis(cards: KpiItem[], key: string, label: string, rows: CashRow[], 
 }
 
 function expenseResult(expenses: ClinicExpenseRangeReport, filters: ReportFilters, base: ReportResult): ReportResult {
-  const available = expenses.movements.map(voucher => ({ voucher, recipient: payee(voucher), item: category(voucher) }));
-  const payees = optionList(available.map(entry => entry.recipient));
-  const categories = optionList(available.map(entry => entry.item));
-  const rows = available.filter(({ recipient, item }) =>
-    (!filters.expenseRecipient || recipient.value === filters.expenseRecipient)
-    && (!filters.expenseCategory || item.value === filters.expenseCategory))
+  const available = expenses.movements.map(voucher => {
+    const name = voucher.recipient.recordedPayeeText?.trim();
+    const recipient = payee(voucher);
+    // The existing payee/text token still selects only unlinked vouchers.
+    // The new, explicit match across recorded names uses a separate namespace;
+    // it is not the party identity and never infers a payee from notes.
+    const recorded = name ? { value: digest("payee-recorded-name:v1", name), label: name + " (مطابقة الاسم المسجّل)" } : null;
+    const recipientOption = name && voucher.recipient.partyId === null
+      ? { ...recipient, label: name + " (سندات غير مرتبطة بجهة)" }
+      : recipient;
+    return { voucher, recipient, recipientOption, item: category(voucher), legacyItem: legacyCategory(voucher), recorded };
+  });
+  const payees = optionList(available.flatMap(({ recipientOption, recorded }) =>
+    recorded ? [recipientOption, recorded] : [recipientOption]));
+  const legacyItems = new Map<string, Option>();
+  for (const { legacyItem } of available) {
+    if (legacyItem) legacyItems.set(legacyItem.value, legacyItem);
+  }
+  // If the raw key is already present (e.g. a pre-seed voucher with exactly
+  // those bytes), label the entire exact raw subset rather than only one row.
+  const categoryOptions = available.map(({ item }) => legacyItems.get(item.value) ?? item);
+  const selectedLegacyItem = filters.expenseCategory ? legacyItems.get(filters.expenseCategory) : undefined;
+  if (selectedLegacyItem) categoryOptions.push(selectedLegacyItem);
+  const categories = optionList(categoryOptions);
+  const rows = available.filter(({ voucher, recipient, item, legacyItem, recorded }) =>
+    matchesCurrency(filters.currency, voucher.currency)
+    && (!filters.expenseRecipient || recipient.value === filters.expenseRecipient || recorded?.value === filters.expenseRecipient)
+    && (!filters.expenseCategory || item.value === filters.expenseCategory || legacyItem?.value === filters.expenseCategory))
     .map(({ voucher, recipient, item }) => voucherRow(voucher, recipient, item).row).reverse();
   addKpis(base.kpis, "posted", "سندات الصرف الموجبة", rows.filter(row => row.amount > 0), filters.currency);
   addKpis(base.kpis, "adjustments", "العكس والتصحيحات السالبة", rows.filter(row => row.amount < 0), filters.currency);
@@ -95,7 +123,7 @@ function expenseResult(expenses: ClinicExpenseRangeReport, filters: ReportFilter
       filters.expenseCategory ? "البند: " + label(categories, filters.expenseCategory) : "",
     ].filter(Boolean).join(" · "),
     notes: [
-      "الجهة المرتبطة تُعرف بمعرّفها؛ الاسم النصي كما سُجّل وليس إثباتًا لهوية واحدة. لا يُستنتج المستفيد من الملاحظات.",
+      "اختيار الجهة يطابق معرّفها فقط. مطابقة الاسم المسجّل نصية وقد تشمل سندات جهات مختلفة. لا يُستنتج المستفيد من الملاحظات.",
       "سداد الالتزام لا يُضاف مرة أخرى ولا يثبت تكلفةً جديدة. السالب يظهر في تاريخ تسجيله.",
       "لا يضم الكشف ردود المرضى أو القيود اليدوية أو التحويلات الداخلية.",
     ],
@@ -194,11 +222,15 @@ export async function loadDisbursementReport(
   report: DisbursementReportId, filters: ReportFilters, timeZone: string, runner: DailyClinicExpenseQueryRunner,
 ): Promise<ReportResult> {
   const { from, to, currency } = filters;
-  const expenses = await loadClinicExpenseRangeReport({ from, to, timeZone, currency }, runner);
   const base: ReportResult = { report, title: "حركة الخرج اليومية", from, to, periodLabel: from === to ? from : from + " ← " + to,
     baseCurrency: CLINIC_BASE_CURRENCY, kpis: [], filtersLabel: currency === "all" ? "كل العملات" : currency };
-  if (report === "expense-payees") return expenseResult(expenses, filters, base);
+  if (report === "expense-payees") {
+    // Selectors describe the applied date period; currency narrows the voucher rows, not the choices.
+    const expenses = await loadPayeeExpenseRangeReport({ from, to, timeZone, currency: "all" }, runner);
+    return expenseResult(expenses, filters, base);
+  }
 
+  const expenses = await loadClinicExpenseRangeReport({ from, to, timeZone, currency }, runner);
   const refunds = refundMovements((await runner.query(refundSql, [timeZone, from, to])).rows as RefundSource[], currency);
   const manual = manualMovements((await runner.query([
     "SELECT m.id, m.entry_date::text AS day, jsonb_agg(jsonb_build_object(",

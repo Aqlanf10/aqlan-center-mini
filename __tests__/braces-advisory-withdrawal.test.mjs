@@ -165,6 +165,47 @@ describe("official withdrawal evidence", () => {
 
 describe("unavailable official services fail closed", () => {
   const url = "https://api.github.com/advisories/GHSA-vfj7-8cjw-p6xm";
+  const search = "https://api.github.com/advisories?ecosystem=npm&affects=braces%403.0.3&per_page=100";
+  const registryUrl = "https://registry.npmjs.org/braces";
+  const token = "synthetic-workflow-token";
+  afterEach(() => vi.unstubAllEnvs());
+  it("sends the workflow credential only to the official GitHub advisory API", async () => {
+    vi.stubEnv("AQLAN_ADVISORY_READ_TOKEN", token);
+    for (const [target, authorized] of [[url, true], [search, true], [registryUrl, false]]) {
+      const transport = vi.fn(async () => Object.defineProperty(Response.json({}), "url", { value: target }));
+      await expect(fetchOfficialJson(target, transport)).resolves.toEqual({});
+      expect(transport).toHaveBeenCalledExactlyOnceWith(target, expect.objectContaining({ cache: "no-store", redirect: "error" }));
+      expect(transport.mock.calls[0][1].headers.Authorization).toBe(authorized ? `Bearer ${token}` : undefined);
+    }
+    for (const target of ["https://api.github.com/advisories?ecosystem=npm", "https://api.github.com/repos/example",
+      "https://api.github.com.example.test/advisories", "http://api.github.com/advisories", url + "?unexpected=true"]) {
+      const transport = vi.fn();
+      await expect(fetchOfficialJson(target, transport)).rejects.toThrow("unexpected official evidence endpoint");
+      expect(transport).not.toHaveBeenCalled();
+    }
+  });
+  it("does not replace live proof with success if the credential is absent", async () => {
+    vi.stubEnv("AQLAN_ADVISORY_READ_TOKEN", undefined);
+    const transport = vi.fn(async () => new Response(null, { status: 429 }));
+    await expect(fetchOfficialJson(url, transport)).rejects.toThrow("official lookup failed (HTTP 429): GitHub advisory record");
+    expect(transport.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
+  });
+  it.each([
+    ["unauthorized status", async () => new Response(token, { status: 401 }), "HTTP 401"],
+    ["transport failure", async () => { throw new Error(token); }, "request error"],
+    ["redirected outcome", async () => Object.defineProperty(Response.json({}), "url", { value: `https://example.test/${token}` }), "unexpected response URL"],
+    ["malformed data", async () => Object.defineProperty(new Response(token, { headers: { "content-type": "application/json" } }), "url", { value: url }), "invalid JSON"],
+    ["stream failure", async () => Object.defineProperty(new Response(new ReadableStream({ start(controller) { controller.error(new Error(token)); } }),
+      { headers: { "content-type": "application/json" } }), "url", { value: url }), "response read error"],
+  ])("fails closed with sanitized diagnostics on %s", async (_label, impl, diagnostic) => {
+    vi.stubEnv("AQLAN_ADVISORY_READ_TOKEN", token);
+    const caught = await fetchOfficialJson(url, impl).catch((error) => error);
+    expect(caught).toBeInstanceOf(Error);
+    expect(caught.message).toContain(diagnostic);
+    expect(caught.stack).not.toContain(token);
+    expect(caught).not.toHaveProperty("cause");
+  });
+
   it.each([
     ["network failure", () => Promise.reject(new TypeError("fetch failed"))],
     ["503", async () => new Response("unavailable", { status: 503, headers: { "content-type": "text/plain" } })],
@@ -216,6 +257,23 @@ describe("withdrawn-mode verification on a synthetic installed tree", () => {
     expect(proof.patchSha256).toBe(PIN.patchSha256);
     expect(fetchJson).toHaveBeenCalledTimes(3);
     expect(JSON.parse(await readFile(path.join(root, ".dependency-audit/exception-proof.json"), "utf8")).mode).toBe("withdrawn");
+  });
+
+  it("joins the authenticated transport to the complete verification without storing its credential", async () => {
+    const token = "synthetic-withdrawal-transport";
+    vi.stubEnv("AQLAN_ADVISORY_READ_TOKEN", token);
+    try {
+      const fixture = official();
+      const transport = vi.fn(async (url) => Object.defineProperty(Response.json(await fixture(url)), "url", { value: url }));
+      const proof = await verify(run(cleanReport(LOCK_PACKAGES)), run(cleanReport(LOCK_PACKAGES)),
+        { fetchJson: (url) => fetchOfficialJson(url, transport) });
+      expect(proof.mode).toBe("withdrawn");
+      expect(transport).toHaveBeenCalledTimes(3);
+      expect(transport.mock.calls.map(([, req]) => req.headers.Authorization)).toEqual([`Bearer ${token}`, `Bearer ${token}`, undefined]);
+      expect(await readFile(path.join(root, ".dependency-audit/exception-proof.json"), "utf8")).not.toContain(token);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it.each([
