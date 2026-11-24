@@ -1,7 +1,7 @@
 import {afterAll,beforeAll,describe,expect,it} from "vitest";
 import {chromium,type Browser} from "playwright";
 import {Client} from "pg";
-import {authedMutation,baseUrl,harness} from "./_server";
+import {authedGet,authedMutation,baseUrl,harness} from "./_server";
 let browser:Browser,h:Awaited<ReturnType<typeof harness>>,db:Client,endo:number,ortho:number,serial=0;
 beforeAll(async()=>{
   h=await harness();db=new Client({connectionString:h.seeded.dbUrl,ssl:false});await db.connect();
@@ -83,5 +83,6 @@ describe("approved historical workspace persists one mixed document",()=>{
       for(const tail of ["historical-documents","historical-documents/preview","historical-documents/1/correct"])
         expect((await authedMutation(`/api/patients/${h.seeded.patientAId}/${tail}`,h.sessions[role],"POST",JSON.stringify({}))).status).toBe(403);
     }
+    expect((await authedGet(`/api/patients/${h.seeded.patientAId}/historical-documents`,h.sessions.reception)).status).toBe(403);
   });
 });
