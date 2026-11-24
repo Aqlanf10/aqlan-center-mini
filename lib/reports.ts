@@ -1197,10 +1197,13 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
 
 /** يبني التقرير كاملًا وفق نوعه وفلاتره. */
 export async function buildReport(report: string, filters: ReportFilters): Promise<ReportResult> {
-  if (isDisbursementReport(report)) {
-    validateDisbursementDays(filters.from, filters.to);
-    return withFinancialReadSnapshot(getPool(), runner =>
-      loadDisbursementReport(report, filters, CLINIC_TIME_ZONE, runner), usesSharedLocalDatabaseConnection());
+  // These reports use a dedicated snapshot, not the shared report context.
+  switch (report) {
+    case "daily-outflow":
+    case "expense-payees":
+      validateDisbursementDays(filters.from, filters.to);
+      return withFinancialReadSnapshot(getPool(), runner =>
+        loadDisbursementReport(report, filters, CLINIC_TIME_ZONE, runner), usesSharedLocalDatabaseConnection());
   }
 
   // نتحقق من المدى قبل تحميل السياق حتى عند استدعاء الباني مباشرةً.
