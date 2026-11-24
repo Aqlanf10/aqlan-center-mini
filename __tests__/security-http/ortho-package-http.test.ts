@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedMutation, harness } from "./_server";
+import { authedMutation, grantReceptionCollection, harness } from "./_server";
 
 /**
- * (P1-B) ربط حالة التقويم باتفاقها على التطبيق المبني: للإدارة والطبيب والاستقبال فقط،
+ * (P1-B) ربط حالة التقويم باتفاقها على التطبيق المبني: للإدارة والطبيب المخوّل فقط،
  * وخطةُ مريضٍ آخر مرفوضة — وكل رفضٍ بالعربية بلا تفاصيل داخلية.
  */
 
@@ -36,6 +36,7 @@ beforeAll(async () => {
     return id;
   };
   const mine = await patient("M");
+  await grantReceptionCollection(h, mine);
   planId = await plan(mine);
   foreignPlan = await plan(await patient("F"));
   caseId = (await db.query<{ id: number }>(
@@ -52,22 +53,24 @@ describe("(P1-B) linking an orthodontic case to its agreement over HTTP", () => 
   });
 
   it("another patient's plan is refused in Arabic", async () => {
-    const response = await patch(h.sessions.reception, { planId: foreignPlan });
+    const response = await patch(h.sessions.admin, { planId: foreignPlan });
     expect(response.status).toBe(409);
     await arabic(response);
     expect((await db.query(`SELECT plan_id FROM ortho_cases WHERE id = $1`, [caseId])).rows[0].plan_id).toBeNull();
   });
 
   it("an invalid plan id is a 400 in Arabic", async () => {
-    const response = await patch(h.sessions.reception, { planId: "abc" });
+    const response = await patch(h.sessions.admin, { planId: "abc" });
     expect(response.status).toBe(400);
     await arabic(response);
   });
 
-  it("reception links the patient's own agreement — funded, audited", async () => {
-    const response = await patch(h.sessions.reception, { planId });
+  it("admin links the patient's own agreement — funded, audited", async () => {
+    expect((await patch(h.sessions.reception, { planId })).status).toBe(403);
+    const response = await patch(h.sessions.admin, { planId });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, changed: true, funded: true });
+    expect((await patch(h.sessions.reception, { planId: null })).status).toBe(403);
     expect((await db.query(`SELECT plan_id FROM ortho_cases WHERE id = $1`, [caseId])).rows[0].plan_id).toBe(planId);
     expect((await db.query(`SELECT count(*)::int AS n FROM audit_log WHERE action = 'ortho.plan_link' AND entity = 'ortho_cases' AND entity_id = $1`,
       [String(caseId)])).rows[0].n).toBe(1);

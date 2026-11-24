@@ -105,14 +105,14 @@ describe("(P1-B) new orthodontic package", () => {
     expect(await linkOrthoCasePlan({ caseId: opened.id, planId: other.planId, actor: "doctor", actorRole: "doctor" }))
       .toEqual({ ok: false, status: 409, message: "الخطة المختارة ليست لهذا المريض." });
 
-    const linked = await linkOrthoCasePlan({ caseId: opened.id, planId, actor: "reception", actorRole: "reception" });
+    const linked = await linkOrthoCasePlan({ caseId: opened.id, planId, actor: "admin", actorRole: "admin" });
     expect(linked).toEqual({ ok: true, changed: true, funded: true });
     expect((await getClinicalVisit(visit.id))?.ortho?.adjustmentBillingClass).toBe("INCLUDED");
     const { rows: [audit] } = await getPool().query<{ actor: string; details: Record<string, unknown> }>(
       `SELECT actor, details FROM audit_log WHERE action = 'ortho.plan_link' AND entity_id = $1`, [String(opened.id)]);
-    expect(audit).toMatchObject({ actor: "reception", details: { المريض: patientId, من_خطة: null, إلى_خطة: planId } });
+    expect(audit).toMatchObject({ actor: "admin", details: { المريض: patientId, من_خطة: null, إلى_خطة: planId } });
     /* إعادة الطلب نفسه لا تكتب تدقيقًا ثانيًا. */
-    expect(await linkOrthoCasePlan({ caseId: opened.id, planId, actor: "reception", actorRole: "reception" }))
+    expect(await linkOrthoCasePlan({ caseId: opened.id, planId, actor: "admin", actorRole: "admin" }))
       .toEqual({ ok: true, changed: false, funded: true });
 
     /* اتفاقٌ أُلغي لا يموّل الحالة — والشدّة تعود تحتاج قرار فوترة. */

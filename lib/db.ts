@@ -23174,7 +23174,7 @@ async function orthoPlanProblem(db: DbClient | DbPool, planId: number, patientId
 
 export type OrthoPlanLinkResult =
   | { ok: true; changed: boolean; funded: boolean }
-  | { ok: false; status: 404 | 409; message: string };
+  | { ok: false; status: 403 | 404 | 409; message: string };
 
 /**
  * (P1-B) ربط حالة التقويم باتفاقها المالي (أو فكّه) — باقة التقويم الجديدة.
@@ -23186,6 +23186,9 @@ export type OrthoPlanLinkResult =
 export async function linkOrthoCasePlan(input: {
   caseId: number; planId: number | null; actor: string; actorRole: string | null;
 }): Promise<OrthoPlanLinkResult> {
+  if (input.actorRole !== "admin" && input.actorRole !== "doctor") {
+    return { ok: false, status: 403, message: "غير مصرّح لك بتعديل رابط الاتفاق المالي." };
+  }
   await ensureSchema();
   return withTransaction(getPool(), async (client): Promise<OrthoPlanLinkResult> => {
     const { rows: [owner] } = await client.query<{ patient_id: number }>(`SELECT patient_id FROM ortho_cases WHERE id = $1`, [input.caseId]);

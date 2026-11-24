@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  CLINIC_TIME_ZONE, closeOrthoCase, findUserByUsername, getOrthoCase, linkOrthoCasePlan, recordAdjustment,
+  CLINIC_TIME_ZONE, closeOrthoCase, getOrthoCase, linkOrthoCasePlan, recordAdjustment,
   setOrthoPhase, setRetainer,
 } from "@/lib/db";
 import { isElasticClass, PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
@@ -30,7 +30,7 @@ const forbidden = (msg = "غير مصرّح لك بالوصول لهذه الح�
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  // Reception handles appointments, collection and plan linkage, not clinical adjustments.
+  // Reception handles appointments, collection, not clinical adjustments.
   // This gate runs before fetching case details; patient scope remains a second gate.
   if (session.role !== "admin" && session.role !== "doctor") {
     return forbidden("تسجيل جلسات التقويم السريرية للطبيب المخوّل أو الإدارة فقط.");
@@ -106,9 +106,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
-  // Front desk may link an agreement, but must not change clinical phase,
-  // retainer or closure state merely because it can access the patient.
-  if (!Object.prototype.hasOwnProperty.call(source, "planId") && session.role !== "admin" && session.role !== "doctor") {
+  if (session.role !== "admin" && session.role !== "doctor") {
     return forbidden("تعديل حالة التقويم السريرية للطبيب المخوّل أو الإدارة فقط.");
   }
   // Malformed JSON must not be interpreted as a clinical action or leak a 500.
@@ -126,14 +124,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   try {
     /* (P1-B) ربط الحالة باتفاقها المالي أو فكّه — يغيّر مصدر فوترة الشدّات القادمة، فلمن يملك الخطط. */
     if ("planId" in source) {
-      if (!["admin", "doctor", "reception"].includes(session.role)) {
-        return forbidden("ربط حالة التقويم بالاتفاق للإدارة والطبيب والاستقبال.");
-      }
-      if (session.role === "doctor") {
-        const user = await findUserByUsername(session.username).catch(() => null);
-        if (user?.permissions && user.permissions.canEditPlans === false) {
-          return forbidden("غير مصرّح لك بتعديل خطط العلاج.");
-        }
+      if (session.role === "doctor" && !(await canAccessPatient(session, found.patientId, "canEditPlans"))) {
+        return forbidden("غير مصرّح لك بتعديل خطط العلاج.");
       }
       const raw = source.planId;
       const planId = raw === null ? null : Number(raw);

@@ -78,6 +78,10 @@ export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
 
+  if (session.role !== "admin" && session.role !== "doctor") {
+    return NextResponse.json({ message: "فتح حالة التقويم للطبيب المخوّل أو الإدارة فقط." }, { status: 403 });
+  }
+
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
@@ -108,6 +112,9 @@ export async function POST(request: Request) {
     ? source.startDate : today;
   const rawPlan = Number(source.planId);
   const planId = Number.isInteger(rawPlan) && rawPlan > 0 ? rawPlan : null;
+  if (planId !== null && session.role === "doctor" && !(await canAccessPatient(session, patientId, "canEditPlans"))) {
+    return NextResponse.json({ message: "غير مصرّح لك بتعديل خطط العلاج." }, { status: 403 });
+  }
 
   try {
     const created = await createOrthoCase({

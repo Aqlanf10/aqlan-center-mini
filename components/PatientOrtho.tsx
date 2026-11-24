@@ -755,7 +755,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
                       <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">رابط خطة أقساط قديم · للتوافق فقط</summary>
                         <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
-                          canLink={row.planId !== null && (session?.role === "admin" || session?.role === "reception"
+                          canLink={row.planId !== null && (session?.role === "admin"
                             || (session?.role === "doctor" && session.permissions?.canEditPlans !== false))}
                           onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />
                       </details>
