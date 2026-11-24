@@ -234,7 +234,7 @@ describe("required invoice visual evidence through retained CI stdout", () => {
         [`IVIS-${stamp}-${width}`, patientName, doctorId]);
       syntheticPatients.set(patientId, patientName);
       const context = await browser.newContext({ viewport: { width, height: VIEWPORT_HEIGHT }, locale: "ar-YE", deviceScaleFactor: 1 });
-      const [name, ...value] = h.sessions.reception.cookie.split("=");
+      const [name, ...value] = h.sessions.admin.cookie.split("=");
       await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
       const page = await context.newPage();
       try {

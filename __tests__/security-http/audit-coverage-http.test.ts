@@ -103,15 +103,15 @@ describe("P1-4 — sensitive edits leave an audit trail with before/after", () =
       [h.seeded.patientAId, `خطة تدقيق ${stamp}`]);
     await db.query(`INSERT INTO plan_installments (plan_id, number, due_date, amount_minor)
       VALUES ($1, 1, '2026-12-01', 10000)`, [planId]);
-    const added = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
+    const added = await authedMutation(`/api/plans/${planId}/items`, h.sessions.admin, "POST",
       JSON.stringify({ serviceId: service.id, quantity: 1 }));
     expect(added.status).toBe(201);
     const row = await lastAudit("plan.item_add", planId);
-    expect(row?.actor).toBe("secreception");
+    expect(row?.actor).toBe("secadmin");
     expect(row?.details).toMatchObject({ الكمية: 1, سعر_الوحدة: 20000 });
 
     const missing = await authedMutation("/api/plans/reminders", h.sessions.reception, "POST", JSON.stringify({ planId: 987654321 }));
-    expect(missing.status).toBe(404);
+    expect(missing.status).toBe(403);
     expect((await json<{ message: string }>(missing)).message).toMatch(/[؀-ۿ]/);
     expect(await lastAudit("plan.installment_reminder", 987654321)).toBeNull();
   });

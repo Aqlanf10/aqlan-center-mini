@@ -21,6 +21,7 @@ vi.stubEnv("RAILWAY_PROJECT_ID", "");
 vi.stubEnv("CLINIC_TIME_ZONE", "Asia/Aden");
 const { ensureSchema, getPool, resetPoolForTesting } = await import("../lib/db");
 const { GET } = await import("../app/api/reports/route");
+const { buildReport, parseFilters } = await import("../lib/reports");
 const { default: PrintPage } = await import("../app/print/report/page");
 const { default: ReportsPage } = await import("../app/reports/page");
 const { ReportView } = await import("../components/reports/ReportView");
@@ -276,6 +277,13 @@ describe("disbursement reports use recorded, non-duplicated native movements", (
     const params = standardParams("daily-outflow", { to: SELECTED_DAY });
     const report = await result(params);
     const rows = report.rows!;
+    // A midnight Asia/Aden voucher has a previous UTC date, while journal
+    // entries have only a local day. Do not let date-only entries outrank it.
+    const midnight = rows.findIndex(row => row.reference === "SYN-EXP-YER");
+    const undatedTime = rows.findIndex(row => row.reference === "قيد #" + transferId);
+    expect(midnight).toBeGreaterThanOrEqual(0);
+    expect(undatedTime).toBeGreaterThan(midnight);
+    expect(rows.map(row => row.day)).toEqual(rows.map(row => row.day).sort().reverse());
     expect(rows.filter(row => row.reference === "SYN-EXP-PAYOUT")).toMatchObject([{ amount:5000, movement:"سداد التزام بسند صرف" }]);
     expect(rows.find(row => row.reference === "SYN-RC-CASH")).toMatchObject({ amount:100, movement:"ردّ مريض مسجّل", channel:"نقد" });
     expect(rows.find(row => row.reference === "SYN-RC-BANK")).toMatchObject({ amount:500, movement:"ردّ مريض مسجّل", channel:"حوالة" });
@@ -303,7 +311,12 @@ describe("disbursement reports use recorded, non-duplicated native movements", (
       session.role = role;
       try {
         for (const id of ["daily-outflow","expense-payees"]) {
-          expect((await api(standardParams(id))).status).toBe(role ? 403 : 401);
+          const response = await api(standardParams(id));
+          expect(response.status).toBe(role ? 403 : 401);
+          if (role) {
+            expect(response.headers.get("cache-control")).toContain("no-store");
+            await expect(buildReport(id, parseFilters(new URLSearchParams(standardParams(id)), SELECTED_DAY), role)).rejects.toThrow("هذا التقرير مالي/إداري");
+          }
           await expect(official(standardParams(id))).rejects.toThrow("NEXT_HTTP_ERROR_FALLBACK;404");
         }
       } finally { session.role = "admin"; }

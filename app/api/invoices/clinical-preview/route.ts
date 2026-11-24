@@ -17,6 +17,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  if (session.role === "reception") return NextResponse.json({ message: "المعاينة السريرية تتطلب صلاحية الملف السريري." }, { status: 403 });
   if (!canHandleMoney(session.role)) return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   let body: Record<string, unknown>;
   try { body = (await readJsonBody(request, JSON_BODY_LIMIT_BYTES) ?? {}) as Record<string, unknown>; }

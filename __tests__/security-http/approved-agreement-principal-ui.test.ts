@@ -3,7 +3,7 @@ import {chromium,type Browser} from "playwright";
 import {Client} from "pg";
 import {formatMoney} from "../../lib/money";
 import {mkdirSync} from "node:fs";
-import {authedMutation,baseUrl,harness} from "./_server";
+import {authedGet,authedMutation,baseUrl,grantReceptionCollection,harness} from "./_server";
 let browser:Browser;let h:Awaited<ReturnType<typeof harness>>;let db:Client;let serial=0;
 beforeAll(async()=>{
  h=await harness();db=new Client({connectionString:h.seeded.dbUrl,ssl:false});await db.connect();
@@ -18,9 +18,9 @@ async function fixture(){
  await db.query("INSERT INTO plan_installments(plan_id,number,due_date,amount_minor) VALUES($1,1,'2026-10-01',75000),($1,2,'2099-12-01',75000)",[planId]);
  return{patientId,planId};
 }
-it.each([{role:"admin" as const,width:1280},{role:"reception" as const,width:390}])("$role at $width approves full principal, collects without another invoice and prints both balances",async({role,width})=>{
+it.each([{role:"admin" as const,width:1280},{role:"reception" as const,width:390}])("admin approves full principal at $width, $role collects without another invoice, and admin prints both balances",async({role,width})=>{
  const {patientId,planId}=await fixture();const context=await browser.newContext({viewport:{width,height:844},locale:"ar-YE",serviceWorkers:"block"});
- const [name,...value]=h.sessions[role].cookie.split("=");await context.addCookies([{name,value:value.join("="),url:baseUrl}]);const page=await context.newPage();const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+ const [name,...value]=h.sessions.admin.cookie.split("=");await context.addCookies([{name,value:value.join("="),url:baseUrl}]);const page=await context.newPage();const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
  try{
   await page.goto(`${baseUrl}/patients/${patientId}?tab=plans`,{waitUntil:"domcontentloaded"});
   await page.getByRole("button",{name:"اعتماد أصل الاتفاق المالي",exact:true}).click();
@@ -28,15 +28,28 @@ it.each([{role:"admin" as const,width:1280},{role:"reception" as const,width:390
   const approval=page.waitForResponse(r=>r.url().endsWith(`/plans/${planId}/financial-approval`)&&r.request().method()==="POST");
   await page.getByRole("button",{name:"تأكيد المبلغ والمصدر واعتماد الالتزام",exact:true}).click();expect((await approval).status()).toBe(201);
   await page.getByTestId("approved-agreement").waitFor();
+  if (role === "reception") {
+    const denied = await authedMutation(`/api/plans/${planId}`, h.sessions.reception, "POST", JSON.stringify({amount:"500",currency:"USD"}), {"Idempotency-Key":`ui-denied-${planId}`});
+    expect(denied.status).toBe(403);
+    await grantReceptionCollection(h, patientId);
+  }
   const paid=await authedMutation(`/api/plans/${planId}`,h.sessions[role],"POST",JSON.stringify({amount:"500",currency:"USD"}),{"Idempotency-Key":`ui-collect-${role}-${planId}`});expect(paid.status,await paid.clone().text()).toBe(201);
   const again=await authedMutation(`/api/plans/${planId}`,h.sessions[role],"POST",JSON.stringify({amount:"500",currency:"USD"}),{"Idempotency-Key":`ui-collect-${role}-${planId}`});expect(again.status).toBe(200);
-  expect((await again.json()).paymentId).toBe((await paid.json()).paymentId);
+  const { paymentId } = await paid.json();
+  expect((await again.json()).paymentId).toBe(paymentId);
+  if (role === "reception") {
+    const account = await authedGet(`/api/patients/${patientId}/ledger`, h.sessions.reception);
+    expect(account.status).toBe(200);
+    expect((await account.json()).payments).toContainEqual(expect.objectContaining({ id: paymentId, currency: "USD", amountMinor: 50000 }));
+    expect((await authedGet(`/print/receipt/${paymentId}`, h.sessions.reception)).status).toBe(200);
+    expect((await authedGet(`/print/plan/${planId}`, h.sessions.reception)).status).toBe(404);
+  }
   await page.reload();const panel=page.getByTestId("approved-agreement");await panel.waitFor();expect(await panel.innerText()).toContain("المستحق حتى اليوم");
   const plan=await db.query("SELECT (SELECT count(*)::int FROM invoices WHERE patient_id=$1) AS invoices,(SELECT count(*)::int FROM payments WHERE patient_id=$1) AS payments",[patientId]);expect(plan.rows[0]).toEqual({invoices:1,payments:1});
   const print=await context.newPage();await print.goto(`${baseUrl}/print/plan/${planId}`,{waitUntil:"domcontentloaded"});expect(await print.getByTestId("approved-agreement-print").innerText()).toContain("كامل المتبقي");
   expect(await print.getByTestId("approved-agreement-print").innerText()).toContain(formatMoney(25000,"USD"));
   const geometry=await page.evaluate(()=>({width:innerWidth,document:document.documentElement.scrollWidth}));expect(geometry.document).toBeLessThanOrEqual(geometry.width+1);expect(errors).toEqual([]);
-  await page.screenshot({path:`.settings-ui-artifacts/approved-agreement-${role}-${width}.png`,fullPage:true});
+  await page.screenshot({path:`.settings-ui-artifacts/approved-agreement-admin-collection-${role}-${width}.png`,fullPage:true});
  }finally{await context.close();}
 });
 it("HTTP denies doctor approval and requires replay keys",async()=>{

@@ -5,6 +5,8 @@ import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpe
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
+import { CollectionScopeDenied, requireCollectionScope } from "./reception-collection-scope";
+import { patientNumberBackupSql } from "./patient-number-backup-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
 import { assertSimilarCollectionReviewed, type SimilarCollectionReview } from "./similar-collection";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
@@ -5440,6 +5442,7 @@ export async function mergeDuplicatePatient(
 export async function updatePatient(
   id: number,
   input: Partial<PatientInput>,
+  options?: { reconcileYearOnlyBirthDate?: boolean },
 ): Promise<Patient | null> {
   await ensureSchema();
   // التحديث الجزئي بعلَم لكل حقل: `COALESCE` وحده لا يفرّق بين «لم يُرسَل» و«أُرسل
@@ -5455,7 +5458,10 @@ export async function updatePatient(
        address       = CASE WHEN $10::boolean THEN $11::text ELSE address       END,
        medical_alert = CASE WHEN $12::boolean THEN $13::text ELSE medical_alert END,
        note          = CASE WHEN $14::boolean THEN $15::text ELSE note          END,
-       birth_date     = CASE WHEN $16::boolean THEN $17::date ELSE birth_date     END,
+       birth_date     = CASE WHEN $16::boolean THEN $17::date
+                             WHEN $34::boolean AND $8::boolean
+                               AND (EXTRACT(YEAR FROM birth_date)::int IS DISTINCT FROM $9::int) THEN NULL
+                             ELSE birth_date END,
        guardian_name  = CASE WHEN $18::boolean THEN $19::text ELSE guardian_name  END,
        guardian_phone = CASE WHEN $20::boolean THEN $21::text ELSE guardian_phone END,
        national_id    = CASE WHEN $22::boolean THEN $23::text ELSE national_id    END,
@@ -5485,6 +5491,7 @@ export async function updatePatient(
       has("email"), has("email") ? input.email : null,
       has("preferredChannel"), has("preferredChannel") ? input.preferredChannel : null,
       has("flags"), has("flags") ? input.flags : null,
+      options?.reconcileYearOnlyBirthDate === true,
     ],
   );
   return rows[0] ? toPatient(rows[0]) : null;
@@ -9675,9 +9682,9 @@ export async function listPatientPayments(patientId: number, client?: DbClient |
   return attachCurrencyReclassifications(client,rows.map(toPayment));
 }
 
-export async function getPayment(id: number): Promise<Payment | null> {
+export async function getPayment(id: number, collector?: string): Promise<Payment | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.id = $1`, [id]);
+  const { rows } = await getPool().query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.id = $1${collector === undefined ? "" : " AND y.created_by = $2"}`, collector === undefined ? [id] : [id, collector]);
   return rows[0] ? toPayment(rows[0]) : null;
 }
 
@@ -10287,6 +10294,7 @@ async function runPaymentTransaction(
   const tx = (statement: "BEGIN" | "COMMIT" | "ROLLBACK") => own ? client.query(statement) : Promise.resolve();
   try {
     await tx("BEGIN");
+    await requireCollectionScope(client, prepared.receiptAudit?.actorRole, input.patientId, input.createdBy, CLINIC_TIME_ZONE);
 
     /* (TD-05 second owner review — Finding 8) الحارس الكانوني داخل المعاملة
      * نفسها: دفعةٌ جديدة بفاتورةٍ وخطةٍ معًا مرفوضة مهما كان الباب الذي دخل
@@ -10656,7 +10664,7 @@ async function runPaymentTransaction(
     // Without an open shift nothing can be written (no_shift below), so no review is asked.
     if (input.kind === "payment" && lockedShiftId !== null) {
       await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
-        currency: input.currency, review: prepared.similarityReview });
+        currency: input.currency, receptionUsername: prepared.receiptAudit?.actorRole === "reception" ? input.createdBy : undefined, review: prepared.similarityReview });
     }
 
     /* الإدراج محصور في الوردية المقفولة أعلاه — لا اكتشاف ولا قفل لوردية
@@ -10831,6 +10839,7 @@ async function runRecoveryTransaction(
   client: DbClient, input: RecoveryWriteInput, key: string, requestHash: string,
   similarityReview?: SimilarCollectionReview,
 ): Promise<RecoveryOutcome> {
+  await requireCollectionScope(client, input.actorRole, input.patientId, input.createdBy, CLINIC_TIME_ZONE);
   const previous = await recoveryReplay(client, input, key, requestHash);
   if (previous) return previous;
   // Opening addOnly writers lock this patient FOR UPDATE. Acquire the compatible
@@ -16320,11 +16329,26 @@ export async function* backupSqlLines(source?: Queryable): AsyncGenerator<string
 export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<string> {
 
   const { rows: tableRows } = (await pool.query(
-    `SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-      ORDER BY table_name`,
-  )) as { rows: { table_name: string }[] };
-  const tables = tableRows.map((row) => row.table_name);
+    `SELECT table_name::text AS table_name, false AS uncaptured_patients
+     FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+     UNION ALL
+     SELECT NULL::text, true
+     WHERE EXISTS (
+       SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname='patients'
+     ) AND NOT EXISTS (
+       SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name = 'patients'
+     )
+     ORDER BY table_name`,
+  )) as { rows: { table_name: string | null; uncaptured_patients?: boolean }[] };
+  const tables = tableRows.map((row) => {
+    // information_schema is visibility-filtered; an existing public relation
+    // cannot masquerade as a deliberately patient-less export.
+    if (row.uncaptured_patients || row.table_name === null) throw new Error("Public patients table is not exportable");
+    return row.table_name;
+  });
 
   // الترتيب من مفاتيح القاعدة نفسها لا من قائمة مكتوبة بيد: قائمةٌ يدوية تنسى جدولًا
   // يُضاف غدًا، فتفشل الاستعادة بخطأ مفتاح أجنبي في أسوأ لحظة.
@@ -16434,6 +16458,22 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
+  // Only genuinely patient-less exports omit fixed-P state. In a patient
+  // export an absent, unreadable or malformed public cursor is a hard failure.
+  if (tables.includes("patients")) {
+    // Standalone numbering isn't an id-owned serial. Capture it last:
+    // sequence state is non-MVCC, even inside this row snapshot. A later
+    // observation can safely leave a gap; no backup can cover writes after it.
+    const { rows: patientNumberState } = await pool.query(
+      `SELECT p.last_value::text, p.is_called FROM public.patient_number_seq p
+       WHERE EXISTS (
+         SELECT 1 FROM pg_catalog.pg_sequence s
+         WHERE s.seqrelid=pg_catalog.to_regclass('public.patient_number_seq')
+       )`,
+    );
+    if (patientNumberState.length !== 1) throw new Error("Patient-number sequence snapshot unavailable");
+    yield `${patientNumberBackupSql(patientNumberState[0].last_value, patientNumberState[0].is_called)}\n`;
+  }
   yield `COMMIT;\n`;
 }
 
@@ -19918,6 +19958,10 @@ export async function setPatientOpeningBalance(input: SetOpeningBalanceInput): P
   await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
   const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
+    if (input.addOnly) {
+      const { rows: [actor] } = await client.query<{ role: string }>("SELECT role FROM users WHERE username=$1 FOR SHARE", [input.createdBy]);
+      await requireCollectionScope(client, actor?.role, input.patientId, input.createdBy, CLINIC_TIME_ZONE);
+    }
     if (!input.addOnly) await assertOpeningCorrectionAllowedInTx(client, input.patientId, currency, input.amountMinor);
     return (await setPatientOpeningBalanceInTx(client, input))?.patientId ?? null;
   });
@@ -20401,9 +20445,21 @@ export async function recordPlanInstallmentReminders(input: {
   await ensureSchema();
   const now = new Date();
   return withTransaction(getPool(), async client => {
-    // Lock in deterministic order. The batch, its timestamps and mandatory audit are atomic.
-    const { rows: plans } = await client.query<{ id: number }>(
-      "SELECT id FROM treatment_plans WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE", [planIds]);
+    const authorizedPatients = new Set<number>();
+    if (input.actorRole === "reception") {
+      const { rows } = await client.query<{ patient_id: number }>(
+        "SELECT DISTINCT patient_id FROM treatment_plans WHERE id = ANY($1::int[]) ORDER BY patient_id", [planIds]);
+      for (const { patient_id } of rows) {
+        await requireCollectionScope(client, input.actorRole, patient_id, input.actor, CLINIC_TIME_ZONE);
+        authorizedPatients.add(patient_id);
+      }
+    }
+    // Lock plans after patient authorization and recheck their ownership before writing the batch.
+    const { rows: plans } = await client.query<{ id: number; patient_id: number }>(
+      "SELECT id, patient_id FROM treatment_plans WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE", [planIds]);
+    if (input.actorRole === "reception" && (plans.length !== planIds.length || plans.some(plan => !authorizedPatients.has(plan.patient_id)))) {
+      throw new CollectionScopeDenied();
+    }
     let updatedCount = 0;
     for (const plan of plans) {
       if (input.installmentNumber !== undefined) {
@@ -21031,6 +21087,7 @@ async function runPlanInstallmentTransaction(
   client: DbClient, input: PlanInstallmentInput,
   prepared: ReturnType<typeof preparePlanInstallment>,
 ): Promise<PlanInstallmentOutcome> {
+  await requireCollectionScope(client, input.actorRole, input.patientId, input.createdBy, CLINIC_TIME_ZONE);
   const { idempotencyKey, baseAmount, requestHash } = prepared;
   // Resolve old successes before new recovery eligibility or acquiring provenance locks.
   if (idempotencyKey !== null) {
@@ -21533,14 +21590,15 @@ function plannedVisitReadScopeSql(v: "v" | "pv" | "nv"): string {
     )`;
 }
 
-const PLANNED_VISIT_SELECT = `
-  SELECT v.id, v.patient_id, v.plan_id, t.title AS plan_title, v.sequence, v.title, v.doctor_id,
+const plannedVisitSelect = (scheduling = false) => `
+  SELECT v.id, v.patient_id, ${scheduling ? "NULL::int" : "v.plan_id"} AS plan_id, ${scheduling ? "NULL::text" : "t.title"} AS plan_title, v.sequence,
+         ${scheduling ? "format('جلسة رقم %s', v.id)" : "v.title"} AS title, v.doctor_id,
          d.name AS doctor_name, v.duration_minutes, v.status, v.appointment_id,
          a.scheduled_date::text AS scheduled_date, a.scheduled_time::text AS scheduled_time,
          a.status AS appointment_status, ${PLANNED_REBOOK_BLOCK_REASON_SQL} AS rebook_block_reason,
          ${PLANNED_REBOOK_GENERATION_SQL} AS rebook_generation,
          a.referral_id IS NOT NULL AS rebook_has_referral, r.to_party_id AS rebook_referral_receiver_id,
-         v.visit_id, v.note, v.created_at
+         ${scheduling ? "NULL::int" : "v.visit_id"} AS visit_id, ${scheduling ? "NULL::text" : "v.note"} AS note, v.created_at
     FROM planned_visits v
     LEFT JOIN treatment_plans t ON t.id = v.plan_id
     LEFT JOIN parties d ON d.id = v.doctor_id
@@ -21565,10 +21623,10 @@ function toPlannedVisit(row: PlannedVisitRow): PlannedVisitView {
   };
 }
 
-export async function listPatientPlannedVisits(patientId: number): Promise<PlannedVisitView[]> {
+export async function listPatientPlannedVisits(patientId: number, projection: "clinical" | "scheduling" = "clinical"): Promise<PlannedVisitView[]> {
   await ensureSchema();
   const { rows } = await getPool().query<PlannedVisitRow>(
-    `${PLANNED_VISIT_SELECT}
+    `${plannedVisitSelect(projection === "scheduling")}
       WHERE v.patient_id = $1 AND v.status NOT IN ('completed', 'cancelled')
         AND ${plannedVisitReadScopeSql("v")}
       ORDER BY v.status = 'in_progress' DESC, v.sequence, v.id`,
@@ -21648,7 +21706,7 @@ export async function schedulePlannedVisit(input: {
 
   // قراءة أولية: المدة والحالة والمريض — ليعرف الحكم مدةً صحيحة.
   const { rows: previewRows } = await getPool().query<PlannedVisitRow>(
-    `${PLANNED_VISIT_SELECT} WHERE v.id = $1`,
+    `${plannedVisitSelect()} WHERE v.id = $1`,
     [input.plannedVisitId],
   );
   const preview = previewRows[0];

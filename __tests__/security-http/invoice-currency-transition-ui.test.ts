@@ -45,7 +45,7 @@ async function patient() {
 async function open(width = 390, historical = false) {
   const patientId = await patient();
   const context = await browser.newContext({ viewport: { width, height: 1040 }, locale: "ar-YE", serviceWorkers: "block" });
-  const [name, ...value] = h.sessions.reception.cookie.split("=");
+  const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage(); page.setDefaultTimeout(15000);
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });
@@ -221,7 +221,7 @@ describe("invoice selected-service currency transitions", () => {
     const send = (role: "admin" | "reception" | "doctorA", value: unknown) => authedMutation("/api/invoices", h.sessions[role], "POST", JSON.stringify(value));
     expect((await send("admin", body("1900"))).status).toBe(400);
     const forbiddenRaise = await send("reception", body("1900", "زيادة اصطناعية مرفوضة"));
-    expect(forbiddenRaise.status).toBe(400); expect((await forbiddenRaise.json()).message).toContain("رفع السعر للمدير وحده");
+    expect(forbiddenRaise.status).toBe(403);
     expect((await send("doctorA", body("1800"))).status).toBe(403);
     await noMoney(patientId);
     const accepted = await send("admin", body("1900", "زيادة صريحة معتمدة للاختبار"));

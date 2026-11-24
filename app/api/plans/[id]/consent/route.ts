@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, recordPlanConsent, schedulePlanInstallments } from "@/lib/db";
-import { canHandleMoney } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 
@@ -23,8 +22,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (!canHandleMoney(session.role)) {
-    return NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
+  if (session.role !== "admin") {
+    return NextResponse.json({ message: "تعديل اتفاق العلاج يتطلب صلاحية الإدارة." }, { status: 403 });
   }
 
   const { id } = await context.params;

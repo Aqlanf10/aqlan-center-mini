@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function PlanAgreementPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<{ source?: string; version?: string }> }) {
   const session = await requireSession();
-  if (!session || !canHandleMoney(session.role)) notFound();
+  if (!session || session.role === "reception" || !canHandleMoney(session.role)) notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);

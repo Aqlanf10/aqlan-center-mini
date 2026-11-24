@@ -27,12 +27,13 @@ function patientIdOf(raw: string): number | null {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role === "reception") return NextResponse.json({ message: "توثيق الاتفاق التاريخي يتطلب صلاحية سريرية أو إدارية." }, { status: 403 });
   const patientId = patientIdOf((await context.params).id);
   if (session.role === "doctor") {
     if (patientId === null || !(await canAccessPatient(session, patientId, "canViewPatientPayments"))) {
       return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على حساب هذا المريض." }, { status: 403 });
     }
-  } else if (session.role !== "admin" && session.role !== "reception") {
+  } else if (session.role !== "admin") {
     return NextResponse.json({ message: "العلاجات السابقة للنظام وأرصدتها للإدارة والاستقبال." }, { status: 403 });
   }
   if (patientId === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
@@ -55,6 +56,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role === "reception") return NextResponse.json({ message: "توثيق الاتفاق التاريخي يتطلب صلاحية سريرية أو إدارية." }, { status: 403 });
   const settings = await getSettings().catch(() => null);
   const access = openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true");
   if (!access.add) {

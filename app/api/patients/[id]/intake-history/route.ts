@@ -22,6 +22,15 @@ async function guard(context: { params: Promise<{ id: string }> }) {
   if (!session) {
     return { error: NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE }) };
   }
+  // P0: these forms contain patient-supplied medical conditions, allergies and medicines.
+  // Reception can file external documents, but must not read or add clinical history.
+  // Gate before even consulting the patient ID or querying the database.
+  if (session.role !== "admin" && session.role !== "doctor") {
+    return { error: NextResponse.json(
+      { message: "الاطلاع على الاستمارات الصحية وتوثيقها للطبيب المخوّل والإدارة فقط." },
+      { status: 403, headers: NO_STORE },
+    ) };
+  }
   const patientId = Number((await context.params).id);
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return { error: NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400, headers: NO_STORE }) };

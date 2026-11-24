@@ -37,7 +37,7 @@ const json = async (response: Response) => await response.json() as Record<strin
 describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", () => {
   it("an ortho invoice returns its clinical linkage; the same key replays the same invoice", async () => {
     const body = { items: [{ serviceId: orthoService, doctorId, scope: "both" }], idempotencyKey: `inv:http-${stamp}` };
-    const created = await post("reception", body);
+    const created = await post("admin", body);
     expect(created.status).toBe(201);
     const first = await json(created) as { id: number; clinical: { planId: number; links: { kind: string; planItemCreated: boolean; caseCreated: boolean; specialty: string }[] } };
     expect(first.clinical.links[0]).toMatchObject({ kind: "clinical", specialty: "orthodontics", planItemCreated: true, caseCreated: true });
@@ -45,11 +45,11 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
       .toEqual([{ consent_at: null }]);
     expect((await db.query(`SELECT doctor_id FROM invoice_items WHERE invoice_id = $1`, [first.id])).rows).toEqual([{ doctor_id: doctorId }]);
 
-    const replay = await post("reception", body);
+    const replay = await post("admin", body);
     expect(replay.status).toBe(200);
     expect((await json(replay)).id).toBe(first.id);
 
-    const conflict = await post("reception", { ...body, items: [{ serviceId: orthoService, doctorId, scope: "both", quantity: 2 }] });
+    const conflict = await post("admin", { ...body, items: [{ serviceId: orthoService, doctorId, scope: "both", quantity: 2 }] });
     expect(conflict.status).toBe(409);
     expect((await json(conflict)).message).toContain("أُرسل سابقًا");
     const { rows } = await db.query(`SELECT 1 FROM invoices WHERE patient_id = $1`, [patientId]);
@@ -58,7 +58,7 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
 
   it("the same treatment invoiced again from another tab is refused in Arabic", async () => {
     const before = (await db.query(`SELECT id FROM invoices WHERE patient_id = $1 ORDER BY id`, [patientId])).rows;
-    const response = await post("reception", { items: [{ serviceId: orthoService, doctorId, scope: "both" }], idempotencyKey: `inv:tab2-${stamp}` });
+    const response = await post("admin", { items: [{ serviceId: orthoService, doctorId, scope: "both" }], idempotencyKey: `inv:tab2-${stamp}` });
     expect(response.status).toBe(409);
     const payload = await json(response);
     expect(payload.message).toContain("له فاتورة قائمة");
@@ -66,14 +66,16 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
     expect((await db.query(`SELECT id FROM invoices WHERE patient_id = $1 ORDER BY id`, [patientId])).rows).toEqual(before);
   });
 
-  it("validation: bad key, bad tooth, bad case are Arabic 400s; doctors still cannot issue invoices", async () => {
-    expect((await post("reception", { items: [{ serviceId: rctService, toothCode: 36 }], idempotencyKey: "bad key!" })).status).toBe(400);
-    const tooth = await post("reception", { items: [{ serviceId: rctService, toothCode: 19 }] });
+  it("validation: bad key, bad tooth, bad case are Arabic 400s; doctors and reception cannot issue invoices", async () => {
+    expect((await post("admin", { items: [{ serviceId: rctService, toothCode: 36 }], idempotencyKey: "bad key!" })).status).toBe(400);
+    const tooth = await post("admin", { items: [{ serviceId: rctService, toothCode: 19 }] });
     expect(tooth.status).toBe(400);
     expect((await json(tooth)).message).toContain("السن");
-    const kase = await post("reception", { items: [{ serviceId: rctService, toothCode: 36, caseId: "x" }] });
+    const kase = await post("admin", { items: [{ serviceId: rctService, toothCode: 36, caseId: "x" }] });
     expect(kase.status).toBe(400);
-    expect((await post("doctorA", { items: [{ serviceId: rctService, toothCode: 36 }] })).status).toBe(403);
+    for (const role of ["doctorA", "reception"] as const) {
+      expect((await post(role, { items: [{ serviceId: rctService, toothCode: 36 }] })).status).toBe(403);
+    }
   });
 
   it("an RCT line on tooth 36 links to a new endo case; a description-only line stays financial", async () => {
@@ -89,22 +91,22 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
 
   it("(INV-LINK TOOTH) fail closed: a tooth-bound line without a tooth, a multi-tooth endo line and a bad scope are Arabic 400s; preview agrees", async () => {
     const invoicesBefore = Number((await db.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM invoices WHERE patient_id = $1`, [patientId])).rows[0].n);
-    const noTooth = await post("reception", { items: [{ serviceId: rctService }] });
+    const noTooth = await post("admin", { items: [{ serviceId: rctService }] });
     expect(noTooth.status).toBe(400);
     expect((await json(noTooth)).message).toContain("البند 1: ");
-    expect((await json(await post("reception", { items: [{ serviceId: rctService }] }))).message).toContain("حدّد السن");
-    const split = await post("reception", { items: [{ serviceId: rctService, toothCode: 36, episodeTeeth: [36, 46] }] });
+    expect((await json(await post("admin", { items: [{ serviceId: rctService }] }))).message).toContain("حدّد السن");
+    const split = await post("admin", { items: [{ serviceId: rctService, toothCode: 36, episodeTeeth: [36, 46] }] });
     expect(split.status).toBe(400);
     expect((await json(split)).message).toContain("قسّم البند");
-    const scope = await post("reception", { items: [{ serviceId: orthoService, toothCode: 11 }] });
+    const scope = await post("admin", { items: [{ serviceId: orthoService, toothCode: 11 }] });
     expect(scope.status).toBe(400);
-    const shape = await post("reception", { items: [{ serviceId: rctService, toothCode: 36, episodeTeeth: "36" }] });
+    const shape = await post("admin", { items: [{ serviceId: rctService, toothCode: 36, episodeTeeth: "36" }] });
     expect(shape.status).toBe(400);
     expect(Number((await db.query<{ n: string }>(`SELECT COUNT(*)::text AS n FROM invoices WHERE patient_id = $1`, [patientId])).rows[0].n)).toBe(invoicesBefore);
     // a fresh patient: the ortho of the main patient is already pre-billed by an earlier test (would preview already_billed)
     const { rows: [{ id: fresh }] } = await db.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'معاينة الأسنان') RETURNING id`, [`ILT-${stamp}`]);
-    const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST",
+    const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST",
       JSON.stringify({ patientId: fresh, currency: "YER", items: [{ serviceId: rctService, doctorId }, { serviceId: orthoService, doctorId, scope: "upper" }] }));
     expect(preview.status).toBe(200);
     const lines = (await preview.json() as { lines: { refusal: string | null; refusalMessage: string | null }[] }).lines;
@@ -117,11 +119,11 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
     const { rows: [{ id: fresh }] } = await db.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'طبيب مالي غير محدد') RETURNING id`, [`IL-NOPROV-${provider}-${stamp}`]);
     const body = { patientId: fresh, currency: "YER", items: [{ serviceId: rctService, toothCode: 46, ...(provider === "null" ? { doctorId: null } : {}) }] };
-    const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify(body));
+    const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify(body));
     expect(preview.status).toBe(200);
     expect((await preview.json() as { lines: unknown[] }).lines[0]).toMatchObject({ financialReviewRequired: true, refusal: null });
     expect((await db.query(`SELECT id FROM invoices WHERE patient_id = $1`, [fresh])).rows).toEqual([]);
-    const created = await post("reception", body);
+    const created = await post("admin", body);
     expect(created.status).toBe(201);
     const result = await created.json() as { id: number; clinical: { planId: number; links: { planItemId: number }[] } };
     expect((await db.query(`SELECT doctor_id, billing_status FROM plan_items WHERE id = $1`, [result.clinical.links[0].planItemId])).rows)
@@ -135,8 +137,8 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
       const { rows: [{ id: fresh }] } = await db.query<{ id: number }>(
         `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'تحقق الطلب') RETURNING id`, [`IL-MAL-${field}-${stamp}`]);
       const body = { patientId: fresh, currency: "YER", items: [{ serviceId: rctService, toothCode: 36, doctorId, [field]: "not-a-number" }] };
-      const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify(body));
-      const saved = await post("reception", body);
+      const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify(body));
+      const saved = await post("admin", body);
       expect(preview.status).toBe(400);
       expect(saved.status).toBe(400);
       for (const response of [preview, saved]) {
@@ -155,7 +157,7 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
         (name, price_minor, is_active, price_configured, category) VALUES ($1, 3000000, TRUE, TRUE, 'rct') RETURNING id`,
       [`خدمة ذات تاريخ علاجي ${category} ${stamp}`]);
       const body = { patientId: fresh, currency: "YER", items: [{ serviceId: changedService, toothCode: 36, doctorId }] };
-      const created = await post("reception", body);
+      const created = await post("admin", body);
       expect(created.status).toBe(201);
       const original = await created.json() as { id: number; clinical: { planId: number; links: { planItemId: number; caseId: number }[] } };
       const snapshot = async () => ({
@@ -170,13 +172,13 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
       // Deliberate catalogue fixture update, not a financial/clinical history rewrite.
       // The real API must read this new category and still honour the old work identity.
       await db.query(`UPDATE services SET category = $2 WHERE id = $1`, [changedService, category]);
-      const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify(body));
+      const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify(body));
       expect(preview.status).toBe(200);
       const lines = (await preview.json() as { lines: { kind: string; refusal: string | null; financialReviewRequired: boolean; refusalMessage: string }[] }).lines;
       expect(lines).toEqual([expect.objectContaining({ kind: "financial", refusal: "needs_financial_review", financialReviewRequired: true })]);
       expect(lines[0].refusalMessage).toContain("مراجعة مالية");
       expect(await snapshot()).toEqual(before); // preview is read-only
-      const duplicate = await post("reception", body);
+      const duplicate = await post("admin", body);
       expect(duplicate.status).toBe(409);
       const refusal = await json(duplicate);
       expect(refusal.message).toContain("مراجعة مالية");
@@ -193,11 +195,11 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
       const financialBody = { patientId: fresh, currency: "YER", items: [
         { serviceId: unrelatedService }, { description: "رسوم ملف مستقلة", price: "1000" },
       ] };
-      const financialPreview = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify(financialBody));
+      const financialPreview = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify(financialBody));
       expect(financialPreview.status).toBe(200);
       expect((await financialPreview.json() as { lines: unknown[] }).lines)
         .toEqual([expect.objectContaining({ kind: "financial", refusal: null }), expect.objectContaining({ kind: "financial", refusal: null })]);
-      const financial = await post("reception", financialBody);
+      const financial = await post("admin", financialBody);
       expect(financial.status).toBe(201);
       const financialResult = await financial.json() as { id: number; clinical: { links: { kind: string }[] } };
       expect(financialResult.clinical.links.map((line) => line.kind)).toEqual(["financial", "financial"]);
@@ -213,10 +215,10 @@ describe("(INV-LINK B) POST /api/invoices — invoice-first clinical linkage", (
       const { rows: [{ id: otherPatient }] } = await db.query<{ id: number }>(
         `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'بلا تاريخ لهذه الخدمة') RETURNING id`, [`IL-DRIFT-OTHER-${category}-${stamp}`]);
       const otherBody = { patientId: otherPatient, currency: "YER", items: [{ serviceId: changedService }] };
-      const otherPreview = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify(otherBody));
+      const otherPreview = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify(otherBody));
       expect(otherPreview.status).toBe(200);
       expect((await otherPreview.json() as { lines: unknown[] }).lines).toEqual([expect.objectContaining({ kind: "financial", refusal: null })]);
-      const otherInvoice = await post("reception", otherBody);
+      const otherInvoice = await post("admin", otherBody);
       expect(otherInvoice.status).toBe(201);
       expect((await otherInvoice.json() as { clinical: { links: { kind: string }[] } }).clinical.links.map((line) => line.kind)).toEqual(["financial"]);
       expect((await db.query(`SELECT id FROM treatment_plans WHERE patient_id = $1`, [otherPatient])).rows).toEqual([]);

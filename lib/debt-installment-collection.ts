@@ -1,3 +1,5 @@
+import { requireCollectionScope } from "./reception-collection-scope";
+import { CLINIC_TIME_ZONE } from "./db";
 import { ensureSchema, getPool, getPayment, getSettingsInTransaction, insertAuditRow, writeDebtCollectionReceipt } from "./db";
 import type { SessionPayload } from "./auth";
 import { CLINIC_BASE_CURRENCY, isCurrency, settlePaymentMinor, toBaseAmount, type Currency } from "./money";
@@ -19,6 +21,7 @@ export async function collectDebtInstallment(input: {
   let paymentId=0;let replayed=false;
   try{
     await client.query("BEGIN");await assertDebtSession(client,input.session);
+    await requireCollectionScope(client, input.session.role, input.patientId, input.session.username, CLINIC_TIME_ZONE);
     const replay=async()=>{
       const {rows:[prior]}=await client.query<{id:number;patient_id:number;created_by:string;idempotency_request_hash:string}>("SELECT id,patient_id,created_by,idempotency_request_hash FROM payments WHERE idempotency_key=$1",[input.idempotencyKey]);
       if(!prior)return null;
@@ -62,7 +65,7 @@ export async function collectDebtInstallment(input: {
         if(!Number.isSafeInteger(baseAmount)||!Number.isSafeInteger(settlement)||settlement<=0||settlement>position.remainingMinor||settlement>Math.max(0,account.due))
           throw new DebtRepaymentError("invalid","المبلغ يتجاوز المتبقي على الدين أو المستحق الفعلي على الحساب؛ راجع التسويات.");
         // Advisory review: last check before writing (shift held, replay and all refusals done); a throw rolls back.
-        await assertSimilarCollectionReviewed(client,{patientId:input.patientId,amountMinor:input.amountMinor,currency:input.currency,review:options.similarityReview});
+        await assertSimilarCollectionReviewed(client,{patientId:input.patientId,amountMinor:input.amountMinor,currency:input.currency,receptionUsername:input.session.role==="reception"?input.session.username:undefined,review:options.similarityReview});
         await assertDebtSession(client,input.session);
         const receipt=await writeDebtCollectionReceipt(client,{patientId:input.patientId,invoiceId:target.invoiceId,openingCurrency:target.openingCurrency,
           amountMinor:input.amountMinor,currency:input.currency,exchangeRate:rate,method:input.method,note:input.note,createdBy:input.session.username,idempotencyKey:input.idempotencyKey,requestHash:hash});

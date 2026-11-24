@@ -64,7 +64,7 @@ async function plan(patientId: number, toothCode: number) {
 async function open(patientId: number, width: number) {
   const context = await browser.newContext({ viewport: { width, height: 980 }, locale: "ar-YE" });
   contexts.add(context);
-  const [name, ...value] = h.sessions.reception.cookie.split("=");
+  const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage(); page.setDefaultTimeout(20000);
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });
@@ -190,7 +190,7 @@ describe("explicit invoice treatment selection in the built RTL application", ()
       expect(bodies[0]).toMatchObject({ existingPlanId: chosen.id, items: [{ planItemId: chosen.itemId }] });
       expect(await q("SELECT id FROM invoices WHERE patient_id=$1", [patientId])).toHaveLength(1);
       expect(await q("SELECT i.id FROM plan_items i JOIN treatment_plans t ON t.id=i.plan_id WHERE t.patient_id=$1", [patientId])).toHaveLength(2);
-      const financial = await authedGet(`/api/patients/${patientId}/treatment-financial-context`, h.sessions.reception);
+      const financial = await authedGet(`/api/patients/${patientId}/treatment-financial-context`, h.sessions.admin);
       expect(financial.status).toBe(200);
       const data = await financial.json() as { references: { planItemId: number; invoiceIds: number[] }[] };
       expect(data.references.find((reference) => reference.planItemId === chosen.itemId)?.invoiceIds).toHaveLength(1);
@@ -202,7 +202,7 @@ describe("explicit invoice treatment selection in the built RTL application", ()
     const wrongPlan = await plan(foreign, 36);
     const body = { patientId: owner, existingPlanId: wrongPlan.id, currency: "YER",
       items: [{ serviceId, doctorId, toothCode: 36, quantity: 1, price: "10000", planItemId: wrongPlan.itemId }] };
-    const denied = await authedMutation("/api/invoices", h.sessions.reception, "POST", JSON.stringify(body));
+    const denied = await authedMutation("/api/invoices", h.sessions.admin, "POST", JSON.stringify(body));
     expect(denied.status).toBe(409);
     expect(await q("SELECT id FROM invoices WHERE patient_id=$1", [owner])).toHaveLength(0);
     expect((await authedMutation("/api/invoices/clinical-preview", h.sessions.doctorA, "POST", JSON.stringify(body))).status).toBe(403);

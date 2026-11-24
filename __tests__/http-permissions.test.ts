@@ -115,6 +115,29 @@ describe("TD-04: المصفوفة تغطي كل مسار API وكل فعل — �
   });
 });
 
+describe("P1 reception expense boundary", () => {
+  it("denies expense vouchers and their files at the proxy while keeping patient collection", () => {
+    const blocked = [
+      ["/api/expenses", "GET"], ["/api/expenses", "POST"],
+      ["/api/expenses/quote", "POST"],
+      ["/api/expenses/1/attachments", "GET"], ["/api/expenses/1/attachments", "POST"],
+      ["/api/expense-attachments/1", "GET"],
+    ] as const;
+    for (const [path, method] of blocked) {
+      const verdict = apiRouteVerdict(path, method);
+      expect(verdict.kind).toBe("registered");
+      if (verdict.kind !== "registered") throw new Error("Not registered: " + path);
+      expect(verdict.access).not.toContain("reception");
+    }
+    const receipts = apiRouteVerdict("/api/payments", "POST");
+    expect(receipts.kind).toBe("registered");
+    if (receipts.kind === "registered") expect(receipts.access).toContain("reception");
+    const ledger = apiRouteVerdict("/api/patients/1/ledger", "GET");
+    expect(ledger.kind).toBe("registered");
+    if (ledger.kind === "registered") expect(ledger.access).toContain("reception");
+  });
+});
+
 describe("TD-04: المصفوفة والباب متفقان", () => {
   it("قائمة PUBLIC_API في الباب = مسارات المصفوفة العامة ومسارات البوابة", () => {
     const fromMatrix = Object.entries(HTTP_PERMISSIONS)

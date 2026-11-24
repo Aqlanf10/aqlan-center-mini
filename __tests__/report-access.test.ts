@@ -3,7 +3,7 @@ import { canAccessUnifiedReport, reportIsAdminOnly } from "../lib/report-access"
 
 describe("reports access policy", () => {
   it("keeps center-wide financial and commission reports admin-only", () => {
-    for (const report of ["daily", "monthly", "annual", "collections", "services", "patients", "debt", "aging", "specialty", "doctor", "doctor-commission", "treatment-plans", "lab", "suppliers"]) {
+    for (const report of ["daily", "monthly", "annual", "collections", "services", "patients", "debt", "aging", "specialty", "doctor", "doctor-commission", "treatment-plans", "lab", "suppliers", "patient-statement"]) {
       expect(reportIsAdminOnly(report)).toBe(true);
       expect(canAccessUnifiedReport("reception", report)).toBe(false);
       expect(canAccessUnifiedReport("admin", report)).toBe(true);
@@ -11,7 +11,7 @@ describe("reports access policy", () => {
   });
 
   it("lets reception use operational reports without exposing clinic income", () => {
-    for (const report of ["visits", "appointments", "recall", "inventory", "patient-statement"]) {
+    for (const report of ["visits", "appointments", "recall", "inventory"]) {
       expect(reportIsAdminOnly(report)).toBe(false);
       expect(canAccessUnifiedReport("reception", report)).toBe(true);
     }

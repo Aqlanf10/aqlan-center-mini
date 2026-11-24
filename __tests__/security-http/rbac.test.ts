@@ -90,9 +90,9 @@ describe("حدود الأدوار الوظيفية", () => {
     expect(response.status).toBe(403);
   });
 
-  it("الاستقبال (صاحب المالية في هذا النظام) يصل الدفعات — والسلوك المشروع لا يُكسر", async () => {
+  it("تحجب قائمة الدفعات العامة عن الاستقبال", async () => {
     const response = await authedGet("/api/payments", h.sessions.reception);
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(403);
   });
 
   it("(P2-1) المحاسب يقرأ الدفعات — ولا يُصدر سندًا", async () => {

@@ -31,7 +31,7 @@ export interface ParsedExpenseRequest {
 
 export type ParseResult =
   | { ok: true; value: ParsedExpenseRequest }
-  | { ok: false; status: number; message: string };
+  | { ok: false; status: number; message: string; code?: "owner_private_requires_owner" };
 
 const MAX_RATE = 1_000_000;
 
@@ -47,6 +47,17 @@ export function parseExpenseRequest(
   settingsRates: RateMap,
   isAdmin: boolean,
 ): ParseResult {
+  // The legacy expense writer posts the entire voucher to the drawer. A private
+  // funding intent requires server-proven ownership and separate ledger lines.
+  const privatePart = [source.ownerPrivateAmount, source.ownerPrivateReason].some(
+    (value) => value != null && !(typeof value === "string" && value.trim() === ""),
+  );
+  if (privatePart) {
+    return {
+      ok: false, status: 403, code: "owner_private_requires_owner",
+      message: "الدفع من مال المالك الخاص يتطلب جلسة تثبت هوية المالك. لم يُسجّل سند صرف.",
+    };
+  }
   if (!isExpenseCategory(source.category)) {
     return { ok: false, status: 400, message: "اختر تصنيف المصروف." };
   }

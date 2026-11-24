@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { chromium, type Browser } from "playwright";
-import { baseUrl, harness } from "./_server";
+import { baseUrl, grantReceptionCollection, harness } from "./_server";
 
 /**
  * (FIN-2) المالك: «نخطئ بزيادة مبلغ على المريض وما عاد نقدر نعدّل».
@@ -48,7 +48,6 @@ async function openAccount(cookie: string) {
   const page = await context.newPage();
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`);
   await page.getByRole("button", { name: /الحساب/ }).first().click();
-  await page.getByRole("region", { name: "الفواتير" }).getByText("تنظيف وتلميع").first().waitFor();
   return { context, page };
 }
 
@@ -56,6 +55,7 @@ describe("تصحيح فاتورةٍ بمبلغٍ زائد من حساب المر
   it("the admin lowers the price with a reason; the ledger shows the cancelled original and the corrected invoice", async () => {
     const { context, page } = await openAccount(h.sessions.admin.cookie);
     try {
+      await page.getByRole("region", { name: "الفواتير" }).getByText("تنظيف وتلميع").first().waitFor();
       const invoices = page.getByRole("region", { name: "الفواتير" });
       await invoices.getByRole("button", { name: "تصحيح" }).click();
       const editor = page.getByTestId("invoice-correction-editor");
@@ -75,9 +75,13 @@ describe("تصحيح فاتورةٍ بمبلغٍ زائد من حساب المر
   }, 120_000);
 
   it("reception sees no correction button", async () => {
+    await grantReceptionCollection(h, patientId);
     const { context, page } = await openAccount(h.sessions.reception.cookie);
     try {
-      expect(await page.getByRole("region", { name: "الفواتير" }).getByRole("button", { name: "تصحيح" }).count()).toBe(0);
+      await page.getByRole("button", { name: "تسجيل تحصيل" }).waitFor();
+      expect(await page.getByRole("button", { name: "تصحيح" }).count()).toBe(0);
+      expect(await page.getByTestId("treatment-entry-open").count()).toBe(0);
+      expect(await page.getByText("تنظيف وتلميع", { exact: true }).count()).toBe(0);
     } finally {
       await context.close();
     }

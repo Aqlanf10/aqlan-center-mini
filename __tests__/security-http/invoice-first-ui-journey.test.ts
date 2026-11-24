@@ -33,7 +33,7 @@ beforeAll(async () => {
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
 
-async function open(who: "reception" | "doctorA", path: string): Promise<{ context: BrowserContext; page: Page }> {
+async function open(who: "admin" | "doctorA", path: string): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext({ viewport: { width: 1280, height: 1100 }, locale: "ar-YE" });
   const [name, ...value] = h.sessions[who].cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
@@ -43,8 +43,8 @@ async function open(who: "reception" | "doctorA", path: string): Promise<{ conte
 }
 
 describe("INV-LINK D — invoice-first journey", () => {
-  it("reception: preview says a new intake case will be created; a double click saves one invoice", async () => {
-    const { context, page } = await open("reception", `/patients/${patientId}?tab=account`);
+  it("admin: preview says a new intake case will be created; a double click saves one invoice", async () => {
+    const { context, page } = await open("admin", `/patients/${patientId}?tab=account`);
     await page.getByTestId("treatment-entry-open").click();
     await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
     await page.getByLabel("الخدمة", { exact: true }).selectOption(String(serviceId));
@@ -117,7 +117,7 @@ describe("INV-LINK D — invoice-first journey", () => {
     const { rows: [{ id: cancelledPatientId }] } = await db.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ($1, 'مريض تقييم بعد إلغاء الفاتورة', $2) RETURNING id`,
       [`IFJ-CANCEL-${stamp}`, doctorId]);
-    const createdResponse = await authedMutation("/api/invoices", h.sessions.reception, "POST", JSON.stringify({
+    const createdResponse = await authedMutation("/api/invoices", h.sessions.admin, "POST", JSON.stringify({
       patientId: cancelledPatientId, currency: "YER", items: [{ serviceId, doctorId, scope: "both" }],
     }));
     expect(createdResponse.status).toBe(201);

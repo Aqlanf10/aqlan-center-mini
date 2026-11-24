@@ -12,7 +12,12 @@ beforeEach(()=>{
  mock.getClinicalVisit.mockResolvedValue({id:42,patientId:23,arrivedAt:new Date().toISOString()});
  mock.getVisitFinancialContext.mockResolvedValue({visitId:42,patientId:23,signed:true,directReferenceState:"current",directReference:{kind:"invoice",id:81,state:"current",path:"visit"},summary:"verified",work:[{key:"procedure:1",id:1,kind:"procedure",coverage:"verified",decision:"none",reasons:[],references:[{kind:"invoice",id:81,state:"current",path:"visit_procedure"}]}]});
 });
-it.each(["doctor","assistant","admin","reception","accountant","cashier"])("redacts actual GET for %s with existing money policy",async role=>{
+it.each(["reception", "cashier", "accountant"])("denies the clinical context to %s before a visit read", async role => {
+  mock.requireSession.mockResolvedValue({ role, partyId: 7 });
+  expect((await get()).status).toBe(403);
+  expect(mock.getClinicalVisit).not.toHaveBeenCalled();
+});
+it.each(["doctor","assistant","admin"])("redacts actual GET for %s with existing money policy",async role=>{
  mock.requireSession.mockResolvedValue({role,partyId:7});const response=await get();expect(response.status).toBe(200);
  const body=await response.json();expect(body.work[0].references.length).toBe(canViewMoney(role)?1:0);expect(body.directReference!==null).toBe(canViewMoney(role));
  expect(mock.getVisitFinancialContext).toHaveBeenCalledWith(42,23);expect(response.headers.get("Cache-Control")).toContain("no-store");

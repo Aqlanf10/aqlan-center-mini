@@ -1,3 +1,7 @@
+import { OtherCollectorReviewRequired } from "@/lib/similar-collection";
+import { getPlanPatientId } from "@/lib/db";
+import { canViewPatientMoney } from "@/lib/patient-access";
+import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { isRetiredCollectionKey, retiredCollectionRefusal } from "@/lib/collection-attempts";
 import { parseSimilarCollectionReviewHeader, similarCollectionRefusal, SimilarCollectionReviewRequired, SIMILAR_COLLECTION_REVIEW_HEADER } from "@/lib/similar-collection";
 import { collectApprovedAgreement } from "@/lib/approved-agreements";
@@ -56,6 +60,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   }
 
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  if (session.role === "reception") {
+    const patientId = await getPlanPatientId(planId);
+    if (!patientId || !await canViewPatientMoney(session, patientId)) {
+      return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
+    }
+  }
   const plan = await getPlan(planId, today);
   if (!plan) return NextResponse.json({ message: "الخطة غير موجودة." }, { status: 404 });
   // The writer checks status under the plan lock, after successful-key replay.
@@ -136,6 +146,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // إعادةٌ لسندٍ سُجّل سابقًا: 200 لا 201 — كما في /api/payments.
     return NextResponse.json(result, { status: result.replayed ? 200 : 201 });
   } catch (error) {
+    if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof OtherCollectorReviewRequired) return NextResponse.json({ message: error.message }, { status: 409 });
     if(error instanceof SimilarCollectionReviewRequired)return NextResponse.json(similarCollectionRefusal(error),{status:409});
     if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
@@ -146,8 +158,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
-    return NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
+  if (session.role !== "admin") {
+    return NextResponse.json({ message: "تعديل اتفاق العلاج يتطلب صلاحية الإدارة." }, { status: 403 });
   }
 
   const { id: rawId } = await context.params;

@@ -42,6 +42,10 @@ type ReceiptRow = {
 };
 
 /** Thrown inside a writer transaction; the owner rolls back and the route answers 409. */
+export class OtherCollectorReviewRequired extends Error {
+  constructor() { super("توجد عملية مشابهة تستلزم مراجعة الإدارة قبل التحصيل."); }
+}
+
 export class SimilarCollectionReviewRequired extends Error {
   constructor(readonly receipts: SimilarCollectionReceipt[]) { super(SIMILAR_COLLECTION_REASON); }
 }
@@ -133,10 +137,13 @@ export async function findSimilarCollectionsOn(q: Queryable, patientId: number, 
  */
 export async function assertSimilarCollectionReviewed(
   q: Queryable,
-  input: { patientId: number; amountMinor: number; currency: Currency; review: SimilarCollectionReview | undefined },
+  input: { patientId: number; amountMinor: number; currency: Currency; review: SimilarCollectionReview | undefined; receptionUsername?: string },
 ): Promise<void> {
   if (input.review === undefined) return;
   const receipts = await findSimilarCollectionsOn(q, input.patientId, input.amountMinor, input.currency);
+  if (input.receptionUsername && receipts.some(receipt => receipt.createdBy !== input.receptionUsername)) {
+    throw new OtherCollectorReviewRequired();
+  }
   const seen = input.review.observedReceiptIds;
   const same = receipts.length === seen.length && receipts.every((receipt, index) => receipt.id === seen[index]);
   if (!same) throw new SimilarCollectionReviewRequired(receipts);

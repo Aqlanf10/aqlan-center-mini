@@ -169,11 +169,11 @@ describe("P-01 على HTTP: /api/finance/debts صفٌّ لكل (مريض × عم
     expect(report.status).toBe(403);
   });
 
-  it("والاستقبال — من يقبض المال — يقرأ المديونية (200)", async () => {
+  it("يحجب كشف مديونية العيادة عن موظف الاستقبال", async () => {
     const response = await fetch(`${baseUrl}/api/finance/debts`, {
       headers: { Cookie: h.sessions.reception.cookie },
       redirect: "manual",
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(403);
   });
 });

@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpeningBalance } from "@/lib/db";
 
+vi.mock("@/lib/patient-access", () => ({ canViewPatientMoney: vi.fn() }));
+import { canViewPatientMoney } from "@/lib/patient-access";
+
 vi.mock("@/lib/session", () => ({ requireSession: vi.fn() }));
 vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden",
@@ -34,6 +37,7 @@ const clear = () => DELETE(new Request("https://synthetic.invalid/api/opening-ba
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(requireSession).mockResolvedValue({ userId: 1, username: "synthetic-admin", role: "admin", expiresAt: 4_102_444_800_000 });
+  vi.mocked(canViewPatientMoney).mockResolvedValue(true);
   vi.mocked(getSettings).mockResolvedValue({ "finance.reception_adds_opening_balance": "true" } as Awaited<ReturnType<typeof getSettings>>);
   vi.mocked(isPeriodLocked).mockResolvedValue(false);
   vi.mocked(getPatientOpeningBalance).mockResolvedValue(existing);
@@ -109,6 +113,14 @@ describe("opening mutation preflight ownership", () => {
 
   it("preserves reason requirement", async () => {
     expect((await post({ reason: " " })).status).toBe(400); noWrites();
+  });
+
+  it("refuses an out-of-scope patient before reading their opening balance", async () => {
+    vi.mocked(requireSession).mockResolvedValue({ userId: 1, username: "synthetic-user", role: "reception", expiresAt: 4_102_444_800_000 });
+    vi.mocked(canViewPatientMoney).mockResolvedValue(false);
+    expect((await post()).status).toBe(403);
+    expect(getPatientOpeningBalance).not.toHaveBeenCalled();
+    expect(setPatientOpeningBalance).not.toHaveBeenCalled();
   });
 
   it("preserves reception edit denial", async () => {

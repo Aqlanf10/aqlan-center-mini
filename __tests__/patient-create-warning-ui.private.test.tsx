@@ -24,6 +24,7 @@ vi.mock("react",async original=>{
 });
 vi.mock("next/navigation",()=>({useRouter:()=>({push:vi.fn()})}));
 vi.mock("../components/Modal",()=>({Modal:()=>null}));
+vi.mock("../components/SessionProvider",()=>({useSession:()=>({role:"reception"})}));
 vi.mock("../components/SettingsProvider",()=>({useSetting:()=>undefined}));
 vi.mock("../components/PatientContactPanel",()=>({PatientFlagChips:()=>null}));
 vi.mock("../components/FamilyLinkSuggestion",async original=>({
