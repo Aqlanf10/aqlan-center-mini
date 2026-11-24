@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpeningBalance } from "@/lib/db";
 
-vi.mock("@/lib/patient-access", () => ({ canViewPatientMoney: vi.fn() }));
-import { canViewPatientMoney } from "@/lib/patient-access";
-
 vi.mock("@/lib/session", () => ({ requireSession: vi.fn() }));
 vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden",
@@ -37,7 +34,6 @@ const clear = () => DELETE(new Request("https://synthetic.invalid/api/opening-ba
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(requireSession).mockResolvedValue({ userId: 1, username: "synthetic-admin", role: "admin", expiresAt: 4_102_444_800_000 });
-  vi.mocked(canViewPatientMoney).mockResolvedValue(true);
   vi.mocked(getSettings).mockResolvedValue({ "finance.reception_adds_opening_balance": "true" } as Awaited<ReturnType<typeof getSettings>>);
   vi.mocked(isPeriodLocked).mockResolvedValue(false);
   vi.mocked(getPatientOpeningBalance).mockResolvedValue(existing);
@@ -115,17 +111,21 @@ describe("opening mutation preflight ownership", () => {
     expect((await post({ reason: " " })).status).toBe(400); noWrites();
   });
 
-  it("refuses an out-of-scope patient before reading their opening balance", async () => {
+  it("records an enabled reception addition without reading the patient's prior balance or returning their details", async () => {
     vi.mocked(requireSession).mockResolvedValue({ userId: 1, username: "synthetic-user", role: "reception", expiresAt: 4_102_444_800_000 });
-    vi.mocked(canViewPatientMoney).mockResolvedValue(false);
-    expect((await post()).status).toBe(403);
+    const response = await post();
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ patientId: 41, currency: "SAR", amountMinor: 30000, asOfDate: "2026-01-01" });
     expect(getPatientOpeningBalance).not.toHaveBeenCalled();
-    expect(setPatientOpeningBalance).not.toHaveBeenCalled();
+    expect(setPatientOpeningBalance).toHaveBeenCalledWith(expect.objectContaining({ addOnly: true, expectedBefore: null }));
   });
 
-  it("preserves reception edit denial", async () => {
+  it("rejects reception when the opening setting is off", async () => {
     vi.mocked(requireSession).mockResolvedValue({ userId: 1, username: "synthetic-user", role: "reception", expiresAt: 4_102_444_800_000 });
-    expect((await post()).status).toBe(403); noWrites();
+    vi.mocked(getSettings).mockResolvedValue({ "finance.reception_adds_opening_balance": "false" } as Awaited<ReturnType<typeof getSettings>>);
+    expect((await post()).status).toBe(403);
+    expect(getPatientOpeningBalance).not.toHaveBeenCalled();
+    noWrites();
   });
 
   it.each(["post", "clear"] as const)("keeps an unrelated %s writer error distinct from a conflict", async (action) => {

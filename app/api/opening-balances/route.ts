@@ -1,5 +1,3 @@
-import { canViewPatientMoney } from "@/lib/patient-access";
-import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -8,7 +6,7 @@ import { parseAmount, CLINIC_BASE_CURRENCY, isCurrency } from "@/lib/money";
 import { clinicDateString } from "@/lib/schedule";
 import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
-import { openingBalanceAccess } from "@/lib/opening-access";
+import { openingBalanceAccess, ReceptionOpeningDisabled } from "@/lib/opening-access";
 
 export const dynamic = "force-dynamic";
 
@@ -95,11 +93,6 @@ export async function POST(request: Request) {
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
   }
-  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) {
-    return NextResponse.json({ message: "لا يوجد تفويض مالي لهذا المريض." }, { status: 403 });
-  }
-
-
   // (P1-5ب) الرصيد الافتتاحي بعملته — قرار المالك: السعودي يبقى سعوديًا. الغائبة = الأساس.
   const currency = source.currency === undefined || source.currency === null || source.currency === ""
     ? CLINIC_BASE_CURRENCY : source.currency;
@@ -132,10 +125,8 @@ export async function POST(request: Request) {
   try {
     /* (P2-5) تعديل رصيدٍ قائم يمسّ دَينًا ظهر في كشوفٍ سابقة: لا يُستبدل بلا سبب،
        والقيمة السابقة تُحفظ في السجلّ والتدقيق. */
-    const before = await getPatientOpeningBalance(patientId, currency);
-    if (before && !access.edit) {
-      return NextResponse.json({ message: "للمريض رصيدٌ سابق بهذه العملة — تعديله للمدير." }, { status: 403 });
-    }
+    // Reception can add only. The financial writer checks absence under its lock.
+    const before = access.edit ? await getPatientOpeningBalance(patientId, currency) : null;
     if (before && !reason) {
       return NextResponse.json({ message: "للمريض رصيدٌ افتتاحي مسجّل. اكتب سبب تعديله." }, { status: 400 });
     }
@@ -159,9 +150,10 @@ export async function POST(request: Request) {
       },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(balance, { status: 201 });
+    return NextResponse.json(access.edit ? balance : { patientId, currency, amountMinor, asOfDate },
+      { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
-    if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof ReceptionOpeningDisabled) return NextResponse.json({ message: error.message }, { status: 403 });
     if (error instanceof OpeningBalanceExists) return NextResponse.json({ message: error.message }, { status: 403 });
     if (error instanceof OpeningBalanceChanged) return NextResponse.json({ message: error.message }, { status: 409 });
     if (error instanceof OpeningCorrectionRefused) return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });

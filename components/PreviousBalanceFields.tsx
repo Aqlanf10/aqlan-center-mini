@@ -25,9 +25,10 @@ export function previousBalancePayload(value: PreviousBalance): { openingBalance
   return { openingBalance: { amount: value.amount.trim(), currency: value.currency, note: value.note.trim() || null } };
 }
 
-export function PreviousBalanceFields({ value, onChange }: {
+export function PreviousBalanceFields({ value, onChange, showAccountHint = true }: {
   value: PreviousBalance;
   onChange: (next: PreviousBalance) => void;
+  showAccountHint?: boolean;
 }) {
   const [allowed, setAllowed] = useState(false);
   useEffect(() => {
@@ -74,7 +75,7 @@ export function PreviousBalanceFields({ value, onChange }: {
             className="w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs outline-none focus:border-navy-800"
           />
           <OpeningBalanceGuidance />
-          <p className="text-[10px] font-semibold text-amber-800">عملةٌ أخرى تُضاف من ملفه ← الحساب.</p>
+          {showAccountHint && <p className="text-[10px] font-semibold text-amber-800">عملةٌ أخرى تُضاف من ملفه ← الحساب.</p>}
         </div>
       ) : null}
     </div>
