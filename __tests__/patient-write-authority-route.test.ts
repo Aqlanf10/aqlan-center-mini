@@ -30,7 +30,7 @@ vi.mock("@/lib/db", () => ({
   deletePatientCascade: mocks.delete,
 }));
 import { GET, POST } from "../app/api/patients/route";
-import { PATCH } from "../app/api/patients/[id]/route";
+import { GET as GET_FILE, PATCH } from "../app/api/patients/[id]/route";
 
 const session: SessionPayload = {
   userId: 10, username: "synthetic-write-doctor", role: "doctor", partyId: 7, expiresAt: 0,
@@ -316,5 +316,44 @@ describe("patient collection cache boundary", () => {
     const response = await GET(new Request("http://test.invalid/api/patients?q=Synthetic"));
     expect(response.status).toBe(500);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+});
+
+
+describe("GET patient-file scope revalidation", () => {
+  const read = () => GET_FILE(new Request("http://test.invalid/api/patients/91"), {
+    params: Promise.resolve({ id: "91" }),
+  });
+
+  it.each(["missing", "failed"])("rejects a %s account lookup without using the stale session party", async (mode) => {
+    if (mode === "missing") mocks.user.mockResolvedValue(null);
+    else mocks.user.mockRejectedValue(new Error("Synthetic account lookup failure"));
+    expect((await read()).status).toBe(401);
+    expect(mocks.owns).not.toHaveBeenCalled();
+    expect(mocks.file).not.toHaveBeenCalled();
+  });
+
+  it.each([{ id: 11 }, { isActive: false }, { role: "reception" }, { username: "other-synthetic-doctor" }])(
+    "rejects changed account identity even with an all-patient grant: %j", async (change) => {
+      mocks.user.mockResolvedValue({ ...currentDoctor({ canViewAllPatients: true }), ...change });
+      expect((await read()).status).toBe(401);
+      expect(mocks.owns).not.toHaveBeenCalled();
+      expect(mocks.file).not.toHaveBeenCalled();
+    });
+
+  it("rejects a removed party link rather than falling back to the signed session", async () => {
+    mocks.user.mockResolvedValue({ ...currentDoctor(), partyId: null });
+    expect((await read()).status).toBe(403);
+    expect(mocks.owns).not.toHaveBeenCalled();
+    expect(mocks.file).not.toHaveBeenCalled();
+  });
+
+  it("preserves the current explicit all-patient grant and owned-file path", async () => {
+    mocks.user.mockResolvedValue({ ...currentDoctor({ canViewAllPatients: true }), partyId: null });
+    expect((await read()).status).toBe(200);
+    expect(mocks.owns).not.toHaveBeenCalled();
+    mocks.user.mockResolvedValue(currentDoctor());
+    expect((await read()).status).toBe(200);
+    expect(mocks.owns).toHaveBeenCalledExactlyOnceWith(7, patient.id);
   });
 });
