@@ -155,6 +155,13 @@ describe("disbursement reports use recorded, non-duplicated native movements", (
     const params = standardParams("daily-outflow", { to: SELECTED_DAY });
     const report = await result(params);
     const rows = report.rows!;
+    // A midnight Asia/Aden voucher has a previous UTC date, while journal
+    // entries have only a local day. Do not let date-only entries outrank it.
+    const midnight = rows.findIndex(row => row.reference === "SYN-EXP-YER");
+    const undatedTime = rows.findIndex(row => row.reference === "قيد #" + transferId);
+    expect(midnight).toBeGreaterThanOrEqual(0);
+    expect(undatedTime).toBeGreaterThan(midnight);
+    expect(rows.map(row => row.day)).toEqual(rows.map(row => row.day).sort().reverse());
     expect(rows.filter(row => row.reference === "SYN-EXP-PAYOUT")).toMatchObject([{ amount:5000, movement:"سداد التزام بسند صرف" }]);
     expect(rows.find(row => row.reference === "SYN-RC-CASH")).toMatchObject({ amount:100, movement:"ردّ مريض مسجّل", channel:"نقد" });
     expect(rows.find(row => row.reference === "SYN-RC-BANK")).toMatchObject({ amount:500, movement:"ردّ مريض مسجّل", channel:"حوالة" });
