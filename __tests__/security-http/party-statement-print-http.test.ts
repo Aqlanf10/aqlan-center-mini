@@ -76,7 +76,7 @@ describe("كشف حساب جهة — الواجهة البرمجية", () => {
   });
 
   it("الإجمالي لكل عملة بعملتها", async () => {
-    const response = await get(`/api/payables?partyId=${supplierId}`, h.sessions.reception.cookie);
+    const response = await get(`/api/payables?partyId=${supplierId}`, h.sessions.admin.cookie);
     const payload = await response.json() as { totals: { currency: string; owedMinor: number; remainingMinor: number }[] };
     expect(payload.totals.map((row) => [row.currency, row.owedMinor, row.remainingMinor])).toEqual([
       ["YER", 80_000, 80_000],

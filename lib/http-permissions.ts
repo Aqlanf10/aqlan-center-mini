@@ -210,7 +210,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/patients/[id]/workflow": { GET: ["admin", "reception", "doctor", "assistant"] },
   "/api/patients/import": { POST: ADMIN },
   "/api/patients/import/legacy": { POST: ADMIN },
-  "/api/payables": { GET: ["admin", "reception", "accountant"], POST: FRONT_DESK },
+  "/api/payables": { GET: ["admin", "accountant"], POST: ADMIN },
   "/api/payments": { GET: ["admin", "reception", "cashier", "accountant"], POST: ["admin", "reception", "cashier"] },
   "/api/payments/attempts/retire": { POST: ["admin", "reception", "cashier"] },
   "/api/payments/[id]/correct": { POST: ADMIN },
