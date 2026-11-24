@@ -497,8 +497,15 @@ export interface FilterState {
   expenseCategory?: string | null;
 }
 
+export type ExpenseChoiceScope = {
+  status: "loading" | "unavailable" | "unapplied" | "ready";
+  noMatches?: boolean;
+  applied?: { from: string; to: string; currency: FilterState["currency"] };
+};
+
 export function FilterBar({
-  state, onChange, options, showDebtMode, showCompare, disbursementMode, expenseOptions, onPatientPicked, onApply,
+  state, onChange, options, showDebtMode, showCompare, disbursementMode, expenseOptions, expenseChoiceScope,
+  onPatientPicked, onApply,
 }: {
   state: FilterState;
   onChange: (patch: Partial<FilterState>) => void;
@@ -507,6 +514,7 @@ export function FilterBar({
   showCompare: boolean;
   disbursementMode?: "daily-outflow" | "expense-payees";
   expenseOptions?: ReportResult["expenseFilterOptions"];
+  expenseChoiceScope?: ExpenseChoiceScope;
   onPatientPicked: (patient: { id: number; name: string } | null) => void;
   onApply: () => void;
 }) {
@@ -514,6 +522,12 @@ export function FilterBar({
   const [patientSearch, setPatientSearch] = useState("");
   const [patientResults, setPatientResults] = useState<{ id: number; name: string }[]>([]);
   const [patientBusy, setPatientBusy] = useState(false);
+  const expenseStatus = expenseChoiceScope?.status ?? (expenseOptions ? "ready" : "unapplied");
+  const expenseReady = expenseStatus === "ready";
+  const expenseApplyLabel = expenseStatus === "loading" ? "جارٍ تحديث خيارات المصروفات…"
+    : expenseStatus === "unavailable" ? "إعادة محاولة تحميل خيارات المصروفات"
+      : expenseStatus === "unapplied" ? "تطبيق الفترة والعملة وتحديث الخيارات"
+        : "تطبيق وإظهار التقرير";
 
   async function searchPatients(term: string) {
     if (term.trim().length < 2) { setPatientResults([]); return; }
@@ -632,23 +646,46 @@ export function FilterBar({
             </select>
           </label>
           {disbursementMode === "expense-payees" ? ([
-            { key: "expenseRecipient", label: "المستفيد", empty: "كل المستفيدين", entries: expenseOptions?.payees },
-            { key: "expenseCategory", label: "بند المصروف", empty: "كل البنود", entries: expenseOptions?.categories },
-          ] as const).map(field => (
-            <label key={field.key} className="block text-xs font-bold text-slate-600">
-              {field.label}
-              <select value={state[field.key] ?? ""} onChange={(event) => onChange({ [field.key]: event.target.value || null })}
-                className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-2 py-2">
-                <option value="">{field.empty}</option>
-                {state[field.key] && !field.entries?.some(option => option.value === state[field.key]) ? (
-                  <option value={state[field.key] ?? ""}>الاختيار الحالي غير موجود في الفترة</option>
-                ) : null}
-                {field.entries?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-          )) : null}
+            { key: "expenseRecipient", label: "المستفيد", selected: "المستفيد المحدد", empty: "كل المستفيدين", entries: expenseOptions?.payees },
+            { key: "expenseCategory", label: "بند المصروف", selected: "البند المحدد", empty: "كل البنود", entries: expenseOptions?.categories },
+          ] as const).map(field => {
+            const heldValue = state[field.key] ?? "";
+            const held = field.entries?.find(option => option.value === heldValue);
+            return (
+              <label key={field.key} className="block text-xs font-bold text-slate-600">
+                {field.label}
+                <select value={heldValue} disabled={!expenseReady}
+                  onChange={(event) => onChange({ [field.key]: event.target.value || null })}
+                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-2 py-2 disabled:bg-slate-100">
+                  <option value="">{field.empty}</option>
+                  {heldValue && (!expenseReady || !held) ? (
+                    <option value={heldValue}>{expenseReady
+                      ? field.selected + " غير موجود في الفترة"
+                      : (held?.label ?? field.selected) + " (اختيار محفوظ)"}</option>
+                  ) : null}
+                  {expenseReady ? field.entries?.map(option => <option key={option.value} value={option.value}>{option.label}</option>) : null}
+                </select>
+              </label>
+            );
+          }) : null}
           {disbursementMode === "expense-payees" ? (
-            <p className="text-[11px] text-slate-600 sm:col-span-3">اختر الفترة وطبّقها أولًا لتظهر الأسماء والبنود المسجّلة خلالها.</p>
+            <p role="status" className="text-[11px] text-slate-700 sm:col-span-3">
+              {expenseStatus === "loading" ? "جارٍ تحديث خيارات المصروفات…"
+                : expenseStatus === "unavailable" ? "تعذّر تحميل خيارات المصروفات. لم تُمسح اختياراتك."
+                  : expenseStatus === "unapplied" ? "طبّق الفترة والعملة أولًا لتحميل المستفيدين والبنود المسجّلة. لن تُمسح الاختيارات السابقة."
+                    : expenseOptions && !expenseOptions.payees.length && !expenseOptions.categories.length
+                      ? "لا توجد سندات صرف مسجّلة في هذه الفترة."
+                      : expenseChoiceScope?.noMatches
+                        ? "لا توجد سندات تطابق العملة والفلاتر في التقرير المطبّق. تبقى خيارات الأسماء والبنود متاحة للفترة."
+                        : "خيارات المستفيد والبند من الفترة المطبّقة. اختيار العملة يصفّي السندات فقط."}
+              {expenseChoiceScope?.applied && expenseStatus !== "loading" ? (
+                <span className="mt-1 block">
+                  {expenseReady ? "الفترة والعملة المطبّقتان: " : "التقرير المعروض بحسب آخر تطبيق: "}
+                  <bdi>{expenseChoiceScope.applied.from} ← {expenseChoiceScope.applied.to}</bdi>
+                  {" · "}{expenseChoiceScope.applied.currency === "all" ? "كل العملات" : expenseChoiceScope.applied.currency}
+                </span>
+              ) : null}
+            </p>
           ) : null}
         </div>
       ) : null}
@@ -842,9 +879,10 @@ export function FilterBar({
         <button
           type="button"
           onClick={onApply}
-          className="rounded-xl bg-navy-900 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-navy-800"
+          disabled={disbursementMode === "expense-payees" && expenseStatus === "loading"}
+          className="rounded-xl bg-navy-900 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-navy-800 disabled:opacity-50"
         >
-          تطبيق وإظهار التقرير
+          {disbursementMode === "expense-payees" ? expenseApplyLabel : "تطبيق وإظهار التقرير"}
         </button>
       </div>
     </div>
