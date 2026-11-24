@@ -51,25 +51,54 @@ function groupTotalText(group: ReportGroup, column: ReportColumn, base: Currency
     : formatMoney(0, base);
 }
 
-function currencyTotalsContent(text: string, column: ReportColumn) {
-  if (!column.stackCurrencyTotals || text === "") return text;
+function currencyTotalsContent(text: string, column: ReportColumn, debtDetail = false) {
+  if (text === "" || (!column.stackCurrencyTotals && (!debtDetail || !text.includes(" · ")))) return text;
   return text.split(" · ").map((part, index) => (
     <span key={index} data-report-currency-total="" style={{ display: "block", whiteSpace: "nowrap" }}>{part}</span>
   ));
 }
 
-function ReportTable({ title, columns, rows, base, groups }: {
+// Relative widths stay with the field when saved views hide or reorder columns.
+// Weights are normalized against the visible columns, not their original positions.
+const DEBT_PRINT_COLUMN_WEIGHTS: Record<string, number> = {
+  patientName: 28, patientNumber: 14, phone: 18, currency: 9, doctorName: 18,
+  specialtyLabel: 11, statusLabel: 11, planStart: 16, planTitle: 22, planCurrency: 9,
+  planTotalMinor: 20, planPaidMinor: 20, billedMinor: 20, paidMinor: 20, balanceMinor: 20,
+  accruedMinor: 20, lastPaymentDate: 16, ageDays: 9,
+};
+
+function ReportTable({ title, columns, rows, base, groups, debtDetail = false }: {
   title?: string;
   columns: ReportColumn[];
   rows: ReportRow[];
   base: Currency;
   groups?: ReportGroup[] | null;
+  debtDetail?: boolean;
 }) {
   const hasMoney = columns.some((column) => column.type === "money" && column.aggregate !== "none");
+  const weights = debtDetail ? columns.map((column) => DEBT_PRINT_COLUMN_WEIGHTS[column.key] ?? 18) : null;
+  const totalWeight = weights?.reduce((total, value) => total + value, 0) ?? 1;
+  const labelIndex = debtDetail ? Math.max(0, columns.findIndex((column) => column.type !== "money")) : 0;
+
+  function totalCells(label: string, total: (column: ReportColumn) => string) {
+    return columns.map((column, index) => {
+      const money = column.type === "money" && (index !== labelIndex || debtDetail);
+      return (
+        <td key={column.key} className={money ? "num" : undefined}>
+          {index !== labelIndex ? null : money ? <span className="report-total-label">{label}</span> : label}
+          {money ? currencyTotalsContent(total(column), column, debtDetail) : null}
+        </td>
+      );
+    });
+  }
+
   return (
     <section className="report-section">
       {title ? <h2 className="report-section-title">{title}</h2> : null}
-      <PrintTableFrame><table className="items report-table">
+      <PrintTableFrame><table className="items report-table" data-report-debt-detail={debtDetail ? "" : undefined}>
+        {weights ? <colgroup>{columns.map((column, index) => (
+          <col key={column.key} style={{ width: `${100 * weights[index] / totalWeight}%` }} />
+        ))}</colgroup> : null}
         <thead>
           <tr>
             {columns.map((column) => <th key={column.key} className={column.type === "money" || column.type === "count" || column.type === "percent" ? "num" : undefined}>{column.label}</th>)}
@@ -97,12 +126,7 @@ function ReportTable({ title, columns, rows, base, groups }: {
             )),
             ...(hasMoney ? [
               <tr key={`g-${group.label}-total`} className="report-subtotal-row">
-                <td>مجموع {group.label}</td>
-                {columns.slice(1).map((column) => (
-                  <td key={column.key} className={column.type === "money" ? "num" : undefined}>
-                    {column.type === "money" ? currencyTotalsContent(groupTotalText(group, column, base), column) : ""}
-                  </td>
-                ))}
+                {totalCells(`مجموع ${group.label}`, (column) => groupTotalText(group, column, base))}
               </tr>,
             ] : []),
           ]) : rows.map((row, index) => (
@@ -122,12 +146,7 @@ function ReportTable({ title, columns, rows, base, groups }: {
         {hasMoney && rows.length > 0 ? (
           <tfoot>
             <tr className="report-total-row">
-              <td>الإجمالي ({rows.length} صفًا)</td>
-              {columns.slice(1).map((column) => (
-                <td key={column.key} className={column.type === "money" ? "num" : undefined}>
-                  {column.type === "money" ? currencyTotalsContent(moneyTotals(rows, column, base), column) : ""}
-                </td>
-              ))}
+              {totalCells(`الإجمالي (${rows.length} صفًا)`, (column) => moneyTotals(rows, column, base))}
             </tr>
           </tfoot>
         ) : null}
@@ -154,6 +173,7 @@ export function PrintableReportDocument({
     ? applyReportView(result.columns, result.rows ?? [], view, result.baseCurrency)
     : null;
   const detailColumns = applied?.columns ?? result.columns;
+  const debtDetail = result.report === "debt" && result.columns?.some((column) => column.key === "planTitle");
   const landscape = Math.max(detailColumns?.length ?? 0, result.monthly?.columns.length ?? 0) >= 8;
   // Collections already has a native compact landscape composition. Keep its
   // original inline metadata grouping/metrics; the generic boxed flex fields
@@ -163,7 +183,7 @@ export function PrintableReportDocument({
   return (
     <>
       <style>{`@page { size: A4 ${landscape ? "landscape" : "portrait"}; margin: 8mm; }`}</style>
-      <div className={`sheet sheet-report ${landscape ? "sheet-report-landscape" : ""}`} data-report={result.report}>
+      <div className={`sheet sheet-report ${landscape ? "sheet-report-landscape" : ""}`} data-report={result.report} data-report-debt-detail-sheet={debtDetail ? "" : undefined}>
         <PrintHeader settings={settings} title={result.title} />
 
         <Metadata className={result.report === "collections" ? "report-meta" : undefined}>
@@ -247,6 +267,7 @@ export function PrintableReportDocument({
             rows={applied?.rows ?? result.rows}
             base={result.baseCurrency}
             groups={applied?.groups ?? null}
+            debtDetail={debtDetail}
           />
         ) : null}
 
@@ -271,7 +292,7 @@ export function PrintableReportDocument({
           </div>
         ) : null}
 
-        {result.report === "collections" ? (
+        {result.report === "collections" || debtDetail ? (
           <footer className="report-contact-footer"><PrintFooter settings={settings} /></footer>
         ) : <PrintFooter settings={settings} />}
       </div>

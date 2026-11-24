@@ -206,7 +206,9 @@ describe("collections native money and explicit settlement presentation", () => 
     const defaults = outputs(defaultResult);
     expect(defaults.screen).not.toContain("data-report-currency-total");
     expect(defaults.print).not.toContain("data-report-currency-total");
-    expect(defaults.screen).toContain("11.00 ر.س · 5.00 $ · 800 ر.ي");
+    // The inline screen footer follows first receipt order; this test checks layout and amounts.
+    const inlineTotals = defaults.screen.match(/<tfoot>[\s\S]*?<td[^>]*>([^<>]+ · [^<>]+)<\/td>[\s\S]*?<\/tfoot>/)?.[1];
+    expect(inlineTotals?.split(" · ").sort()).toEqual(["11.00 ر.س", "5.00 $", "800 ر.ي"]);
     expect(defaults.print).toContain("800 ر.ي · 11.00 ر.س · 5.00 $");
     expect(rendered.csv).toBe(defaults.csv);
     expect(rendered.excel).toBe(defaults.excel);
@@ -365,6 +367,39 @@ describe("collections exact receipt filter population", () => {
     expect(collectionsReport(ctx).rows).toHaveLength(2);
     expect(native(collectionsReport(ctx), "SAR")).toBe(2500);
     expect(JSON.stringify(ctx.movements)).toBe(before);
+  });
+
+  it.each(["collections", "debt"])("sorts default %s rows across months by source instant, then receipt ID", (caller) => {
+    const early = payment({ id: 99, date: "2026-12-31", at: "2026-12-31T20:00:00.000Z", note: "SYN DECEMBER" });
+    const later = payment({ id: 5, date: "2027-01-01", at: "2027-01-01T12:00:00.000Z", note: "SYN LATER" });
+    const tied = payment({ id: 7, date: later.date, at: later.at, note: "SYN TIED" });
+    const sameDayEarlier = payment({ id: 201, date: later.date, at: "2027-01-01T09:00:00.000Z", note: "SYN EARLIER" });
+    const source = context([early, later], { from: "2026-12-31", to: "2027-01-01" }, [
+      patient([early, later]), patient([sameDayEarlier, tied], { patientId: 2 }),
+    ]);
+    const before = JSON.stringify(source.movements);
+    const result = collectionsReport(source, caller);
+    expect(result.rows?.map(row => row.receiptId)).toEqual([7, 5, 201, 99]);
+    expect(result.rows?.map(row => row.date)).toEqual(["01/01/2027", "01/01/2027", "01/01/2027", "31/12/2026"]);
+    expect(result.rows?.some(row => Object.hasOwn(row, "sourceAt"))).toBe(false);
+    expect(native(result, "SAR")).toBe(5_000);
+    expect(JSON.stringify(source.movements)).toBe(before);
+    const rendered = outputs(result);
+    for (const target of [rendered.screen, rendered.print, rendered.csv, rendered.excel]) {
+      const order = ["SYN TIED", "SYN LATER", "SYN EARLIER", "SYN DECEMBER"].map(marker => target.indexOf(marker));
+      expect(order[0]).toBeGreaterThanOrEqual(0);
+      expect(order).toEqual([...order].sort((a, b) => a - b));
+      expect(new Set(order).size).toBe(4);
+    }
+  });
+
+  it("falls back to ISO clinic date and receipt ID for legacy fixture rows without a source instant", () => {
+    const result = collectionsReport(context([
+      payment({ id: 90, date: "2026-12-31", at: undefined }),
+      payment({ id: 4, date: "2027-01-01", at: undefined }),
+      payment({ id: 6, date: "2027-01-01", at: undefined }),
+    ], { from: "2026-12-31", to: "2027-01-01" }));
+    expect(result.rows?.map(row => row.receiptId)).toEqual([6, 4, 90]);
   });
 
   it("uses the identical projection for collected-debt mode", () => {

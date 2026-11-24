@@ -4,7 +4,7 @@ import type { SessionPayload } from "../lib/auth";
 // Mocked route calls only: no real accounts, database, app server, network or visits.
 const mocks = vi.hoisted(() => ({
   session: vi.fn(), user: vi.fn(), search: vi.fn(), browse: vi.fn(),
-  create: vi.fn(), duplicates: vi.fn(), settings: vi.fn(), locked: vi.fn(),
+  create: vi.fn(), settings: vi.fn(), locked: vi.fn(),
   audit: vi.fn(), opening: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: mocks.session }));
@@ -13,8 +13,7 @@ vi.mock("@/lib/db", () => ({
   findUserByUsername: mocks.user,
   searchPatients: mocks.search,
   browsePatients: mocks.browse,
-  createPatient: mocks.create,
-  duplicateCandidates: mocks.duplicates,
+  createPatientWithDuplicateReview: mocks.create,
   getSettings: mocks.settings,
   isPeriodLocked: mocks.locked,
   recordAudit: mocks.audit,
@@ -73,7 +72,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const mock of [mocks.create, mocks.duplicates, mocks.settings, mocks.locked, mocks.audit, mocks.opening]) {
+  for (const mock of [mocks.create, mocks.settings, mocks.locked, mocks.audit, mocks.opening]) {
     expect(mock).not.toHaveBeenCalled();
   }
 });
