@@ -64,7 +64,8 @@ describe("approved historical workspace persists one mixed document",()=>{
     });
     try{
       const save=page.getByRole("button",{name:"احفظ الاتفاق التاريخي",exact:true});await save.evaluate((button:HTMLButtonElement)=>{button.click();button.click();});
-      const recovery=page.getByTestId("invoice-command-recovery");await expect.poll(()=>recovery.innerText()).toContain("نتيجة الطلب غير مؤكدة");
+      const recovery=page.getByTestId("invoice-command-recovery");
+      await recovery.getByText(/نتيجة الطلب غير مؤكدة/).waitFor({ timeout: 10_000 });
       expect(bodies).toHaveLength(1);expect(await save.isDisabled()).toBe(true);expect(await page.getByLabel("عملة الاتفاق",{exact:true}).isDisabled()).toBe(true);
       await page.getByTestId("patient-tab-summary").click();expect(new URL(page.url()).searchParams.get("tab")).toBe("account");
       if(scenario.fault.endsWith("reload")){
