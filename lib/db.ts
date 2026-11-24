@@ -21546,14 +21546,15 @@ function plannedVisitReadScopeSql(v: "v" | "pv" | "nv"): string {
     )`;
 }
 
-const PLANNED_VISIT_SELECT = `
-  SELECT v.id, v.patient_id, v.plan_id, t.title AS plan_title, v.sequence, v.title, v.doctor_id,
+const plannedVisitSelect = (scheduling = false) => `
+  SELECT v.id, v.patient_id, ${scheduling ? "NULL::int" : "v.plan_id"} AS plan_id, ${scheduling ? "NULL::text" : "t.title"} AS plan_title, v.sequence,
+         ${scheduling ? "format('جلسة رقم %s', v.id)" : "v.title"} AS title, v.doctor_id,
          d.name AS doctor_name, v.duration_minutes, v.status, v.appointment_id,
          a.scheduled_date::text AS scheduled_date, a.scheduled_time::text AS scheduled_time,
          a.status AS appointment_status, ${PLANNED_REBOOK_BLOCK_REASON_SQL} AS rebook_block_reason,
          ${PLANNED_REBOOK_GENERATION_SQL} AS rebook_generation,
          a.referral_id IS NOT NULL AS rebook_has_referral, r.to_party_id AS rebook_referral_receiver_id,
-         v.visit_id, v.note, v.created_at
+         ${scheduling ? "NULL::int" : "v.visit_id"} AS visit_id, ${scheduling ? "NULL::text" : "v.note"} AS note, v.created_at
     FROM planned_visits v
     LEFT JOIN treatment_plans t ON t.id = v.plan_id
     LEFT JOIN parties d ON d.id = v.doctor_id
@@ -21578,10 +21579,10 @@ function toPlannedVisit(row: PlannedVisitRow): PlannedVisitView {
   };
 }
 
-export async function listPatientPlannedVisits(patientId: number): Promise<PlannedVisitView[]> {
+export async function listPatientPlannedVisits(patientId: number, projection: "clinical" | "scheduling" = "clinical"): Promise<PlannedVisitView[]> {
   await ensureSchema();
   const { rows } = await getPool().query<PlannedVisitRow>(
-    `${PLANNED_VISIT_SELECT}
+    `${plannedVisitSelect(projection === "scheduling")}
       WHERE v.patient_id = $1 AND v.status NOT IN ('completed', 'cancelled')
         AND ${plannedVisitReadScopeSql("v")}
       ORDER BY v.status = 'in_progress' DESC, v.sequence, v.id`,
@@ -21661,7 +21662,7 @@ export async function schedulePlannedVisit(input: {
 
   // قراءة أولية: المدة والحالة والمريض — ليعرف الحكم مدةً صحيحة.
   const { rows: previewRows } = await getPool().query<PlannedVisitRow>(
-    `${PLANNED_VISIT_SELECT} WHERE v.id = $1`,
+    `${plannedVisitSelect()} WHERE v.id = $1`,
     [input.plannedVisitId],
   );
   const preview = previewRows[0];

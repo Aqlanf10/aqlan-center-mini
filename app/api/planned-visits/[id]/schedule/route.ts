@@ -98,7 +98,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         });
       }
       return NextResponse.json(
-        { appointmentId: result.appointmentId, title: result.title }, { status: 201 },
+        { appointmentId: result.appointmentId, title: session.role === "reception" ? `جلسة رقم ${plannedVisitId}` : result.title }, { status: 201 },
       );
     }
     if (result.reason === "conflict") {

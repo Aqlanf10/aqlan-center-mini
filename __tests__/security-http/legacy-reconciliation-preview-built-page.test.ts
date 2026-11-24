@@ -146,6 +146,7 @@ async function fixture(width: number) {
     reads.push(target);
     for (const id of ids) {
       const prefix = `/api/patients/${id}`;
+      if (target === prefix + "?projection=workspace") { await route.continue(); return; }
       if (target === prefix) { await json(route, { patient: patient(id), visits: [], appointments: [] }); return; }
       if (target === prefix + "/workflow") { await json(route, workflow(id)); return; }
       if (target === prefix + "/ledger") { pending.push({ patientId: id, route }); return; }
