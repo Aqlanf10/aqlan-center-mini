@@ -115,6 +115,21 @@ describe("document association boundary over real authenticated HTTP", () => {
     expect(download.headers.get("x-content-type-options")).toBe("nosniff");
     expect(Buffer.from(await download.arrayBuffer())).toEqual(png);
     expect((await authedGet(`/api/documents/${document.id}`, h.sessions.doctorB)).status).toBe(403);
+
+    // Clinical document metadata is sensitive even without the binary payload.
+    const listPath = `/api/patients/${ownPatient}/documents`;
+    const listed = await authedGet(listPath, h.sessions.doctorA);
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get("cache-control")).toContain("private");
+    expect(listed.headers.get("cache-control")).toContain("no-store");
+    expect(await listed.json()).toMatchObject({ documents: expect.arrayContaining([expect.objectContaining({ id: document.id })]) });
+    for (const deniedSession of [h.sessions.reception, h.sessions.doctorB]) {
+      const forbidden = await authedGet(listPath, deniedSession);
+      expect(forbidden.status).toBe(403);
+      expect(forbidden.headers.get("cache-control")).toContain("private");
+      expect(forbidden.headers.get("cache-control")).toContain("no-store");
+      expect(await forbidden.json()).not.toHaveProperty("documents");
+    }
   });
 
   it("rejects foreign, missing, unlinked and mismatched references without revealing their identity or inserting rows", async () => {
