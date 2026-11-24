@@ -49,11 +49,14 @@ describe("actual saved converted-quote invoice in statement SSR", () => {
         { dueDate: "2028-02-29", amountMinor: 33667, kind: "installment" },
         { dueDate: "2028-03-31", amountMinor: 33666, kind: "installment" },
       ] } });
-    const created = await authedMutation("/api/invoices", h.sessions[role], "POST", body);
+    const created = await authedMutation("/api/invoices", h.sessions.admin, "POST", body);
     expect(created.status).toBe(201);
+    if (role === "reception") {
+      expect((await authedMutation("/api/invoices", h.sessions.reception, "POST", body)).status).toBe(403);
+    }
     const invoice = await created.json();
     expect(invoice).toMatchObject({ totalMinor: 150000, baseCurrency: "SAR" });
-    const replay = await authedMutation("/api/invoices", h.sessions[role], "POST", body);
+    const replay = await authedMutation("/api/invoices", h.sessions.admin, "POST", body);
     expect(replay.status).toBe(200); expect(await replay.json()).toMatchObject({ id: invoice.id, replayed: true });
     const ledger = await (await authedGet(`/api/patients/${patientId}/ledger`, h.sessions[role])).json();
     expect(ledger.invoices).toHaveLength(1);

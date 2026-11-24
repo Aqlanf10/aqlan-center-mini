@@ -53,7 +53,7 @@ describe("inactive plan collection over built HTTP", () => {
     const first = await post(path, target, key);
     expect(first.status).toBe(201);
     const original = await first.json();
-    const close = await authedMutation(`/api/plans/${target.planId}`, h.sessions.reception,
+    const close = await authedMutation(`/api/plans/${target.planId}`, h.sessions.admin,
       "PATCH", JSON.stringify({ status: "completed" }));
     expect(close.status).toBe(200);
     const again = await post(path, target, key);
