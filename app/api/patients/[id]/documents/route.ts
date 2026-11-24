@@ -69,18 +69,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
-  if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
+  if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400, headers: privateNoStore });
 
   /* صلاحيات الوكيل المساعد + عزل V2: رفع الأشعة بابٌ يغلقه المدير، والعزل قائم
      حتى على المسموح له — الكتابة أضيق من القراءة دائمًا. */
   if (!(await canAccessPatient(session, patientId, "canUploadXrays"))) {
-    return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403 });
+    return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403, headers: privateNoStore });
   }
 
   const storage = await storageStatus();
   if (!storage.ready) {
     // ٥٠٣ لا ٥٠٠: العطل في التهيئة لا في الطلب، والرسالة تقول ما يُضبط.
-    return NextResponse.json({ message: storage.message }, { status: 503 });
+    return NextResponse.json({ message: storage.message }, { status: 503, headers: privateNoStore });
   }
 
   let form: FormData;
@@ -90,13 +90,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     form = await readBoundedFormData(request, UPLOAD_BODY_LIMIT_BYTES);
   } catch (error) {
     const bounded = bodyErrorResponse(error);
-    if (bounded) return bounded;
-    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+    if (bounded) {
+      bounded.headers.set("Cache-Control", privateNoStore["Cache-Control"]);
+      return bounded;
+    }
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: privateNoStore });
   }
 
   const file = form.get("file");
   if (!(file instanceof File)) {
-    return NextResponse.json({ message: "اختر ملفًّا." }, { status: 400 });
+    return NextResponse.json({ message: "اختر ملفًّا." }, { status: 400, headers: privateNoStore });
   }
 
   const settings = await getSettings();
@@ -105,12 +108,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ? Math.round(configured * 1024 * 1024) : DEFAULT_MAX_BYTES;
 
   const check = validateUpload({ mimeType: file.type, sizeBytes: file.size, maxBytes });
-  if (!check.ok) return NextResponse.json({ message: check.message }, { status: 400 });
+  if (!check.ok) return NextResponse.json({ message: check.message }, { status: 400, headers: privateNoStore });
 
   const rawKind = form.get("kind");
   const kind = isDocumentKind(rawKind) ? rawKind : "other";
   if (session.role === "reception" && kind !== "xray" && kind !== "report") {
-    return NextResponse.json({ message: "يمكن رفع أشعة أو تقرير خارجي فقط." }, { status: 403 });
+    return NextResponse.json({ message: "يمكن رفع أشعة أو تقرير خارجي فقط." }, { status: 403, headers: privateNoStore });
   }
   const rawTitle = typeof form.get("title") === "string" ? String(form.get("title")).trim() : "";
   const title = (rawTitle || file.name || "مستند").slice(0, 120);
@@ -122,7 +125,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      consent from the generic upload) and every other document keep their 300-character note unchanged. */
   const consentRecord = kind === "consent" && rawNote.startsWith("{");
   if (consentRecord && (rawNote.length > CONSENT_RECORD_NOTE_LIMIT || parseStoredConsent(rawNote) === null)) {
-    return NextResponse.json({ message: CONSENT_NOTE_INVALID_MESSAGE }, { status: 400 });
+    return NextResponse.json({ message: CONSENT_NOTE_INVALID_MESSAGE }, { status: 400, headers: privateNoStore });
   }
   const note = !rawNote ? null : consentRecord ? rawNote : rawNote.slice(0, DOCUMENT_NOTE_LIMIT);
   const takenOn = DATE_PATTERN.test(rawTaken) ? rawTaken : null;
@@ -139,7 +142,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const orthoCaseId = optionalId(form.get("orthoCaseId"));
   const adjustmentId = optionalId(form.get("adjustmentId"));
   if (visitId === undefined || orthoCaseId === undefined || adjustmentId === undefined) {
-    return NextResponse.json({ message: new DocumentAssociationError().message }, { status: 400 });
+    return NextResponse.json({ message: new DocumentAssociationError().message }, { status: 400, headers: privateNoStore });
   }
   const rawStage = form.get("photoStage");
   const photoStage = typeof rawStage === "string"
@@ -163,7 +166,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         actor: session.username,
         actorRole: session.role,
       });
-      return NextResponse.json({ message: SIGNATURE_MISMATCH_MESSAGE }, { status: 400 });
+      return NextResponse.json({ message: SIGNATURE_MISMATCH_MESSAGE }, { status: 400, headers: privateNoStore });
     }
     /* أبعاد الصورة من ترويسة الملف (من مستودع الوكيل الآخر) — بلا مكتبة:
        التراكب والمقارنة يرسمان فوق الشععة فيحتاجان مقاسها، و`null` ليست عطلًا
@@ -199,12 +202,12 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // Never let clinical POST responses persist in browser or shared intermediary caches.
     return NextResponse.json(projectUploadedClinicalDocument(session.role, document), {
       status: 201,
-      headers: { "Cache-Control": "private, no-store" },
+      headers: privateNoStore,
     });
   } catch (error) {
     if (error instanceof DocumentAssociationError) {
-      return NextResponse.json({ message: error.message }, { status: 400 });
+      return NextResponse.json({ message: error.message }, { status: 400, headers: privateNoStore });
     }
-    return NextResponse.json({ message: "تعذّر حفظ الملف. أعد المحاولة." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر حفظ الملف. أعد المحاولة." }, { status: 500, headers: privateNoStore });
   }
 }
