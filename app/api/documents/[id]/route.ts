@@ -18,8 +18,10 @@ export const dynamic = "force-dynamic";
  * أصلًا — المتصفّح يعرف رقم المستند فقط.
  */
 
+const privateNoStore = { "Cache-Control": "private, no-store" };
+
 const denied = () =>
-  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: privateNoStore });
 
 const idFrom = async (context: { params: Promise<{ id: string }> }) => {
   const { id } = await context.params;
@@ -31,25 +33,25 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const session = await requireSession();
   if (!session) return denied();
   const id = await idFrom(context);
-  if (!id) return NextResponse.json({ message: "رقم المستند غير صالح." }, { status: 400 });
+  if (!id) return NextResponse.json({ message: "رقم المستند غير صالح." }, { status: 400, headers: privateNoStore });
 
   // Deny upload-only front desk at the HTTP handler before document metadata,
   // storage keys or binary bytes are queried. Shared patient scope is a second gate.
   if (session.role === "reception") {
     return NextResponse.json(
       { message: "غير مصرّح لك بعرض هذا المستند." },
-      { status: 403, headers: { "Cache-Control": "private, no-store" } },
+      { status: 403, headers: privateNoStore },
     );
   }
 
   try {
     const found = await getDocumentForDownload(id);
-    if (!found) return NextResponse.json({ message: "المستند غير موجود." }, { status: 404 });
+    if (!found) return NextResponse.json({ message: "المستند غير موجود." }, { status: 404, headers: privateNoStore });
     if (!(await canAccessPatient(session, found.document.patientId, "canViewXrays"))) {
-      return NextResponse.json({ message: "غير مصرّح لك بعرض هذا المستند." }, { status: 403 });
+      return NextResponse.json({ message: "غير مصرّح لك بعرض هذا المستند." }, { status: 403, headers: privateNoStore });
     }
     if (found.document.removedAt && !isAdmin(session.role)) {
-      return NextResponse.json({ message: "المستند مخفيّ." }, { status: 404 });
+      return NextResponse.json({ message: "المستند مخفيّ." }, { status: 404, headers: privateNoStore });
     }
 
     const bytes = await readFileByKey(found.storageKey);
@@ -58,7 +60,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       // صفحةٍ فارغة تجعل الطبيب يظنّ أن الأشعة لم تُرفع أصلًا.
       return NextResponse.json(
         { message: "وصف المستند موجود وملفّه مفقود من التخزين. راجع القرص الملحق." },
-        { status: 410 },
+        { status: 410, headers: privateNoStore },
       );
     }
 
@@ -76,7 +78,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       },
     });
   } catch {
-    return NextResponse.json({ message: "تعذّر فتح المستند." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر فتح المستند." }, { status: 500, headers: privateNoStore });
   }
 }
 

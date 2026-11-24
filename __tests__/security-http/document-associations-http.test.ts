@@ -93,6 +93,8 @@ describe("document association boundary over real authenticated HTTP", () => {
     const before = await count();
     const response = await upload({ visitId: String(ownVisit), orthoCaseId: String(ownCase), adjustmentId: String(ownAdjustment) });
     expect(response.status).toBe(201);
+    expect(response.headers.get("cache-control")).toContain("private");
+    expect(response.headers.get("cache-control")).toContain("no-store");
     const document = await response.json() as { id: number };
     expect(document).toMatchObject({
       patientId: ownPatient, visitId: ownVisit, orthoCaseId: ownCase,
@@ -114,7 +116,86 @@ describe("document association boundary over real authenticated HTTP", () => {
     expect(download.headers.get("cache-control")).toContain("no-store");
     expect(download.headers.get("x-content-type-options")).toBe("nosniff");
     expect(Buffer.from(await download.arrayBuffer())).toEqual(png);
-    expect((await authedGet(`/api/documents/${document.id}`, h.sessions.doctorB)).status).toBe(403);
+    // Both inline preview and attachment download must fail without cacheable
+    // clinical data when the requester is not authorized to read the document.
+    for (const session of [h.sessions.doctorB, h.sessions.reception]) {
+      for (const suffix of ["", "?download=1"]) {
+        const denied = await authedGet(`/api/documents/${document.id}${suffix}`, session);
+        expect(denied.status).toBe(403);
+        expect(denied.headers.get("cache-control")).toContain("private");
+        expect(denied.headers.get("cache-control")).toContain("no-store");
+        expect(denied.headers.get("content-disposition")).toBeNull();
+        expect(await denied.json()).not.toHaveProperty("storageKey");
+      }
+    }
+
+    // Clinical document metadata is sensitive even without the binary payload.
+    const listPath = `/api/patients/${ownPatient}/documents`;
+    const listed = await authedGet(listPath, h.sessions.doctorA);
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get("cache-control")).toContain("private");
+    expect(listed.headers.get("cache-control")).toContain("no-store");
+    expect(await listed.json()).toMatchObject({ documents: expect.arrayContaining([expect.objectContaining({ id: document.id })]) });
+    for (const deniedSession of [h.sessions.reception, h.sessions.doctorB]) {
+      const forbidden = await authedGet(listPath, deniedSession);
+      expect(forbidden.status).toBe(403);
+      expect(forbidden.headers.get("cache-control")).toContain("private");
+      expect(forbidden.headers.get("cache-control")).toContain("no-store");
+      expect(await forbidden.json()).not.toHaveProperty("documents");
+    }
+  });
+
+  it.each(["xray", "report"] as const)("allows upload-only reception to save an external %s without returning metadata", async (kind) => {
+    const externalTitle = `SYNTHETIC external ${kind} ${stamp}`;
+    const form = new FormData();
+    form.set("file", new Blob([new Uint8Array(png)], { type: "image/png" }), `synthetic-${kind}.png`);
+    form.set("kind", kind);
+    form.set("title", externalTitle);
+    const saved = await fetch(`${baseUrl}/api/patients/${ownPatient}/documents`, {
+      method: "POST",
+      headers: { Cookie: h.sessions.reception.cookie, Origin: baseUrl, "Sec-Fetch-Site": "same-origin" },
+      body: form,
+      redirect: "manual",
+    });
+    expect(saved.status).toBe(201);
+    expect(saved.headers.get("cache-control")).toContain("private");
+    expect(saved.headers.get("cache-control")).toContain("no-store");
+    expect(await saved.json()).toEqual({ uploaded: true });
+    const rows = (await db.query<{ id: number }>(
+      "SELECT id FROM patient_documents WHERE patient_id=$1 AND title=$2 AND kind=$3",
+      [ownPatient, externalTitle, kind],
+    )).rows;
+    expect(rows).toHaveLength(1);
+    const path = `/api/documents/${rows[0].id}`;
+    const allowed = await authedGet(path, h.sessions.doctorA);
+    expect(allowed.status).toBe(200);
+    expect(Buffer.from(await allowed.arrayBuffer())).toEqual(png);
+    const denied = await authedGet(path, h.sessions.reception);
+    expect(denied.status).toBe(403);
+    expect(denied.headers.get("cache-control")).toContain("no-store");
+  });
+
+  it.each(["photo", "consent"] as const)("rejects reception upload of clinical %s without persisting metadata", async (kind) => {
+    const rejectedTitle = `SYNTHETIC forbidden reception ${kind} ${stamp}`;
+    const form = new FormData();
+    form.set("file", new Blob([new Uint8Array(png)], { type: "image/png" }), "synthetic-forbidden.png");
+    form.set("kind", kind);
+    form.set("title", rejectedTitle);
+    const response = await fetch(`${baseUrl}/api/patients/${ownPatient}/documents`, {
+      method: "POST",
+      headers: { Cookie: h.sessions.reception.cookie, Origin: baseUrl, "Sec-Fetch-Site": "same-origin" },
+      body: form,
+      redirect: "manual",
+    });
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toContain("private");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.json()).toEqual({ message: "يمكن رفع أشعة أو تقرير خارجي فقط." });
+    const rows = (await db.query<{ n: number }>(
+      "SELECT COUNT(*)::int AS n FROM patient_documents WHERE patient_id=$1 AND title=$2",
+      [ownPatient, rejectedTitle],
+    )).rows;
+    expect(rows[0].n).toBe(0);
   });
 
   it("rejects foreign, missing, unlinked and mismatched references without revealing their identity or inserting rows", async () => {
@@ -124,6 +205,8 @@ describe("document association boundary over real authenticated HTTP", () => {
       { visitId: String(unlinkedVisit) }, { orthoCaseId: String(ownCase), adjustmentId: String(foreignAdjustment) }]) {
       const response = await upload(links);
       expect(response.status).toBe(400);
+      expect(response.headers.get("cache-control")).toContain("private");
+      expect(response.headers.get("cache-control")).toContain("no-store");
       expect(await response.json()).toEqual(refusal);
       expect(await count()).toBe(before);
     }
@@ -135,6 +218,8 @@ describe("document association boundary over real authenticated HTTP", () => {
       for (const value of ["abc", "0", "1.5", "2147483648"]) {
         const response = await upload({ [field]: value });
         expect(response.status).toBe(400);
+        expect(response.headers.get("cache-control")).toContain("private");
+        expect(response.headers.get("cache-control")).toContain("no-store");
         expect(await response.json()).toEqual(refusal);
       }
     }
