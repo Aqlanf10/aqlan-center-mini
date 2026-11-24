@@ -48,6 +48,20 @@ it("retains the browser registration key when a committed HTTP response is lost"
         AND a.action IN ('patient.create','opening_balance.set')) AS audits
       FROM patients p JOIN patient_opening_balances b ON b.patient_id=p.id WHERE p.full_name=$1`, [fullName]);
     expect(rows).toEqual([{ id: committed!.id, patient_number: committed!.patientNumber, amount_minor: "83", history: 1, audits: 2 }]);
+
+    const ledgerRefusal = page.waitForResponse(r => new URL(r.url()).pathname === `/api/patients/${committed!.id}/ledger`);
+    await page.getByLabel("أقسام ملف المريض").getByRole("button", { name: /الحساب/ }).click();
+    expect((await ledgerRefusal).status()).toBe(403);
+    await page.getByRole("checkbox", { name: /مريض سابق/ }).check();
+    await page.getByLabel("عملة الرصيد السابق").selectOption("SAR");
+    await page.getByLabel("مبلغ الرصيد السابق").fill("7.50");
+    await page.getByRole("button", { name: "إضافة الرصيد السابق", exact: true }).click();
+    await page.getByText("سُجّل الرصيد السابق.", { exact: true }).waitFor();
+    expect(await page.getByRole("button", { name: "تسجيل تحصيل", exact: true }).count()).toBe(0);
+    const additional = await db.query(`SELECT currency, amount_minor::text FROM patient_opening_balances
+      WHERE patient_id=$1 ORDER BY currency`, [committed!.id]);
+    expect(additional.rows).toEqual([{ currency: "SAR", amount_minor: "750" }, { currency: "YER", amount_minor: "83" }]);
+    expect((await db.query("SELECT 1 FROM payments WHERE patient_id=$1", [committed!.id])).rows).toHaveLength(0);
   } finally {
     await browser.close();
     await db.end();
