@@ -57,11 +57,11 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
     ||input.source.historicalPaidMinor>=input.expectedTotalMinor))fail("راجع المدفوع التاريخي والمتبقي الافتتاحي.");
   const hash=debtRequestHash({purpose:"approve-agreement-v1",...input,session:{id:input.session.userId,username:input.session.username}});
   return transaction(async client=>{
-    await assertDebtSession(client,input.session);
-    if(input.source.kind!=="new"&&(await revalidateSessionInTransaction(input.session,client))?.role!=="admin")throw new DebtRepaymentError("unauthorized","مطابقة أصل قديم للإدارة فقط.");
+    if ((await revalidateSessionInTransaction(input.session, client))?.role !== "admin") {
+      throw new DebtRepaymentError("unauthorized", "اعتماد أصل الدين يتطلب صلاحية الإدارة.");
+    }
     const owner=(await client.query<{patient_id:number}>("SELECT patient_id FROM treatment_plans WHERE id=$1",[input.planId])).rows[0];
     if(!owner)throw new DebtRepaymentError("missing","الخطة غير موجودة.");
-    await requireCollectionScope(client, input.session.role, owner.patient_id, input.session.username, CLINIC_TIME_ZONE);
     const replay=async()=>{
       const prior=(await client.query<ApprovedAgreement>("SELECT * FROM approved_agreement_principals WHERE idempotency_key=$1 OR plan_id=$2",[input.idempotencyKey,input.planId])).rows[0];
       if(prior&&prior.request_hash!==hash)throw new DebtRepaymentError("conflict","الاتفاق معتمد أو مفتاح الطلب مستعمل؛ راجع المصدر دون إثبات دين ثانٍ.");

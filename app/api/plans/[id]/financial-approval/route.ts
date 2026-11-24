@@ -10,7 +10,7 @@ export const dynamic="force-dynamic";
 export async function POST(request:Request,context:{params:Promise<{id:string}>}){
   const session=await requireSession();
   if(!session)return NextResponse.json({message:"سجّل الدخول من جديد."},{status:401});
-  if(!["admin","reception"].includes(session.role))return NextResponse.json({message:"الاعتماد المالي للإدارة والاستقبال."},{status:403});
+  if(session.role!=="admin")return NextResponse.json({message:"اعتماد أصل الدين يتطلب صلاحية الإدارة."},{status:403});
   try{
     const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);
     if(!body||typeof body!=="object"||Array.isArray(body))throw new DebtRepaymentError("invalid","طلب غير صالح.");

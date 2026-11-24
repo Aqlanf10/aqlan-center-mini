@@ -223,7 +223,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/planned-visits/[id]/rebook": { POST: CLINIC },
   "/api/plans": { GET: ["admin", "cashier", "accountant"], POST: CLINIC },
   "/api/plans/[id]": { POST: FRONT_DESK, PATCH: FRONT_DESK },
-  "/api/plans/[id]/financial-approval": { POST: FRONT_DESK },
+  "/api/plans/[id]/financial-approval": { POST: ADMIN },
   "/api/plans/[id]/reconcile": { GET: ADMIN, POST: ADMIN, PUT: ADMIN },
   "/api/plans/[id]/agreement-amendment": { GET: ADMIN, POST: ADMIN, PUT: ADMIN },
   "/api/plans/[id]/consent": { POST: FRONT_DESK },
