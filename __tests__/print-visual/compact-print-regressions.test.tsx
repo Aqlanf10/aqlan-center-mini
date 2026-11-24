@@ -18,7 +18,7 @@ vi.mock("@/components/PrintButton", () => ({ PrintButton: () => null, ReprintMar
 vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", printCount: async () => 0,
   getSettingsSafe: async () => SETTING_DEFAULTS,
   patientAppointmentsFrom: async () => [{ id: 1, patientId: 2, scheduledDate: "2031-01-04", scheduledTime: "09:30", status: "booked" }],
-  getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "SYN-PRINT-1234567890123", phone: null, createdAt: "2031-01-04T09:00:00Z" }) : ({ id: 1, fullName: "SYN-RX-PATIENT", patientNumber: "SYN-RX-001", birthYear: 1990, gender: "male", medicalAlert: null }),
+  getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "P-07007", phone: null, createdAt: "2030-12-17T09:00:00Z" }) : ({ id: 1, fullName: "SYN-RX-PATIENT", patientNumber: "SYN-RX-001", birthYear: 1990, gender: "male", medicalAlert: null }),
   getPrescription: async () => ({ id: 11, patientId: 1, createdBy: "SYN-SAVED-RX-ISSUER", prescribingDoctorName: "SYN-SAVED-CLINICIAN", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: [{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }] }),
   getLabOrderById: async () => dispatchOrder({ labName: "SYNTHETIC-DISPATCH-LAB-A-1234567890123", labPhone: "777123456", serviceName: "SYNTHETIC-DISPATCH-SERVICE-1234567890123", workType: "SYNTHETIC-DISPATCH-SERVICE-1234567890123" }),
   getPayment: async () => ({ id: 1, receiptNumber: "SYN-PROV-ORIGINAL-BHGFBCDEFABCD", patientName: "SYNTHETIC-RECEIPT-PROVENANCE", invoiceId: 1, kind: "payment", amountMinor: 50000, currency: "YER", method: "cash", createdBy: "SYNTHETIC-SIGNER", createdAt: "2000-03-02T22:00:00.000Z" }),
@@ -100,12 +100,19 @@ describe("native compact print regression witnesses", () => {
           expect(word.xMax).toBeLessThanOrEqual(pages[0].width); expect(word.yMax).toBeLessThanOrEqual(pages[0].height);
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });
-        const references = kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
+        const references = kind === "patient-card" ? ["SYN-PRINT-1234567890123", "P-07007", "17/12/2030", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
           ? ["SYN-RX-PATIENT", "SYN-RX-001", "SYNTHETIC-RX-MEDICATION", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", "SYN-SAVED-DIAGNOSIS"]
           : ["SYN-PROV-ORIGINAL-BHGFBCDEFABCD", "SYN-REV-00002", "SYN-REP-00003"];
         for (const reference of references) expect(text).toContain(reference);
         if (kind === "patient-card") {
           expect(body).not.toContain('class="print-metadata');
+          const copy = page.getByText("احتفظ بهذه البطاقة وقدّم رقم الملف للاستقبال عند المراجعة أو الاستفسار عن موعدك القادم.", { exact: true });
+          expect(await copy.count()).toBe(1);
+          expect(await page.locator(".patient-card-sheet a[href]").count()).toBe(0);
+          const plain = text.replace(/[\s\p{M}\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, "");
+          expect(plain).toContain("احتفظ");
+          expect(plain).toContain("للاستقبال");
+          expect(plain).not.toMatch(/بوابةالمرضى|\/patient-portal|\/portal/u);
           expect(text.replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")).toContain(SETTING_DEFAULTS["clinic.phone"]);
         }
         if (prescription) {

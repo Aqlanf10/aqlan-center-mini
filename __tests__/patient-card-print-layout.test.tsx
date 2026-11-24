@@ -21,6 +21,8 @@ describe("native A6 patient card keeps the original compact metadata flow", () =
     expect(html).not.toContain("print-metadata");
     for (const value of ["SYN-CARD-001", "Synthetic card patient", "777000123", "الهاتف", "تاريخ التسجيل", "04/01/2031", "9:30", "مواعيدك القادمة", "طُبعت في", "print-contact-footer", SETTING_DEFAULTS["clinic.phone"]]) expect(html).toContain(value);
     expect(html.match(/class="line"/g)).toHaveLength(3); // phone, registration, appointment
+    expect(html).toMatch(/احتفظ بهذه البطاقة وقدّم رقم الملف للاستقبال عند المراجعة أو الاستفسار\s+عن موعدك القادم\./u);
+    expect(html.replace(/\p{M}/gu, "")).not.toMatch(/بوابة المرضى|\/patient-portal|\/portal/u);
   });
 });
 

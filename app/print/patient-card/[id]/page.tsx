@@ -94,8 +94,8 @@ export default async function PatientCardPage({ params }: { params: Promise<{ id
 
         <div className="rule-light" />
         <p style={{ fontSize: "9pt", fontWeight: 700, margin: "1mm 0 0" }}>
-          متابعة مواعيدك وحسابك من جوّالك: ادخل بوّابة المرضى برقم ملفّك أعلاه
-          ورقم جوّالك المسجَّل لدينا.
+          احتفظ بهذه البطاقة وقدّم رقم الملف للاستقبال عند المراجعة أو الاستفسار
+          عن موعدك القادم.
         </p>
 
         {/* وتاريخ الطبع يقول إلى متى تصحّ الورقة. */}
