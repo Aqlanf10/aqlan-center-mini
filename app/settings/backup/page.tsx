@@ -1,4 +1,5 @@
 "use client";
+import { NUMBERING_CUTOVER_MESSAGE } from "@/lib/restore/numbering-hold";
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -19,7 +20,7 @@ interface RestoreDrillSummary {
   backupId: string;
   requestedAt: string;
   completedAt: string | null;
-  status: "running" | "ready" | "failed";
+  status: "running" | "restored" | "failed";
   targetEnvironment: "staging" | "test";
   archiveSha256: string;
   documentsVerified: number;
@@ -161,7 +162,7 @@ export default function BackupRecoveryPage() {
       });
       const payload = await json(response);
       if (!response.ok) throw new Error(typeof payload.message === "string" ? payload.message : "فشل اختبار الاستعادة.");
-      setSuccess("نجح Restore Drill على الهدف المعزول وأصبحت النسخة READY FOR CUTOVER.");
+      setSuccess(NUMBERING_CUTOVER_MESSAGE);
       setRestoreTarget(null);
       await load();
     } catch (e) {
@@ -190,7 +191,7 @@ export default function BackupRecoveryPage() {
           <div>
             <h2 className="text-sm font-black text-navy-950">التحكم بالطوارئ</h2>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              الاستعادة هنا لا تكتب فوق Production. تُجرَّب النسخة أولًا على قاعدة staging/test مخصصة ثم تعطي READY FOR CUTOVER.
+              تُختبر النسخة على قاعدة مخصصة للتحقق من السجلات والمستندات.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -230,7 +231,7 @@ export default function BackupRecoveryPage() {
         )}
         {data?.restore.lastDrill ? (
           <div className="mt-3 rounded-xl bg-white/80 p-3 text-xs">
-            <strong>آخر اختبار:</strong> {data.restore.lastDrill.status === "ready" ? "READY FOR CUTOVER" : data.restore.lastDrill.status}
+            <strong>آخر اختبار:</strong> {data.restore.lastDrill.status === "restored" ? NUMBERING_CUTOVER_MESSAGE : data.restore.lastDrill.status}
             {" · "}{data.restore.lastDrill.documentsVerified} مستند متحقق
             {" · "}{data.restore.lastDrill.tablesCount} جدول
             {typeof data.restore.lastDrill.durationMs === "number" ? ` · ${(data.restore.lastDrill.durationMs / 1000).toFixed(1)} ث` : ""}

@@ -14,7 +14,8 @@ describe("واجهة إدارة النسخ والاستعادة", () => {
     expect(page).toContain("إدارة النسخ والاستعادة");
     expect(page).toContain("حذف النسخة");
     expect(page).toContain("اختبار الاستعادة");
-    expect(page).toContain("READY FOR CUTOVER");
+    expect(page).toContain("NUMBERING_CUTOVER_MESSAGE");
+    expect(page).not.toContain("READY FOR CUTOVER");
   });
 
   it("الحذف والاستعادة محميان في الخادم للمدير لا في الواجهة فقط", () => {

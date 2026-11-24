@@ -164,6 +164,7 @@ export async function GET() {
             tablesCount: lastRestoreDrill.tablesCount,
             durationMs: lastRestoreDrill.durationMs,
             readyForCutover: lastRestoreDrill.readyForCutover,
+            cutoverBlocker: lastRestoreDrill.cutoverBlocker,
             errorCode: lastRestoreDrill.errorCode,
           }
         : null,

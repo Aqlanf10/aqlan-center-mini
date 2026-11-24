@@ -63,7 +63,8 @@ export async function POST(request: Request) {
   if (result.ok) {
     return noStore({
       ok: true,
-      readyForCutover: true,
+      readyForCutover: result.readyForCutover,
+      cutoverBlocker: result.cutoverBlocker,
       backupId: result.backupId,
       archiveSha256: result.archiveSha256,
       documentsVerified: result.documentsVerified,
