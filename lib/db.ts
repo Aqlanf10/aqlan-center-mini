@@ -5,6 +5,7 @@ import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpe
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
+import { ReceptionOpeningDisabled } from "./opening-access";
 import { CollectionScopeDenied, requireCollectionScope } from "./reception-collection-scope";
 import { patientNumberBackupSql } from "./patient-number-backup-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
@@ -19960,7 +19961,10 @@ export async function setPatientOpeningBalance(input: SetOpeningBalanceInput): P
   const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
     if (input.addOnly) {
       const { rows: [actor] } = await client.query<{ role: string }>("SELECT role FROM users WHERE username=$1 FOR SHARE", [input.createdBy]);
-      await requireCollectionScope(client, actor?.role, input.patientId, input.createdBy, CLINIC_TIME_ZONE);
+      if (actor?.role === "reception") {
+        const settings = await getSettingsInTransaction(client);
+        if (settings["finance.reception_adds_opening_balance"] !== "true") throw new ReceptionOpeningDisabled();
+      }
     }
     if (!input.addOnly) await assertOpeningCorrectionAllowedInTx(client, input.patientId, currency, input.amountMinor);
     return (await setPatientOpeningBalanceInTx(client, input))?.patientId ?? null;
