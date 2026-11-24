@@ -181,6 +181,33 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
     expect(Number(next.patientNumber.slice(2))).toBeGreaterThan(issuedHigh);
     expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
   });
+  it('simultaneous replay of the same walk-in and booking cannot create a second archive file', async () => {
+    const visit=await db.addVisit({patientName:'SYNTHETIC SAME WALK IN',patientPhone:null,note:null});
+    const request=await db.createBookingRequest({fullName:'SYNTHETIC SAME BOOKING',phone:'999900003',reason:null,preferredDate:null,preferredPeriod:'any'},'synthetic-same-numbering');
+    const booking={id:request.id,date:'2026-11-19',time:'12:00',durationMinutes:30};
+    const [walkA,walkB,bookA,bookB]=await Promise.all([
+      db.openVisitPatientFile(visit.id),db.openVisitPatientFile(visit.id),
+      db.confirmBookingRequest(booking),db.confirmBookingRequest(booking),
+    ]);
+    if(!walkA.ok || !walkB.ok)throw new Error('Synthetic concurrent walk-in failed');
+    expect(walkA.patientId).toBe(walkB.patientId);
+    expect([walkA.created,walkB.created].filter(Boolean)).toHaveLength(1);
+    const booked=bookA ?? bookB;
+    expect([bookA,bookB].filter(Boolean)).toHaveLength(1);
+    if(!booked)throw new Error('Synthetic concurrent booking failed');
+    expect(booked.patientId).not.toBe(walkA.patientId);
+    const walkPatient=await db.getPatient(walkA.patientId);
+    const bookPatient=await db.getPatient(booked.patientId);
+    if(!walkPatient || !bookPatient)throw new Error('Synthetic archived patient missing');
+    const numbers=[walkPatient.patientNumber,bookPatient.patientNumber];
+    expect(new Set(numbers).size).toBe(2);
+    expect(numbers.every(n=>/^P-[0-9]{5,}$/.test(n))).toBe(true);
+    expect((await q('SELECT count(*)::int AS n FROM patients')).rows[0].n).toBe(3);
+    await restart();
+    const next=await db.createPatient(input('AFTER SAME REQUEST RACE'));
+    expect(Number(next.patientNumber.slice(2))).toBeGreaterThan(Math.max(...numbers.map(n=>Number(n.slice(2)))));
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
   it('equal and occupied unconsumed number is marked consumed, not allocated again', async () => {
     await q("INSERT INTO patients(patient_number,full_name) VALUES('P-07000','SYNTHETIC OCCUPIED TARGET')");
     await q("SELECT setval('patient_number_seq',7000,false)");await restart();
