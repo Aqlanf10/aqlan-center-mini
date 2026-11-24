@@ -208,6 +208,28 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
     expect(Number(next.patientNumber.slice(2))).toBeGreaterThan(Math.max(...numbers.map(n=>Number(n.slice(2)))));
     expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
   });
+  it('concurrent CSV import and ordinary registration share the archive counter, not the external number', async () => {
+    const csv='الاسم,الهاتف,رقم الملف\nSYNTHETIC CONCURRENT IMPORT,,900000';
+    const [imported,ordinary]=await Promise.all([
+      db.commitPatientImport({rows:parseCsv(csv),fileSha256:createHash('sha256').update(csv).digest('hex'),fileName:'synthetic-concurrent-numbering.csv',today:'2026-11-19',includePossibleDuplicates:false,actor:'synthetic-admin',actorRole:'admin'}),
+      db.createPatient(input('CONCURRENT WITH IMPORT')),
+    ]);
+    if(!imported.ok)throw new Error(imported.reason);
+    expect(imported.created).toHaveLength(1);
+    const fromImport=imported.created[0];
+    const numbers=[fromImport.patientNumber,ordinary.patientNumber];
+    expect(new Set(numbers).size).toBe(2);
+    expect(numbers).toContain('P-07000');
+    expect(numbers.every(n=>/^P-[0-9]{5,}$/.test(n) && Number(n.slice(2))>=7000 && Number(n.slice(2))<900000)).toBe(true);
+    expect((await db.getPatient(fromImport.id))?.note).toContain('رقم الملف في النظام القديم: 900000');
+    for(const n of numbers)expect((await db.searchPatients(n)).map(p=>p.patientNumber)).toContain(n);
+    expect((await q('SELECT count(*)::int AS n FROM patients')).rows[0].n).toBe(3);
+    await restart();
+    const next=await db.createPatient(input('AFTER CONCURRENT IMPORT'));
+    expect(Number(next.patientNumber.slice(2))).toBeGreaterThan(Math.max(...numbers.map(n=>Number(n.slice(2)))));
+    expect(Number(next.patientNumber.slice(2))).toBeLessThan(900000);
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
   it('equal and occupied unconsumed number is marked consumed, not allocated again', async () => {
     await q("INSERT INTO patients(patient_number,full_name) VALUES('P-07000','SYNTHETIC OCCUPIED TARGET')");
     await q("SELECT setval('patient_number_seq',7000,false)");await restart();
