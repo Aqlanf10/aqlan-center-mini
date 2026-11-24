@@ -82,7 +82,7 @@ export function QuickPatientModal({
     try {
       const res = await fetch("/api/patients", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": warningGuard.current.registrationKey.forBody(JSON.stringify(fields)) },
         body: JSON.stringify({ ...fields, confirmDuplicate }),
       });
       const payload = await res.json().catch(() => null);
@@ -104,6 +104,7 @@ export function QuickPatientModal({
         return;
       }
 
+      warningGuard.current.registrationKey.acknowledged();
       const familyWarning = await linkNewPatientToFamily(payload.id, family);
       setFamilyChoice(null);
       if (familyWarning) window.alert(familyWarning);
