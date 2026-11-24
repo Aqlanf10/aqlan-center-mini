@@ -13,6 +13,9 @@ export const dynamic = "force-dynamic";
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
+const receptionShiftDenied = () =>
+  NextResponse.json({ message: "تفاصيل الصندوق والورديات للإدارة والكاشير المخوّل فقط." }, { status: 403 });
+
 /** يقرأ ثلاثة مبالغ — واحدًا لكل عملة — ويرفض ما لا يُقرأ رقمًا. */
 function readAmounts(source: Record<string, unknown>, key: string): Record<Currency, number> | null {
   const raw = (source[key] ?? {}) as Record<string, unknown>;
@@ -30,6 +33,8 @@ function readAmounts(source: Record<string, unknown>, key: string): Record<Curre
 export async function GET() {
   const session = await requireSession();
   if (!session) return denied();
+  // P1 owner policy: patient-specific collection remains in /api/payments; no drawer access.
+  if (session.role === "reception") return receptionShiftDenied();
   /* صلاحيات الوكيل المساعد: الصندوق والورديات من «المالية المخفية» — الطبيب
      يراها بتصريح المدير فقط؛ والفتح والإغلاق يبقيان للإدارة والاستقبال. */
   if (session.role === "doctor") {
@@ -72,6 +77,8 @@ export async function GET() {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  // P1 owner policy: patient-specific collection remains in /api/payments; no drawer access.
+  if (session.role === "reception") return receptionShiftDenied();
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.operateShift)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
@@ -106,6 +113,8 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  // P1 owner policy: patient-specific collection remains in /api/payments; no drawer access.
+  if (session.role === "reception") return receptionShiftDenied();
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.operateShift)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }

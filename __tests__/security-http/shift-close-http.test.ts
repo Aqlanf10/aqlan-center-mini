@@ -7,7 +7,7 @@ import { authedMutation, baseUrl, harness } from "./_server";
  *
  * الجرد الأعمى: الخادم يحسب المتوقَّع لحظة الإقفال، فإن خالفه المعدود رفض برسالةٍ
  * عربية تكشف الفرق وتطلب سببه؛ ومع السبب يُقفَل ويُدقَّق بالمتوقَّع والفرق والسبب.
- * وتقرير الإقفال (Z) يُطبع للإدارة والاستقبال ولا يُفتح للطبيب.
+ * وتقرير الإقفال (Z) يُطبع للإدارة المخوّلة، ولا يُفتح للاستقبال أو الطبيب.
  */
 
 let h: Awaited<ReturnType<typeof harness>>;
@@ -38,11 +38,11 @@ afterAll(async () => {
   await db?.end();
 });
 
-const close = (body: unknown) => authedMutation("/api/shifts", h.sessions.reception, "PATCH", JSON.stringify(body));
+const close = (body: unknown) => authedMutation("/api/shifts", h.sessions.admin, "PATCH", JSON.stringify(body));
 
 describe("إقفال الوردية — جردٌ أعمى وفرقٌ لا يُقفَل بلا سبب", () => {
   it("GET يعرض الدرج بالقاعدة الواحدة (نقدٌ فقط)", async () => {
-    const response = await fetch(`${baseUrl}/api/shifts`, { headers: { cookie: h.sessions.reception.cookie } });
+    const response = await fetch(`${baseUrl}/api/shifts`, { headers: { cookie: h.sessions.admin.cookie } });
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.drawer?.expected).toBeTruthy();
@@ -76,13 +76,16 @@ describe("إقفال الوردية — جردٌ أعمى وفرقٌ لا يُق
     expect((audit.details["الفرق"] as Record<string, number>).YER).toBe(777);
   });
 
-  it("تقرير الإقفال (Z) يُطبع للاستقبال ولا يُفتح للطبيب", async () => {
-    const ok = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions.reception.cookie } });
+  it("تقرير الإقفال (Z) يُطبع للإدارة فقط ولا يُفتح للاستقبال أو الطبيب", async () => {
+    const ok = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions.admin.cookie } });
     expect(ok.status).toBe(200);
     const html = await ok.text();
     expect(html).toContain("تقرير إقفال الوردية");
     expect(html).toContain("مبلغ زائد تركه مريض");
-    const denied = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions.doctorA.cookie } });
-    expect(denied.status).toBe(404);
+    for (const role of ["doctorA", "reception"] as const) {
+      const denied = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions[role].cookie } });
+      expect(denied.status).toBe(404);
+      expect(await denied.text()).not.toContain("مبلغ زائد تركه مريض");
+    }
   });
 });
