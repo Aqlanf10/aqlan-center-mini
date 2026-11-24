@@ -60,6 +60,23 @@ describe("بطاقة المريض A6 (P0.11)", () => {
     ).rejects.toThrow();
   });
 
+  it("blocks a foreign patient card before reading identifiers, settings, or appointments", async () => {
+    mocks.canAccessPatient.mockResolvedValue(false);
+    await expect(PatientCardPage({ params: Promise.resolve({ id: "77" }) })).rejects.toThrow();
+    expect(mocks.canAccessPatient).toHaveBeenCalledWith(DOCTOR_A, 77);
+    expect(mocks.getPatient).not.toHaveBeenCalled();
+    expect(mocks.getSettingsSafe).not.toHaveBeenCalled();
+    expect(mocks.patientAppointmentsFrom).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before fetching private patient data when scope verification errors", async () => {
+    mocks.canAccessPatient.mockRejectedValue(new Error("synthetic scope lookup failed"));
+    await expect(PatientCardPage({ params: Promise.resolve({ id: "77" }) })).rejects.toThrow();
+    expect(mocks.getPatient).not.toHaveBeenCalled();
+    expect(mocks.getSettingsSafe).not.toHaveBeenCalled();
+    expect(mocks.patientAppointmentsFrom).not.toHaveBeenCalled();
+  });
+
   it("الاستقبال يفتح بطاقة أي مريض (سياسة المركز) — السلوك الطبيعي", async () => {
     mocks.requireSession.mockResolvedValue({ userId: 3, username: "reception1", role: "reception" });
     const result = await PatientCardPage({ params: Promise.resolve({ id: "77" }) });

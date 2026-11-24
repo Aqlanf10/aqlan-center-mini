@@ -276,7 +276,7 @@ describe("positive persisted print routes on the built app", () => {
       await expectFictionalPrintIdentity(page, name === "invoice");
       expect(unexpected).toEqual([]);
       const format = name === "invoice" ? "A4" : ["card", "patient-card", "voucher"].includes(name) ? "A6" : "A5";
-      const pdf = await page.pdf({ format, printBackground: true, preferCSSPageSize: true, displayHeaderFooter: false });
+      const pdf = await page.pdf({ ...(name === "patient-card" ? {} : { format }), printBackground: true, preferCSSPageSize: true, displayHeaderFooter: false });
       const pdfText = execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" });
       expectFictionalPdfIdentity(pdfText, name === "invoice");
       // Persist diagnostics only after DOM, logo and PDF identity checks.
