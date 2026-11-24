@@ -16410,6 +16410,28 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
+  // The archive number is a standalone sequence, not a SERIAL id. A retired
+  // allocation may have no corresponding row; reconstructing from MAX(id) or
+  // MAX(patient_number) can reissue a paper-file number after restoration.
+  if (tables.includes("patients")) {
+    const { rows: [presence] } = await pool.query(
+      "SELECT to_regclass('public.patient_number_seq') IS NOT NULL AS present",
+    );
+    if (presence?.present === true) {
+      const { rows: [archive] } = await pool.query(
+        "SELECT last_value::text AS last_value, is_called FROM public.patient_number_seq",
+      );
+      if (typeof archive?.last_value !== "string" || !/^[1-9]\d{0,18}$/.test(archive.last_value)
+          || BigInt(archive.last_value) > 9223372036854775807n || typeof archive.is_called !== "boolean") {
+        throw new Error("Invalid patient archive sequence state in backup");
+      }
+      const value = archive.last_value;
+      const called = archive.is_called ? "true" : "false";
+      // Preserve a higher target fence too. The target must be isolated from
+      // live writers during restore; sequence changes are not MVCC snapshots.
+      yield `SELECT setval('public.patient_number_seq'::regclass, GREATEST(last_value, ${value}::bigint), CASE WHEN last_value > ${value}::bigint THEN is_called WHEN last_value = ${value}::bigint THEN is_called OR ${called} ELSE ${called} END) FROM public.patient_number_seq;\n`;
+    }
+  }
   yield `COMMIT;\n`;
 }
 
