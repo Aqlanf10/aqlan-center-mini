@@ -49,7 +49,7 @@ describe("invoice reference readers through the built application", () => {
   it("resolves the recorded visit/item/plan and refuses sibling-plan and foreign-patient guesses without writes", async () => {
     const before = await snapshot(patientId);
     const path = `/api/patients/${patientId}/clinical-context`;
-    const exact = await authedGet(`${path}?visitId=${visitId}&planItemId=${itemId}`, h.sessions.reception);
+    const exact = await authedGet(`${path}?visitId=${visitId}&planItemId=${itemId}`, h.sessions.admin);
     expect(exact.status).toBe(200);
     expect(await exact.json()).toMatchObject({ context: { patientId, visitId, planId, planItemId: itemId } });
     const sibling = await authedGet(`${path}?visitId=${visitId}&planId=${siblingId}`, h.sessions.admin);
@@ -70,7 +70,7 @@ describe("invoice reference readers through the built application", () => {
   });
   it("reads a real invoice's exact plan item and currency without manufacturing receipts", async () => {
     const target = await patient();
-    const response = await authedMutation("/api/invoices", h.sessions.reception, "POST", JSON.stringify({
+    const response = await authedMutation("/api/invoices", h.sessions.admin, "POST", JSON.stringify({
       patientId: target, currency: "YER", idempotencyKey: randomUUID(), items: [{ serviceId, toothCode: 36 }],
     }));
     const created = await response.json(); expect(response.status, JSON.stringify(created)).toBe(201);
@@ -84,7 +84,7 @@ describe("invoice reference readers through the built application", () => {
   });
   it("reads historical 300000/120000 as one 180000 opening with no invoice or receipt", async () => {
     const target = await patient();
-    const response = await authedMutation(`/api/patients/${target}/legacy-treatments`, h.sessions.reception, "POST", JSON.stringify({
+    const response = await authedMutation(`/api/patients/${target}/legacy-treatments`, h.sessions.admin, "POST", JSON.stringify({
       serviceId, toothCode: 36, currency: "YER", agreedAmount: "300000", previouslyPaidAmount: "120000",
       historicalAsOf: "2026-09-30", idempotencyKey: randomUUID(),
     }));
@@ -98,15 +98,15 @@ describe("invoice reference readers through the built application", () => {
     expect(await snapshot(target)).toEqual(before);
   });
   it("does not grant financial access from clinical navigation or clinical access from finance roles", async () => {
-    for (const session of [h.sessions.reception, h.sessions.cashier, h.sessions.accountant]) {
+    for (const session of [h.sessions.cashier, h.sessions.accountant]) {
       const response = await authedGet(`/api/patients/${patientId}/treatment-financial-context`, session);
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ patientId, documents: [] });
     }
-    for (const session of [h.sessions.doctorA, h.sessions.portalA, { cookie: "", token: "" }]) {
+    for (const session of [h.sessions.reception, h.sessions.doctorA, h.sessions.portalA, { cookie: "", token: "" }]) {
       expect([401, 403]).toContain((await authedGet(`/api/patients/${patientId}/treatment-financial-context`, session)).status);
     }
-    for (const session of [h.sessions.cashier, h.sessions.accountant, h.sessions.portalA, { cookie: "", token: "" }]) {
+    for (const session of [h.sessions.reception, h.sessions.cashier, h.sessions.accountant, h.sessions.portalA, { cookie: "", token: "" }]) {
       expect([401, 403]).toContain((await authedGet(`/api/patients/${patientId}/clinical-context?planItemId=${itemId}`, session)).status);
     }
   });

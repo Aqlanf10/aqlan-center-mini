@@ -48,7 +48,7 @@ async function newPatient(label: string): Promise<number> {
 
 async function openInvoice(patientId: number, viewport = { width: 1280, height: 1100 }): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext({ viewport, locale: "ar-YE" });
-  const [name, ...value] = h.sessions.reception.cookie.split("=");
+  const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });

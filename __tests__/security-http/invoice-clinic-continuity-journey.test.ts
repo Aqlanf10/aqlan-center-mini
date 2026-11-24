@@ -85,12 +85,12 @@ async function open(who: Who, patientId: number, tab = "account") {
 async function close(context: BrowserContext) { await context.close(); contexts.delete(context); }
 
 async function invoiceDraft(patientId: number, category: Category, tooth: number | null) {
-  const view = await open("reception", patientId);
+  const view = await open("admin", patientId);
   const { page } = view;
   await page.getByTestId("treatment-entry-open").click();
   await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
   await page.getByTestId("invoice-row-0").getByLabel("الخدمة", { exact: true }).selectOption(String(services[category]));
-  // Explicit reception choice from the authorized catalogue, never inferred from the signer.
+  // Explicit billing choice from the authorized catalogue, never inferred from the signer.
   await page.getByTestId("invoice-provider-0").selectOption(String(doctorId));
   if (tooth === null) {
     await page.getByTestId("invoice-row-0").getByLabel("نطاق العلاج",{exact:true}).selectOption("both");
@@ -294,7 +294,7 @@ async function signOnce(patientId: number, visitId: number, expectedInvoices: nu
 
 async function collectThroughUi(patientId: number, target: Invoice, loseResponse = false) {
   const { context, page } = await open("reception", patientId);
-  await page.getByRole("button", { name: "قبض دفعة", exact: true }).click();
+  await page.getByRole("button", { name: "تسجيل تحصيل", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "تحصيل دفعة", exact: true });
   await dialog.getByLabel("فاتورة الهدف", { exact: true }).selectOption(String(target.id));
   await dialog.getByLabel("المبلغ", { exact: true }).fill(formatAmount(target.totalMinor - target.discountMinor, "YER"));
@@ -331,7 +331,9 @@ async function checkoutAndNext(patientId: number, visitId: number, nextId: numbe
   const before = await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId]);
   const checkout = await read<{ lines: { billingClass: string }[]; summary: { currency: string; currentBalanceMinor: number; dueNowMinor: number }[] }>(
     "reception", `/api/visits/${visitId}/walkout`);
-  expect(checkout.lines).toEqual([expect.objectContaining({ billingClass: "INCLUDED" })]);
+  expect(checkout.lines).toEqual([]);
+  const clinical = await read<{ lines: { billingClass: string }[] }>("admin", `/api/visits/${visitId}/walkout`);
+  expect(clinical.lines).toEqual([expect.objectContaining({ billingClass: "INCLUDED" })]);
   expect(checkout.summary.find((line) => line.currency === "YER")).toMatchObject({ currentBalanceMinor: 0, dueNowMinor: 0 });
   expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toEqual(before);
   expect(before).toHaveLength(expectedInvoices);
