@@ -245,6 +245,21 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
     expect((await db.createPatient(input('AFTER POOL RECONNECT'))).patientNumber).toBe('P-07001');
     expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
   });
+  it('database uniqueness rejects an explicit duplicate archive number without changing the issued file', async () => {
+    // Synthetic database only: verify the persistence boundary even if a writer
+    // bypasses createPatient and attempts to insert an already issued number.
+    const issued=await db.createPatient(input('ORIGINAL UNIQUE NUMBER'));
+    expect(issued.patientNumber).toBe('P-07000');
+    await expect(q('INSERT INTO patients(patient_number,full_name) VALUES($1,$2)',
+      [issued.patientNumber,'SYNTHETIC CONFLICTING ARCHIVE'])).rejects.toMatchObject({code:'23505'});
+    const rows=(await q('SELECT id,patient_number FROM patients WHERE patient_number=$1',[issued.patientNumber])).rows;
+    expect(rows).toHaveLength(1);
+    expect(String(rows[0].id)).toBe(String(issued.id));
+    await restart();
+    expect((await db.getPatient(issued.id))?.patientNumber).toBe('P-07000');
+    expect((await db.createPatient(input('AFTER DUPLICATE CONFLICT'))).patientNumber).toBe('P-07001');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
   it('equal and occupied unconsumed number is marked consumed, not allocated again', async () => {
     await q("INSERT INTO patients(patient_number,full_name) VALUES('P-07000','SYNTHETIC OCCUPIED TARGET')");
     await q("SELECT setval('patient_number_seq',7000,false)");await restart();
