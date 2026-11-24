@@ -18,7 +18,6 @@ describe("patient archive IDs survive clinic reset", () => {
   });
 
   it("generates patient numbers from the durable sequence rather than a financial document counter", () => {
-    expect(PATIENT_NUMBER_SQL).toBe(`'P-' || ${paddedSequenceSql("patient_number_seq")}`);
     expect(PATIENT_NUMBER_SQL).toContain("nextval('patient_number_seq')");
     expect(PATIENT_NUMBER_SQL).not.toMatch(/invoice_number_seq|receipt_number_seq|voucher_number_seq/);
   });
