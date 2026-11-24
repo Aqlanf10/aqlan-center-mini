@@ -109,14 +109,16 @@ describe.each(cases)("$method patient write authority", ({ method, permission, s
     expect(await response.json()).toMatchObject({ id: patient.id, fullName });
     expect(writer).toHaveBeenCalledTimes(1);
     if (method === "POST") {
-      expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ fullName }), false);
+      expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ fullName }), false,
+        expect.objectContaining({ actorId: session.userId, actor: session.username, opening: null }));
       expect(mocks.update).not.toHaveBeenCalled();
     } else {
       expect(mocks.owns).toHaveBeenCalledExactlyOnceWith(7, patient.id);
       expect(mocks.update).toHaveBeenCalledWith(patient.id, expect.objectContaining({ fullName }));
       expect(mocks.create).not.toHaveBeenCalled();
     }
-    expect(mocks.audit).toHaveBeenCalledTimes(1);
+    // POST includes its audit in the registration transaction. PATCH audits here.
+    expect(mocks.audit).toHaveBeenCalledTimes(method === "PATCH" ? 1 : 0);
     expect(mocks.opening).not.toHaveBeenCalled();
     expect(mocks.delete).not.toHaveBeenCalled();
   });

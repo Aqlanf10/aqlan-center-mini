@@ -171,6 +171,9 @@ describe.each(["inline","quick"] as const)("%s exact component handlers",kind=>{
     expect(requestBody(1)).toMatchObject({fullName:nameB,phone,confirmDuplicate:false});
     await tap(required(u.confirm()));await tick();
     expect(requestBody(2)).toMatchObject({fullName:nameB,phone,confirmDuplicate:true});
+    const key = (i: number) => new Headers(fetchMock.mock.calls[i][1].headers).get("Idempotency-Key");
+    expect(key(0)).not.toBe(key(1));
+    expect(key(1)).toBe(key(2));
     expect(fetchMock.mock.calls[3][0]).toBe("/api/families/13/members");
     expect(requestBody(3)).toEqual({patientId:92,role:null});
     expect(u.notify).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({id:92,patientNumber:"P-07092"}));
@@ -192,6 +195,9 @@ describe.each(["inline","quick"] as const)("%s exact component handlers",kind=>{
     expect(fetchMock).toHaveBeenCalledTimes(3);
     await u.submit();
     expect(fetchMock.mock.calls.map((_,i)=>requestBody(i).confirmDuplicate)).toEqual([false,false,true,false]);
+    const keys = fetchMock.mock.calls.map(([, init]) => new Headers(init.headers).get("Idempotency-Key"));
+    expect(keys[0]).toMatch(/^register:/);
+    expect(new Set(keys).size).toBe(1);
     expect(u.notify).not.toHaveBeenCalled();
   });
 
