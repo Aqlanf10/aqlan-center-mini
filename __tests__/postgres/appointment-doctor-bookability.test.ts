@@ -135,8 +135,12 @@ describe("selected appointment doctor must match the active-doctor picker", () =
   });
 
   it("validates the effective self-booking doctor rather than the ignored request doctor", async () => {
-    expect(await bookAppointment({ ...await input(), doctorId: activeDoctor }, {
-      ...actor, role: "doctor", doctorPartyId: inactiveDoctor,
+    const request = await input();
+    const username = "synthetic-inactive-provider";
+    await getPool().query("INSERT INTO users(username,display_name,password_hash,role,party_id) VALUES ($1,'Synthetic clinician','unused','doctor',$2)", [username, inactiveDoctor]);
+    await getPool().query("UPDATE patients SET primary_doctor_id=$1 WHERE id=$2", [inactiveDoctor, request.patientId]);
+    expect(await bookAppointment({ ...request, doctorId: activeDoctor }, {
+      ...actor, username, role: "doctor", doctorPartyId: inactiveDoctor,
     })).toMatchObject({ ok: false, status: 400 });
   });
 });

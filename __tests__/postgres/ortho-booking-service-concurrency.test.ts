@@ -172,6 +172,9 @@ describe("protected follow-up service admission is atomic with booking", () => {
 
   it("lets two different-day bookings hold compatible service read locks concurrently", async () => {
     const fixtures = [await fixture(), await fixture()];
+    // D..D+2 locks are intentionally shared by nearby dates. Exercise the service's
+    // independent read locks with disjoint booking windows.
+    fixtures[1].request.date = "2030-03-10";
     const blockers = [await external(), await external()];
     const bookings: Array<ReturnType<typeof observe<BookingResult>>> = [];
     try {
