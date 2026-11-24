@@ -118,6 +118,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       const body_ = body as Record<string, unknown>;
       const result = await rescheduleAppointment({
         appointmentId: id,
+      nearbyAppointmentConfirmation: typeof body_.nearbyAppointmentConfirmation === "string" ? body_.nearbyAppointmentConfirmation : null,
         date: String(body_.date ?? ""),
         time: String(body_.time ?? ""),
         durationMinutes: body_.durationMinutes == null ? null : Number(body_.durationMinutes),
@@ -130,7 +131,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         reason: bodyReason ?? "",
         overrideReason: typeof body_.overrideReason === "string" ? body_.overrideReason : null,
       }, {
-        username: session.username,
+        userId: session.userId, username: session.username,
         role: session.role,
         doctorPartyId: user?.partyId ?? null,
         /* صلاحيةُ التجاوز من المستخدم في الخادم لا من الطلب. */

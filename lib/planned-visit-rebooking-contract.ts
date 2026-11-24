@@ -52,6 +52,7 @@ export const PLANNED_REBOOK_REASONS = {
 export type PlannedRebookBlockReason = keyof typeof PLANNED_REBOOK_REASONS;
 
 export interface PlannedRebookIntent {
+  nearbyAppointmentConfirmation?: string;
   plannedVisitId: number;
   expectedAppointmentId: number;
   expectedGeneration: string;
@@ -63,7 +64,8 @@ export interface PlannedRebookIntent {
 export function parsePlannedRebookIntent(plannedVisitId: number, source: unknown): PlannedRebookIntent | null {
   if (!Number.isSafeInteger(plannedVisitId) || plannedVisitId <= 0 || plannedVisitId > 2147483647 || !source || typeof source !== "object" || Array.isArray(source)) return null;
   const input = source as Record<string, unknown>;
-  if (Object.keys(input).some(key => !["expectedAppointmentId", "expectedGeneration", "date", "time", "reason", "requestId"].includes(key))) return null;
+  if (Object.keys(input).some(key => !["expectedAppointmentId", "expectedGeneration", "date", "time", "reason", "requestId", "nearbyAppointmentConfirmation"].includes(key))) return null;
+  if (input.nearbyAppointmentConfirmation !== undefined && (typeof input.nearbyAppointmentConfirmation !== "string" || input.nearbyAppointmentConfirmation.length > 4096)) return null;
   const { expectedAppointmentId, expectedGeneration, date, time, reason, requestId } = input;
   if (typeof expectedAppointmentId !== "number" || !Number.isSafeInteger(expectedAppointmentId) || expectedAppointmentId <= 0 || expectedAppointmentId > 2147483647
     || typeof expectedGeneration !== "string" || !/^[a-f0-9]{32}$/.test(expectedGeneration)
@@ -73,5 +75,5 @@ export function parsePlannedRebookIntent(plannedVisitId: number, source: unknown
     || typeof requestId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{15,127}$/.test(requestId)) return null;
   const parsed = new Date(`${date}T00:00:00Z`);
   if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) return null;
-  return { plannedVisitId, expectedAppointmentId, expectedGeneration, date, time, reason: reason.trim(), requestId };
+  return { ...(typeof input.nearbyAppointmentConfirmation === "string" ? { nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation } : {}), plannedVisitId, expectedAppointmentId, expectedGeneration, date, time, reason: reason.trim(), requestId };
 }

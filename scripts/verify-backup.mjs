@@ -122,10 +122,15 @@ try {
 
   // P0-A: preserve a historical paper-file number and the new canonical floor.
   await db.getPool().query("INSERT INTO patients(patient_number,full_name) VALUES ('P-00042','SYNTHETIC HISTORICAL ARCHIVE')");
-  const patient = await db.createPatient({
+  const originalRequest = {
     fullName: "مريض تمرين الاستعادة", phone: "770001122", altPhone: null,
     gender: "male", birthYear: 1990, address: null, medicalAlert: null, note: null,
-  });
+  };
+  const command = { actor: "synthetic-registrar", actorId: 47, actorRole: "admin", key: "synthetic-restored-request",
+    opening: { currency: "SAR", amountMinor: 3700, asOfDate: "2025-03-20", note: null }, openingDateSpecified: true };
+  const registration = await db.createPatientWithDuplicateReview(originalRequest, true, command);
+  if (!registration.ok) throw new Error("synthetic registration refused");
+  const patient = registration.patient;
   // (PAT-3) The optional photo creates a patients ↔ patient_documents FK cycle.
   // Keep a real link in the drill so a restored row count alone cannot mask its loss.
   const { rows: [photo] } = await db.getPool().query(
@@ -261,6 +266,14 @@ try {
   await db.ensureSchema();
   const { rows: [historical] } = await db.getPool().query("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL ARCHIVE'");
   check("P0-A: historical P-00042 survives restore and startup", historical?.patient_number === "P-00042");
+  const replay = await db.createPatientWithDuplicateReview(originalRequest, false, command);
+  check("restored actor and request return the original registration", replay.ok && replay.patient.id === patient.id && replay.patient.patientNumber === patient.patientNumber);
+  const witness = await db.getPool().query(`SELECT
+      (SELECT count(*)::int FROM patient_opening_balance_history WHERE patient_id=$1 AND currency='SAR') AS histories,
+      (SELECT count(*)::int FROM audit_log WHERE entity='patient' AND entity_id=$2 AND action IN ('patient.create','opening_balance.set')) AS audits,
+      (SELECT amount_minor::text FROM patient_opening_balances WHERE patient_id=$1 AND currency='SAR') AS amount`,
+    [patient.id,String(patient.id)]);
+  check("restored replay leaves one opening history, two audit events and SAR 37", witness.rows[0].histories === 1 && witness.rows[0].audits === 2 && witness.rows[0].amount === "3700");
   const next = await db.createPatient({ fullName: "SYNTHETIC AFTER ARCHIVE RESTORE", phone: null, altPhone: null, gender: "unknown", birthYear: null, address: null, medicalAlert: null, note: null });
   check("P0-A: first new file after restore is P-07002", next.patientNumber === "P-07002");
   check("P0-A: restored file is searchable by canonical number", (await db.searchPatients("P-07000")).some(row => row.patientNumber === "P-07000"));

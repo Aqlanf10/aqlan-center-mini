@@ -2,7 +2,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { LabOrder } from "../../lib/lab";
 import { PATIENT_LAB_QUERY_MONEY, seedPatientLabQuery } from "../fixtures/patient-lab-query";
-import { authedGet, baseUrl, harness, TEST_USERS, type Session } from "./_server";
+import { authedGet, authedMutation, baseUrl, harness, TEST_USERS, type Session } from "./_server";
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
@@ -30,6 +30,7 @@ beforeAll(async () => {
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
   fixture = await seedPatientLabQuery((sql, values) => db.query(sql, values), `HTTP-PATIENT-LAB-QUERY-${Date.now()}`);
+  await db.query("UPDATE patients SET primary_doctor_id = (SELECT party_id FROM users WHERE username=$1) WHERE id=$2", [TEST_USERS.doctorA.username, fixture.targetPatientId]);
   beforeReads = await snapshot();
 }, 120_000);
 
@@ -89,9 +90,11 @@ describe("patient lab query through the built HTTP application", () => {
     const path = queryPath(fixture.targetPatientId);
     const admin = await list(path);
     const reception = await list(path, h.sessions.reception);
-    expect(reception).toEqual(admin);
+    expect(reception.orders.map(row => row.id)).toEqual(admin.orders.map(row => row.id));
+    for (const row of reception.orders) for (const key of ["costMinor","costCurrency","baseAmountMinor","exchangeRate","expenseAccountCode","isPosted"]) expect(row).not.toHaveProperty(key);
     const doctor = await list(path, h.sessions.doctorA);
-    expect(doctor).toEqual({ ...admin, orders: admin.orders.map((order) => ({ ...order, costMinor: null, costCurrency: null })) });
+    expect(doctor).toEqual(reception);
+    expect((await list(queryPath(fixture.otherPatientId), h.sessions.doctorA)).orders).toEqual([]);
   });
 
   it("preserves explicit doctor cost-price permission without modifying the read policy", async () => {
@@ -104,10 +107,28 @@ describe("patient lab query through the built HTTP application", () => {
         [TEST_USERS.doctorA.username, JSON.stringify({ ...permissions, canViewCostPrices: true })]);
       const path = queryPath(fixture.targetPatientId);
       expect(await list(path, h.sessions.doctorA)).toEqual(await list(path));
+      expect((await list(queryPath(fixture.otherPatientId), h.sessions.doctorA)).orders).toEqual([]);
     } finally {
       await db.query(`UPDATE users SET permissions = $2::jsonb WHERE username = $1`,
         [TEST_USERS.doctorA.username, user.permissions]);
     }
+  });
+
+  it("filters history by patient, price grant and the visibility of batch settlements", async () => {
+    const id = fixture.targetOrderIds[0];
+    await db.query(`INSERT INTO lab_order_tracking(lab_order_id, action, notes, actor) VALUES
+      ($1,'quality_check','synthetic shade A2','fixture'), ($1,'accounting_posted','synthetic ledger','fixture'),
+      ($1,'financial_settlement','synthetic whole voucher','fixture')`, [id]);
+    const events = (order: number, session: Session) => authedMutation(
+      `/api/lab/${order}`, session, "PATCH", JSON.stringify({ action: "events" }));
+    expect((await events(id, h.sessions.reception)).status).toBe(403);
+    expect((await events(fixture.unrelatedOrderIds[0], h.sessions.doctorA)).status).toBe(404);
+    const clinical = await events(id, h.sessions.doctorA);
+    expect(clinical.status).toBe(200);
+    const body = await clinical.json();
+    expect(body.events.map((event: { notes: string }) => event.notes)).toEqual(["synthetic shade A2"]);
+    const admin = await events(id, h.sessions.admin);
+    expect((await admin.json()).events).toHaveLength(3);
   });
 
   it("keeps unauthenticated, portal, cashier, and accountant admission unchanged", async () => {

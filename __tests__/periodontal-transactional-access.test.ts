@@ -1,3 +1,4 @@
+import { classifyStaffPermissionEnvelope } from "../lib/staff-permission-envelope";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,8 +95,8 @@ function ownerFunctions() {
   const js = ts.transpile(chunks, { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None });
   const query = vi.fn().mockResolvedValue({ rows: [] }); const ensure = vi.fn(); const getPool = vi.fn(() => ({ query }));
   const date = vi.fn(() => "2026-10-06");
-  const owners = new Function("ensureSchema", "getPool", "toUser", "CLINIC_TIME_ZONE", "clinicDateString",
-    `${js};return {${names.join(",")}}`)(ensure, getPool, (row: unknown) => row, "Asia/Aden", date) as {
+  const owners = new Function("classifyStaffPermissionEnvelope", "ensureSchema", "getPool", "toUser", "CLINIC_TIME_ZONE", "clinicDateString",
+    `${js};return {${names.join(",")}}`)(classifyStaffPermissionEnvelope, ensure, getPool, (row: unknown) => row, "Asia/Aden", date) as {
       findUserByUsername: (name: string, client?: DbClient) => Promise<unknown>;
       doctorOwnsPatient: (party: number, patient: number, client?: DbClient) => Promise<boolean>;
       patientHasVisitToday: (patient: number, client?: DbClient) => Promise<boolean>;

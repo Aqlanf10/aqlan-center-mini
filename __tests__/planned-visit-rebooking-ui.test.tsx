@@ -6,6 +6,10 @@ type Slot = { value?: unknown; deps?: unknown[]; cleanup?: () => void };
 type Frame = { slots: Slot[]; cursor: number; effects: (() => void)[] };
 const runtime = vi.hoisted(() => ({ frame: null as Frame | null }));
 // Repository-standard hook harness: invoke real handlers without a browser or a DB.
+// This component harness owns synthetic hook slots. The mounted dialog and cancellation use their dedicated React suite.
+vi.mock("../components/useNearbyBooking", () => ({ useNearbyBooking: () => ({
+  bookingFetch: (url: string, init: RequestInit) => fetch(url, init), nearbyBookingDialog: null,
+}) }));
 vi.mock("react", async original => {
   const react = await original<typeof import("react")>();
   const slot = () => { const f = runtime.frame!; const i = f.cursor++; return f.slots[i] ?? (f.slots[i] = {}); };

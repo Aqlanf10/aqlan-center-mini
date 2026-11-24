@@ -1,4 +1,5 @@
 "use client";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CURRENCY_LABEL, formatMoney, isCurrency } from "@/lib/money";
@@ -109,6 +110,7 @@ function OwnedCheckoutExtras({ canPrintWalkout, visitId, expectedPatientId, fina
   const [date, setDate] = useState(() => suggestedDate ?? addDays(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), 28));
   const [time, setTime] = useState("10:00");
   const [booked, setBooked] = useState<string | null>(null);
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([visitId, expectedPatientId, date, time, durationMinutes]));
 
   useEffect(() => {
     mounted.current = true;
@@ -168,7 +170,7 @@ function OwnedCheckoutExtras({ canPrintWalkout, visitId, expectedPatientId, fina
     command.current = true;
     setBusy(true);
     try {
-      const response = await fetch(`/api/visits/${visitId}/next`, {
+      const response = await bookingFetch(`/api/visits/${visitId}/next`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date, time, durationMinutes: durationMinutes ?? 30 }),
       });
@@ -231,6 +233,7 @@ function OwnedCheckoutExtras({ canPrintWalkout, visitId, expectedPatientId, fina
 
   return (
     <div className="mt-3 space-y-2">
+      {nearbyBookingDialog}
       {!walkout ? <p role="status" className="text-xs font-bold text-slate-500">ملخص المغادرة غير متحقق؛ لا تُستنتج منه حالة تغطية أو مبلغ للتحصيل.</p> : null}
       {/* (P0-G) «أُنجز اليوم» بتصنيف الخادم لكل سطر — لا حساب فوترة في الواجهة. */}
       {walkout && (walkout.lines.length > 0 || walkout.orthoAdjustment) ? (

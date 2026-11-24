@@ -9,6 +9,8 @@ import { clinicDateString, type Appointment } from "@/lib/schedule";
 import { bookAppointment } from "@/lib/book-appointment";
 import { requireSession } from "@/lib/session";
 
+import { canAccessPatient } from "@/lib/patient-access";
+
 export const dynamic = "force-dynamic";
 
 const denied = () =>
@@ -90,10 +92,18 @@ export async function POST(request: Request) {
   try {
     /* التجاوز يُقرأ من المستخدم في القاعدة لا من الجلسة: الجلسة كوكي، والصلاحية
        قرارٌ يُغيَّر من شاشة المستخدمين فيسري فورًا لا بعد خروجٍ ودخول. */
+    const patientId = Number(source.patientId);
+    if (!Number.isSafeInteger(patientId) || patientId <= 0) {
+      return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
+    }
+    if (!await canAccessPatient(session, patientId)) {
+      return NextResponse.json({ message: "غير مصرّح بحجز موعد لهذا المريض." }, { status: 403 });
+    }
     const actor = await findUserByUsername(session.username).catch(() => null);
     /* بابٌ واحد للحجز — هو نفسه الذي يمرّ منه الوكيل الذكي. */
     const result = await bookAppointment({
-      patientId: Number(source.patientId),
+      patientId,
+      nearbyAppointmentConfirmation: text("nearbyAppointmentConfirmation", 4096),
       date: typeof source.date === "string" ? source.date : "",
       time: typeof source.time === "string" ? source.time : "",
       durationMinutes: source.durationMinutes == null ? null : Number(source.durationMinutes),
@@ -106,7 +116,7 @@ export async function POST(request: Request) {
       overrideReason: text("overrideReason", 300),
       isNewPatient: source.isNewPatient === true,
     }, {
-      username: session.username,
+      username: session.username, userId: session.userId,
       role: session.role,
       doctorPartyId: actor?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null),
       canOverrideCapacity: actor?.permissions?.canOverrideCapacity === true,
@@ -116,7 +126,7 @@ export async function POST(request: Request) {
     if (!result.ok) {
       return result.status === 409
         ? NextResponse.json(result.conflict, { status: 409 })
-        : NextResponse.json({ message: result.message }, { status: 400 });
+        : NextResponse.json({ message: result.message }, { status: result.status });
     }
     /* تنبيهٌ لا خطأ: الموعد حُجز، والاستقبال تُخبَر لتتأكّد قبل أن تَعِد المريض. */
     return NextResponse.json(

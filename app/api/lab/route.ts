@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { createLabOrder, findUserByUsername, getSettings, labCounts, listLabNames, listLabOrders, listLabServices, listParties, recordAudit } from "@/lib/db";
-import { DEFAULT_LAB_DAYS, PENDING_LAB_NAME, labToothInputProblem, parseLabTeeth } from "@/lib/lab";
+import { clinicalLabOrder, DEFAULT_LAB_DAYS, PENDING_LAB_NAME, labToothInputProblem, parseLabTeeth } from "@/lib/lab";
 import { LabOrderPricingConflict } from "@/lib/lab-order-pricing";
 import { canDoctorViewCostPrices } from "@/lib/doctor-permissions";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
@@ -37,26 +37,29 @@ export async function GET(request: Request) {
 
   /* صلاحيات الوكيل المساعد: أسعار تكلفة المعامل من «المالية المخفية» — تُحجب
      عن الطبيب ما لم يصرّح المدير. الطلب نفسه يبقى مرئيًا: مسار العمل سريري. */
-  let hideCosts = false;
-  if (session.role === "doctor") {
-    const user = await findUserByUsername(session.username).catch(() => null);
-    if (!canDoctorViewCostPrices(user?.permissions, session.role)) hideCosts = true;
+  if (!["admin", "doctor", "reception"].includes(session.role)) {
+    return NextResponse.json({ message: "غير مصرّح بقراءة أعمال المختبر." }, { status: 403 });
   }
-
+  const doctor = session.role === "doctor" ? await findUserByUsername(session.username).catch(() => null) : null;
+  const ownScope = session.role === "doctor" && doctor?.permissions?.canViewAllPatients !== true;
+  if (session.role === "doctor" && (!doctor || (ownScope && !doctor.partyId))) {
+    return NextResponse.json({ message: "تعذّر التحقق من نطاق الطبيب." }, { status: 403 });
+  }
+  const scopeDoctorPartyId = ownScope ? doctor?.partyId ?? undefined : undefined;
+  const filters = { ...(scopeDoctorPartyId ? { scopeDoctorPartyId } : {}), ...(patientFilter === null ? {} : { patientId: patientFilter }) };
+  const showCosts = session.role === "admin" || (session.role === "doctor" && canDoctorViewCostPrices(doctor?.permissions));
   try {
     if (summaryOnly) {
-      return NextResponse.json(await labCounts());
+      return NextResponse.json(scopeDoctorPartyId ? await labCounts(undefined, scopeDoctorPartyId) : await labCounts());
     }
     const [rawOrders, labs, labServices] = await Promise.all([
       patientOutOfRange
         ? Promise.resolve([])
-        : listLabOrders(patientFilter !== null ? { patientId: patientFilter } : undefined),
+        : listLabOrders(scopeDoctorPartyId || patientFilter !== null ? filters : undefined),
       listLabNames(),
       withServices ? listLabServices() : Promise.resolve([]),
     ]);
-    const orders = hideCosts
-      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null }))
-      : rawOrders;
+    const orders = showCosts ? rawOrders : rawOrders.map(clinicalLabOrder);
     return NextResponse.json({ orders, labs, ...(withServices ? { labServices } : {}) });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل أعمال المختبر." }, { status: 500 });
@@ -205,6 +208,7 @@ export async function POST(request: Request) {
       if (serviceProblem) return NextResponse.json({ message: serviceProblem }, { status: 400 });
     }
     const created = await createLabOrder({
+      session,
       patientId, labName, labPhone, workType, details, sentDate, dueDate, note,
       partyId, costMinor, costCurrency, baseCurrency: base, exchangeRate,
       createdBy: session.username,
@@ -254,8 +258,11 @@ export async function POST(request: Request) {
       },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(created, { status: 201 });
+    const costs = session.role === "admin" || (session.role === "doctor" && canDoctorViewCostPrices((await findUserByUsername(session.username))?.permissions));
+    return NextResponse.json(costs ? created : clinicalLabOrder(created), { status: 201 });
+
   } catch (error) {
+    if ((error as Error).message === "LAB_PATIENT_SCOPE_DENIED") return NextResponse.json({ message: "الملف غير متاح." }, { status: 403 });
     if (error instanceof LabOrderPricingConflict) {
       return NextResponse.json({ code: error.code, message: error.message }, { status: 409 });
     }

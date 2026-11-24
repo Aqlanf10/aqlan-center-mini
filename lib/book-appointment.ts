@@ -1,3 +1,4 @@
+import { nearbyPatientBookingWarning, type NearbyPatientAppointment } from "./nearby-patient-booking";
 /**
  * حجز الموعد — الباب الوحيد.
  *
@@ -15,7 +16,7 @@ import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "./or
 import { APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE, lockBookableAppointmentDoctor } from "./appointment-doctor";
 import type { Role } from "./roles";
 import {
-  getAppointment, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
+  doctorOwnsPatient, findUserByUsername, getAppointment, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
   writeAppointmentAcrossDays, writeAppointmentInDay, type DbClient,
 } from "./db";
 import {
@@ -30,8 +31,15 @@ import {
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_PATTERN = /^\d{1,2}:\d{2}$/;
 
+function bookingProposalScope(kind: string, input: object): string {
+  return JSON.stringify([kind, Object.fromEntries(Object.entries(input)
+    .filter(([key]) => key !== "nearbyAppointmentConfirmation")
+    .sort(([a], [b]) => a.localeCompare(b)))]);
+}
+
 /** من يحجز — إنسانٌ موثَّق دائمًا، ولو كانت يدُه وكيلًا ذكيًّا. */
 export interface BookingActor {
+  userId?: number;
   username: string;
   role: Role | string | null | undefined;
   /** جهة الطبيب حين يكون الفاعل طبيبًا — يُسجّل موعده على نفسه. */
@@ -42,7 +50,17 @@ export interface BookingActor {
   channel: "ui" | "ai" | "portal" | "visit";
 }
 
+/** Recheck the clinician's existing relationship before an appointment can itself establish one. */
+async function admitsBookingDoctor(actor: BookingActor, patientId: number, client: DbClient): Promise<boolean> {
+  if (actor.role !== "doctor") return true;
+  const doctor = await findUserByUsername(actor.username, client);
+  if (!doctor?.isActive || doctor.role !== "doctor" || !doctor.partyId || doctor.partyId !== actor.doctorPartyId
+    || (actor.userId !== undefined && actor.userId !== doctor.id)) return false;
+  return doctor.permissions?.canViewAllPatients === true || await doctorOwnsPatient(doctor.partyId, patientId, client);
+}
+
 export interface BookAppointmentInput {
+  nearbyAppointmentConfirmation?: string | null;
   patientId: number;
   date: string;
   time: string;
@@ -68,6 +86,9 @@ export interface BookAppointmentInput {
 }
 
 export interface BookingConflict {
+  kind?: "nearby_patient_appointments";
+  nearbyAppointments?: NearbyPatientAppointment[];
+  confirmationToken?: string;
   message: string;
   state: CapacityVerdict["state"];
   reasons: string[];
@@ -94,7 +115,7 @@ export type BookingResult =
       /** تنبيهٌ لا خطأ — الحجز تمّ والمستخدم يُخبَر ليتأكّد قبل أن يَعِد المريض. */
       warning: string | null;
     }
-  | { ok: false; status: 400; message: string }
+  | { ok: false; status: 400 | 403; message: string }
   | { ok: false; status: 409; conflict: BookingConflict };
 
 /** صلاحية التجاوز تُشتقّ من المستخدم لا من القناة — والوكيل الذكي قناة. */
@@ -186,6 +207,9 @@ export function patientOverlap(
  * والحكمُ واحد — وإلا صار لكلِّ بابٍ محرّكُ سعةٍ خاصّ به وعاد الازدحام من أوسعها.
  */
 export async function judgeBookingInDay(input: {
+  bookingActor?: string;
+  bookingScope?: string;
+  nearbyAppointmentConfirmation?: string | null;
   sameDay: Appointment[];
   client: DbClient;
   date: string;
@@ -251,6 +275,27 @@ export async function judgeBookingInDay(input: {
     };
   }
 
+  // Acknowledgement is never a capacity or overlap override. Only ask after
+  // those existing guards admit this proposal, and re-read on every attempt.
+  if (input.patientId !== null && (verdict.state !== "OVER_CAPACITY"
+    || (input.canOverride && input.overrideReason.trim().length >= 3))) {
+    const warning = await nearbyPatientBookingWarning(input.client, {
+      actor: input.bookingActor ?? "", scope: input.bookingScope ?? "booking",
+      patientId: input.patientId, date: input.date, time: input.time,
+      durationMinutes: input.durationMinutes, serviceId: input.service?.id ?? null,
+      doctorId: input.providerId ?? null, chairNo: input.chairNo ?? null,
+      excludeId: input.excludeId ?? null,
+    }, input.nearbyAppointmentConfirmation);
+    if (warning) {
+      const message = "للمريض موعد قائم في يوم الحجز المقترح أو خلال اليومين التاليين. هل الموعد الإضافي مقصود؟";
+      return { ok: false, verdict, conflict: {
+        ...warning, message, state: verdict.state, reasons: [message],
+        dayPercent: verdict.dayPercent, canOverride: false,
+        overrideHint: "ألغِ المحاولة أو أكّد أن الموعد الإضافي مقصود.",
+        suggestion: null, suggestionMessage: "",
+      } };
+    }
+  }
   if (verdict.state !== "OVER_CAPACITY") return { ok: true, verdict, overridden: false };
 
   /* التجاوز حقٌّ موثَّق: صلاحيةٌ **وسبب**. وغيابُ أيّهما رفضٌ لا استثناء — وهذا
@@ -367,12 +412,16 @@ export async function bookAppointment(
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
   const state: {
     verdict: CapacityVerdict | null; overridden: boolean;
-    followupServiceRejected: boolean; doctorRejected: boolean;
-  } = { verdict: null, overridden: false, followupServiceRejected: false, doctorRejected: false };
+    followupServiceRejected: boolean; accessDenied: boolean; doctorRejected: boolean;
+  } = { verdict: null, overridden: false, followupServiceRejected: false, accessDenied: false, doctorRejected: false };
 
   const result = await writeAppointmentInDay({
     date: input.date,
     judge: async (sameDay, client) => {
+      if (!await admitsBookingDoctor(actor, patientId, client)) {
+        state.accessDenied = true;
+        return { ok: false as const, conflict: null };
+      }
       if (input.bookingIntent === "ortho_follow_up") {
         // Existing order: day advisory lock, then this service row. The row lock
         // lasts through capacity, insertion and owner commit/rollback, so a
@@ -391,6 +440,8 @@ export async function bookAppointment(
         return { ok: false as const, conflict: null };
       }
       const judged = await judgeBookingInDay({
+        bookingActor: JSON.stringify([actor.userId, actor.username]), bookingScope: bookingProposalScope("create", input),
+        nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation,
         sameDay, client, date: input.date, time: input.time, durationMinutes,
         service, context, providerId: doctorId, chairNo,
         isNewPatient: input.isNewPatient ?? false,
@@ -425,6 +476,7 @@ export async function bookAppointment(
 
   if (!result.ok) {
     if (state.followupServiceRejected) return { ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE };
+    if (state.accessDenied) return { ok: false, status: 403, message: "غير مصرّح بحجز موعد لهذا المريض." };
     if (state.doctorRejected) return { ok: false, status: 400, message: APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE };
     return { ok: false, status: 409, conflict: result.conflict as BookingConflict };
   }
@@ -460,6 +512,7 @@ export async function bookAppointment(
 /* ── إعادة الجدولة ──────────────────────────────────────────────────────── */
 
 export interface RescheduleInput {
+  nearbyAppointmentConfirmation?: string | null;
   appointmentId: number;
   date: string;
   time: string;
@@ -475,7 +528,7 @@ export interface RescheduleInput {
 
 export type RescheduleResult =
   | { ok: true; appointment: Appointment; verdict: CapacityVerdict; overridden: boolean; warning: string | null }
-  | { ok: false; status: 400 | 404 | 409; message: string; conflict?: BookingConflict };
+  | { ok: false; status: 400 | 403 | 404 | 409; message: string; conflict?: BookingConflict };
 
 /**
  * نقلُ موعدٍ إلى وقتٍ آخر — عبر محرّك السعة نفسه، لا بابًا ثانيًا.
@@ -564,18 +617,24 @@ export async function rescheduleAppointment(
 
   const canOverride = actorCanOverride(actor);
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
-  const state: { verdict: CapacityVerdict | null; overridden: boolean; doctorRejected: boolean } =
-    { verdict: null, overridden: false, doctorRejected: false };
+  const state: { verdict: CapacityVerdict | null; overridden: boolean; accessDenied: boolean; doctorRejected: boolean } =
+    { verdict: null, overridden: false, accessDenied: false, doctorRejected: false };
 
   const result = await writeAppointmentAcrossDays({
     fromDate: current.scheduledDate,
     toDate: input.date,
     judge: async (targetDay, client) => {
+      if (!await admitsBookingDoctor(actor, current.patientId, client)) {
+        state.accessDenied = true;
+        return { ok: false as const, conflict: null };
+      }
       if (!await lockBookableAppointmentDoctor(client, doctorId)) {
         state.doctorRejected = true;
         return { ok: false as const, conflict: null };
       }
       const judged = await judgeBookingInDay({
+        bookingActor: JSON.stringify([actor.userId, actor.username]), bookingScope: bookingProposalScope("move", input),
+        nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation,
         sameDay: targetDay, client, date: input.date, time: input.time,
         durationMinutes, service, context, providerId: doctorId, chairNo,
         /* الموعد لا يزاحم نفسه. */
@@ -612,6 +671,7 @@ export async function rescheduleAppointment(
   });
 
   if (!result.ok) {
+    if (state.accessDenied) return { ok: false, status: 403, message: "غير مصرّح بحجز موعد لهذا المريض." };
     if (state.doctorRejected) return { ok: false, status: 400, message: APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE };
     return {
       ok: false, status: 409,

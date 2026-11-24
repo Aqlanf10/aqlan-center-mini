@@ -2964,6 +2964,19 @@ async function resolveVisitPatientDetailed(
   return { patientId, created };
 }
 
+/** Resolve the same patient the next-session writer will use, under its visit
+ * lock and the caller's day transaction. Rejection rolls back any new file/link.
+ * This closes the walk-in (patient_id NULL, existing phone) warning bypass. */
+export async function prepareNextSessionPatient(
+  client: DbClient, input: { visitId: number; phone: string | null },
+): Promise<number | null> {
+  const { rows } = await client.query<{
+    id: number; patient_name: string; patient_phone: string | null; patient_id: number | null;
+  }>(`SELECT id, patient_name, patient_phone, patient_id FROM visits WHERE id = $1 FOR UPDATE`, [input.visitId]);
+  if (!rows[0]) return null;
+  return resolveVisitPatient(client, rows[0], input.phone ?? rows[0].patient_phone);
+}
+
 export async function createNextSession(
   input: {
     visitId: number;
@@ -4418,10 +4431,14 @@ export async function writeAppointmentInDay<T>(input: {
   try {
     await client.query("BEGIN");
     await input.beforeLocks?.(client);
-    await client.query(
-      `SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))`,
-      [input.date],
-    );
+    // Lock the whole forward warning window before reading. Adjacent-day
+    // bookings share a lock, so confirmation snapshots cannot miss a concurrent
+    // committed appointment. Sorted order matches cross-day rescheduling.
+    for (const date of [input.date, addDays(input.date, 1), addDays(input.date, 2)]) {
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext('appointments-day:' || $1))`, [date],
+      );
+    }
     const { rows } = await client.query<AppointmentRow>(
       `${APPOINTMENT_SELECT} WHERE a.scheduled_date = $1 ORDER BY a.scheduled_time`,
       [input.date],
@@ -4467,9 +4484,9 @@ export async function writeAppointmentAcrossDays<T>(input: {
   commit: (client: DbClient) => Promise<T>;
 }): Promise<{ ok: true; value: T } | { ok: false; conflict: unknown }> {
   await ensureSchema();
-  const keys = input.fromDate === input.toDate
-    ? [input.fromDate]
-    : [input.fromDate, input.toDate].sort();
+  const keys = [...new Set([
+    input.fromDate, input.toDate, addDays(input.toDate, 1), addDays(input.toDate, 2),
+  ])].sort();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -6127,6 +6144,7 @@ const LAB_SELECT = `
  * الفلاتر (المختبرات V2) اختيارية — بلاها سلوك الشاشة اليومية كما كان.
  */
 export async function listLabOrders(filters?: {
+  scopeDoctorPartyId?: number;
   status?: string;
   patientId?: number;
   doctorId?: number;
@@ -6158,17 +6176,19 @@ export async function listLabOrders(filters?: {
   }
 
   const hasFilters = conditions.length > 0;
-  const whereClause = hasFilters ? `WHERE ${conditions.join(" AND ")}` : "";
+  if (filters?.scopeDoctorPartyId) {
+    conditions.push(DOCTOR_PATIENT_CONDITION.replaceAll("patients.id", "l.patient_id").replaceAll(":doc", `$${idx++}`));
+    params.push(filters.scopeDoctorPartyId);
+  }
   // النافذة اليومية (بلا فلاتر): المفتوح + ما رُكّب خلال شهر — أداة عمل لا أرشيف.
-  const openWindow = !hasFilters
-    ? `WHERE (l.status IN ('needed', 'sent', 'in_progress', 'received', 'remake')
-            OR l.delivered_at > NOW() - INTERVAL '30 days')`
-    : "";
+  if (!hasFilters) conditions.push(`(l.status IN ('needed', 'sent', 'in_progress', 'received', 'remake')
+            OR l.delivered_at > NOW() - INTERVAL '30 days')`);
+  const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const limitClause = `LIMIT ${filters?.limit ? Math.min(filters.limit, 500) : 300}`;
 
   const { rows } = await getPool().query<LabOrderRow>(
     `${LAB_SELECT}
-      ${whereClause} ${openWindow}
+      ${whereClause}
       ORDER BY l.due_date ASC, l.id DESC
       ${limitClause}`,
     params,
@@ -6662,6 +6682,7 @@ export async function addLabOrderTracking(
  */
 export async function createLabOrder(input: {
   patientId: number;
+  session?: import("./auth").SessionPayload;
   labName: string;
   labPhone: string | null;
   workType: string;
@@ -6704,6 +6725,9 @@ export async function createLabOrder(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    if (input.session && !await (await import("./patient-access")).canAccessPatient(input.session, input.patientId, undefined, client, "nowait")) {
+      throw new Error("LAB_PATIENT_SCOPE_DENIED");
+    }
 
     // الربط المالي: المختبر جهةٌ محاسبية — إن أُرسل الطلب باسم مختبرٍ بلا جهة،
     // نبحث عنها، فإن لم توجد وُلدت جهة جديدة بلا مخاطبة ولا حسابات مخصصة.
@@ -7282,6 +7306,7 @@ export async function setLabOrderStatus(
   id: number,
   status: LabOrderStatus,
   context?: {
+    session?: import("./auth").SessionPayload;
     actor?: string;
     actorRole?: string | null;
     notes?: string | null;
@@ -7311,16 +7336,23 @@ export async function setLabOrderStatus(
     // قفل الصف أولًا: قراءة الحالة والمال معًا بلا سباق — ضغطتان متزامنتان
     // لن تمرّا كلتاهما من بوابة الحالة، والالتزام لا يُولد مرتين.
     const { rows: currentRows } = await client.query<{
-      status: string; party_id: number | null; cost_minor: string | null;
+      patient_id: number; status: string; party_id: number | null; cost_minor: string | null;
       cost_currency: string | null; base_amount_minor: string | null;
       payable_id: number | null; work_type: string; details: string | null;
       due_date: Date;
     }>(
-      `SELECT status, party_id, cost_minor, cost_currency, base_amount_minor, payable_id,
+      `SELECT patient_id, status, party_id, cost_minor, cost_currency, base_amount_minor, payable_id,
               work_type, details, due_date
          FROM lab_orders WHERE id = $1 FOR UPDATE`,
       [id],
     );
+    const session = context?.session;
+    if (session && currentRows[0] && !await (await import("./patient-access")).canAccessPatient(session, currentRows[0].patient_id, undefined, client, "nowait")) {
+      throw new Error("LAB_PATIENT_SCOPE_DENIED");
+    }
+    if (session && status === "cancelled" && currentRows[0] && currentRows[0].status !== "needed" && session.role !== "admin") {
+      throw new Error("LAB_PATIENT_SCOPE_DENIED");
+    }
     if (!currentRows[0] || !allowedFrom[status].includes(currentRows[0].status)) {
       await client.query("ROLLBACK");
       return null;
@@ -7573,20 +7605,21 @@ export async function setLabOrderDueDate(
   id: number,
   dueDate: string,
   actor = "system",
+  session?: import("./auth").SessionPayload,
 ): Promise<LabOrder | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<{ id: number }>(
-    `UPDATE lab_orders SET due_date = $2::date
-      WHERE id = $1 AND status IN ('sent', 'needed') RETURNING id`,
-    [id, dueDate],
-  );
-  if (!rows[0]) return null;
-  await addLabOrderTracking(
-    id, "due_date_change", null, null,
-    `تأجيل موعد التسليم إلى ${dueDate}`, actor, null,
-  );
-  const { rows: full } = await getPool().query<LabOrderRow>(`${LAB_SELECT} WHERE l.id = $1`, [id]);
-  return full[0] ? toLabOrder(full[0]) : null;
+  return withTransaction(getPool(), async client => {
+    const { rows: [order] } = await client.query<{ patient_id: number }>("SELECT patient_id FROM lab_orders WHERE id=$1 FOR UPDATE", [id]);
+    if (!order) return null;
+    if (session && !await (await import("./patient-access")).canAccessPatient(session, order.patient_id, undefined, client, "nowait")) {
+      throw new Error("LAB_PATIENT_SCOPE_DENIED");
+    }
+    const result = await client.query("UPDATE lab_orders SET due_date=$2::date WHERE id=$1 AND status IN ('sent','needed')", [id, dueDate]);
+    if (!result.rowCount) return null;
+    await addLabOrderTracking(id, "due_date_change", null, null, `تأجيل موعد التسليم إلى ${dueDate}`, actor, session?.role, client);
+    const { rows } = await client.query<LabOrderRow>(`${LAB_SELECT} WHERE l.id=$1`, [id]);
+    return rows[0] ? toLabOrder(rows[0]) : null;
+  });
 }
 
 /**
@@ -7687,7 +7720,7 @@ export async function deleteLabOrder(
  * وثلاثون صفًّا في الجدول، ويصير حِملًا بلا سبب بعد سنة — والعدّ هنا لا يحتاج صفًّا
  * واحدًا في الذاكرة. «اليوم» بتوقيت العيادة لا بـUTC، وإلا حُسب عمل يستحق غدًا متأخرًا.
  */
-export async function labCounts(options?: { mode: "workflow"; today: string }): Promise<{
+export async function labCounts(options?: { mode: "workflow"; today: string }, scopeDoctorPartyId?: number): Promise<{
   outstanding: number; late: number; dueToday: number; waitingFitting: number;
 }> {
   await ensureSchema();
@@ -7703,8 +7736,8 @@ export async function labCounts(options?: { mode: "workflow"; today: string }): 
        count(*) FILTER (WHERE ${outstanding} AND due_date < ${today})::int AS late,
        count(*) FILTER (WHERE ${outstanding} AND due_date = ${today})::int AS due_today,
        count(*) FILTER (WHERE status = 'received')::int AS waiting_fitting
-     FROM lab_orders`,
-    [workflow ? options.today : CLINIC_TIME_ZONE],
+     FROM lab_orders l ${scopeDoctorPartyId ? "WHERE " + DOCTOR_PATIENT_CONDITION.replaceAll("patients.id", "l.patient_id").replaceAll(":doc", "$2") : ""}`,
+    [workflow ? options.today : CLINIC_TIME_ZONE, ...(scopeDoctorPartyId ? [scopeDoctorPartyId] : [])],
   );
   return {
     outstanding: Number(rows[0].outstanding),

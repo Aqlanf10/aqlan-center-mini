@@ -1,4 +1,5 @@
 "use client";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
@@ -46,6 +47,7 @@ export default function RequestsPage() {
   const [date, setDate] = useState(todayLocal());
   const [time, setTime] = useState("10:00");
   const [duration, setDuration] = useState(30);
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([openId, date, time, duration]));
   const [confirmed, setConfirmed] = useState<{ id: number; link: string | null } | null>(null);
   const inFlight = useRef(false);
 
@@ -85,7 +87,7 @@ export default function RequestsPage() {
     inFlight.current = true;
     setBusy(true);
     try {
-      const response = await fetch(`/api/booking-requests/${request.id}`, {
+      const response = await bookingFetch(`/api/booking-requests/${request.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "confirm", date, time, durationMinutes: duration }),
@@ -145,6 +147,7 @@ export default function RequestsPage() {
 
   return (
     <main className="mx-auto max-w-3xl p-4 pb-24">
+      {nearbyBookingDialog}
       <PageHeader
         title="طلبات المرضى"
         subtitle="وصلت من صفحة الحجز، الأقدم أولًا"

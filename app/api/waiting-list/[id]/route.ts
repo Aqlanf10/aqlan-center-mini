@@ -172,13 +172,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       const user = await findUserByUsername(session.username).catch(() => null);
       const result = await convertWaitingToAppointment({
         waitingId: id, date, time,
+      nearbyAppointmentConfirmation: typeof body.nearbyAppointmentConfirmation === "string" ? body.nearbyAppointmentConfirmation : null,
         durationMinutes: body.durationMinutes == null ? null : Number(body.durationMinutes),
         serviceId: body.serviceId == null ? null : Number(body.serviceId),
         doctorId: body.doctorId == null ? null : Number(body.doctorId),
         chairNo: body.chairNo == null ? null : Number(body.chairNo),
         overrideReason: typeof body.overrideReason === "string" ? body.overrideReason : null,
       }, {
-        username: session.username,
+        userId: session.userId, username: session.username,
         role: session.role,
         doctorPartyId: user?.partyId ?? null,
         /* صلاحيةُ التجاوز تُقرأ من المستخدم في الخادم — لا من الطلب. */

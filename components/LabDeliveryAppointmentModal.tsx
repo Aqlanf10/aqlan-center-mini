@@ -1,4 +1,5 @@
 "use client";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import React, { useState } from "react";
 import { type LabOrder, type LabOrderClinicalDTO } from "@/lib/lab";
@@ -46,6 +47,7 @@ export function LabDeliveryAppointmentModal({
   const [error, setError] = useState<string | null>(null);
   const [bookedSuccess, setBookedSuccess] = useState(false);
 
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([order.id, order.patientId, isOpen, date, time, appointmentType, duration, note]));
   if (!isOpen) return null;
 
   /* رقم واتساب معياري: الأرقام المحلية القصيرة تُسبق ببادئة الدولة كما في بقية
@@ -72,7 +74,7 @@ export function LabDeliveryAppointmentModal({
     setError(null);
 
     try {
-      const res = await fetch("/api/appointments", {
+      const res = await bookingFetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -113,6 +115,7 @@ export function LabDeliveryAppointmentModal({
       }}
     >
       <div className="relative my-6 w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 shadow-2xl transition-all">
+      {nearbyBookingDialog}
         {/* Header with visual badge */}
         <div className="mb-4 flex items-start justify-between border-b border-slate-100 pb-3.5">
           <div className="flex items-center gap-3">

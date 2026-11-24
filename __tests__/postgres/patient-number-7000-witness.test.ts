@@ -36,10 +36,21 @@ beforeEach(async () => {
 afterEach(async () => {
   await db?.resetPoolForTesting();
   if (!/^aqlan_number_witness_[a-f0-9]{32}$/.test(name)) throw new Error('Not an owned fixture');
-  if (createdDatabase) await admin(`DROP DATABASE "${name}" WITH (FORCE)`);
+  if (createdDatabase) {
+    // A parallel entry point can release a separate idle pool after the test.
+    // Never force-terminate a session that is still returning its result.
+    const deadline = Date.now() + 35_000;
+    for (;;) {
+      try { await admin(`DROP DATABASE "${name}"`); break; }
+      catch (error) {
+        if ((error as { code?: string }).code !== '55006' || Date.now() >= deadline) throw error;
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+    }
+  }
   if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL=originalDatabaseUrl;
   if (originalTestDatabaseUrl === undefined) delete process.env.TEST_DATABASE_URL; else process.env.TEST_DATABASE_URL=originalTestDatabaseUrl;
-});
+}, 40_000);
 
 describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => {
   it('fresh initialization leaves P-07000 pending without an external reseed', async () => {

@@ -1,4 +1,5 @@
 "use client";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -123,6 +124,7 @@ export default function FlowBoard() {
   const [nextTime, setNextTime] = useState("10:00");
   const [nextDuration, setNextDuration] = useState(30);
   const [nextPhone, setNextPhone] = useState("");
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([justFinished?.id, nextDate, nextTime, nextDuration, nextPhone]));
   const [nextBooked, setNextBooked] = useState<{ link: string | null; whenText: string } | null>(null);
   /*
    * التنبيهات الصوتية للعيادة — نغمات مولّدة عبر Web Audio API بلا ملفات صوت.
@@ -485,7 +487,7 @@ export default function FlowBoard() {
     inFlight.current = true;
     setBusy(true);
     try {
-      const response = await fetch(`/api/visits/${justFinished.id}/next`, {
+      const response = await bookingFetch(`/api/visits/${justFinished.id}/next`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -519,6 +521,7 @@ export default function FlowBoard() {
 
   return (
     <main className="mx-auto max-w-5xl p-4 pb-24">
+      {nearbyBookingDialog}
       {/*
         العنوان سطرًا والروابط سطرًا تحته.
         كانت الروابط بجانب العنوان، فلمّا صارت أربعة انكسر اسم المركز إلى أربعة أسطر

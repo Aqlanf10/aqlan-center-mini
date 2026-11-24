@@ -1,4 +1,5 @@
 "use client";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { useEffect, useId, useRef, useState } from "react";
 import {
@@ -105,6 +106,7 @@ export function QuickAppointmentModal({
   const [overrideReason, setOverrideReason] = useState("");
   /* الرفض بلا وجهةٍ يعني مريضًا ضاع. فمن رُدّ يُكتب في قائمة الانتظار من
      اللوحة نفسها التي ردّته — لا من شاشةٍ أخرى يُنسى الانتقال إليها. */
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([patientId, isOpen, newPatientCreated || !selectedPatientId ? patientQuery : selectedPatientId, date, time, duration, appointmentType, note, selectedDoctorId, selectedServiceId, chairNo, overrideReason]));
   const [waitingBusy, setWaitingBusy] = useState(false);
   const [waitingNote, setWaitingNote] = useState<string | null>(null);
   /* خطوةُ التفضيلات — تُفتح بالضغط على «أضِف إلى قائمة الانتظار».
@@ -374,7 +376,7 @@ export function QuickAppointmentModal({
         }
       }
 
-      const res = await fetch("/api/appointments", {
+      const res = await bookingFetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -448,6 +450,7 @@ export function QuickAppointmentModal({
 
   return (
     <Modal onClose={onClose} labelledBy={`${formId}-title`} busy={busy} initialFocus="input">
+      {nearbyBookingDialog}
       {/* Include conflict/override and search-result controls as well as the form.
           Native disabling prevents pointer and keyboard edits during both writes. */}
       <fieldset

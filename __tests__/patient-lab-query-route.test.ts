@@ -80,29 +80,29 @@ describe("patient lab GET canonical query boundary", () => {
     },
   );
 
-  it.each(["admin", "reception"])("preserves the %s currency/cost projection", async (role) => {
-    boundary.requireSession.mockResolvedValue({ username: "synthetic-reader", role });
-    const response = await GET(request("?patientId=101"));
-    expect((await response.json()).orders).toEqual(orders);
-    expect(boundary.findUserByUsername).not.toHaveBeenCalled();
+  const clinical = orders.map(({ id, patientId, status }) => ({ id, patientId, status }));
+
+  it("limits reception to operational and clinical rows without money fields", async () => {
+    boundary.requireSession.mockResolvedValue({ username: "synthetic-desk", role: "reception" });
+    expect((await (await GET(request("?patientId=101"))).json()).orders).toEqual(clinical);
   });
 
-  it.each([false, true])("preserves doctor cost visibility = %s", async (canViewCostPrices) => {
+  it.each([false, true])("scopes a doctor to their patients with cost grant %s", async (canViewCostPrices) => {
     boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor" });
-    boundary.findUserByUsername.mockResolvedValue({ permissions: { canViewCostPrices } });
+    boundary.findUserByUsername.mockResolvedValue({ partyId: 77, permissions: { canViewCostPrices } });
     const response = await GET(request("?patientId=101"));
-    expect(boundary.listLabOrders).toHaveBeenCalledExactlyOnceWith({ patientId: 101 });
-    expect((await response.json()).orders).toEqual(canViewCostPrices
-      ? orders : orders.map((order) => ({ ...order, costMinor: null, costCurrency: null })));
-    // This bounded fix preserves the existing two-field mask; it does not redesign financial DTOs.
-    expect(orders.map((order) => order.costCurrency)).toEqual(["USD", "SAR", "YER"]);
+    expect(boundary.listLabOrders).toHaveBeenCalledExactlyOnceWith({ patientId: 101, scopeDoctorPartyId: 77 });
+    expect((await response.json()).orders).toEqual(canViewCostPrices ? orders : clinical);
+    await GET(request("?summary=1"));
+    expect(boundary.labCounts).toHaveBeenCalledExactlyOnceWith(undefined, 77);
   });
 
-  it("keeps doctor costs masked when the user lookup fails", async () => {
+  it("refuses the read before orders or counts when the clinician lookup fails", async () => {
     boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor" });
-    boundary.findUserByUsername.mockRejectedValue(new Error("Synthetic lookup failure"));
-    expect((await (await GET(request("?patientId=101"))).json()).orders)
-      .toEqual(orders.map((order) => ({ ...order, costMinor: null, costCurrency: null })));
+    boundary.findUserByUsername.mockRejectedValue(new Error("synthetic"));
+    expect((await GET(request("?patientId=101"))).status).toBe(403);
+    expect(boundary.listLabOrders).not.toHaveBeenCalled();
+    expect(boundary.labCounts).not.toHaveBeenCalled();
   });
 
   it("retains unauthenticated admission without reads", async () => {

@@ -1,10 +1,12 @@
+import { canAccessPatient } from "@/lib/patient-access";
+import { visibleLabOrderEvents } from "@/lib/lab-event-visibility";
 import { labClinicalEditProblem, parseLabClinicalSnapshot } from "@/lib/lab-clinical-edit";
 import { parseLabShadeSpecification } from "@/lib/lab-shades";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  deleteLabOrder,
+  findUserByUsername, deleteLabOrder,
   getLabOrderById,
   getSettings,
   labOrderEvents,
@@ -19,7 +21,7 @@ import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { isCurrency, parseAmount, type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 import { rateFromSettings } from "@/lib/settings";
-import type { LabOrderStatus } from "@/lib/lab";
+import { clinicalLabOrder, type LabOrder, type LabOrderStatus } from "@/lib/lab";
 import { isLabAccountingRate } from "@/lib/lab-accounting-edit";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +51,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const source = (body ?? {}) as Record<string, unknown>;
 
   try {
+    const orderResponse = async (order: LabOrder) => {
+      const costs = session.role === "admin" || (session.role === "doctor" && (await findUserByUsername(session.username))?.permissions?.canViewCostPrices === true);
+      return NextResponse.json(costs ? order : clinicalLabOrder(order));
+    };
     if (source.action === "update_clinical") {
       if (!["admin", "doctor", "reception"].includes(session.role)) return NextResponse.json({ message: "غير مصرح بتصحيح الإرسالية." }, { status: 403 });
       const clinical = parseLabClinicalSnapshot(source.clinical);
@@ -81,8 +87,21 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
     /* سجل أحداث الطلب (المختبرات V2) — قبل أي تغيير أو بدونه عند الطلب المجرد. */
     if (source.action === "events") {
-      const events = await labOrderEvents(id);
-      return NextResponse.json({ events });
+      if (session.role !== "admin" && session.role !== "doctor") {
+        return NextResponse.json({ message: "سجل المختبر السريري للطبيب المخوّل والإدارة." }, { status: 403 });
+      }
+      const order = await getLabOrderById(id);
+      if (!order || !await canAccessPatient(session, order.patientId)) {
+        return NextResponse.json({ message: "الإرسالية غير متاحة." }, { status: 404 });
+      }
+      const admin = session.role === "admin";
+      const permissions = admin ? null : (await findUserByUsername(session.username))?.permissions;
+      const events = visibleLabOrderEvents(await labOrderEvents(id), {
+        costs: admin || permissions?.canViewCostPrices === true,
+        expenses: admin || permissions?.canViewExpenses === true,
+        allPatients: admin || permissions?.canViewAllPatients === true,
+      });
+      return NextResponse.json({ events }, { headers: { "Cache-Control": "private, no-store" } });
     }
 
     /* إجراءات الربط المحاسبي والترحيل النهائي (بنود المصروفات): تحديث البند
@@ -163,21 +182,21 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!updated) {
         return NextResponse.json({ message: "أمر المختبر غير موجود." }, { status: 404 });
       }
-      return NextResponse.json(updated);
+      return await orderResponse(updated);
     }
 
     if (typeof source.dueDate === "string") {
       if (!DATE_PATTERN.test(source.dueDate)) {
         return NextResponse.json({ message: "تاريخ غير صالح." }, { status: 400 });
       }
-      const updated = await setLabOrderDueDate(id, source.dueDate);
+      const updated = await setLabOrderDueDate(id, source.dueDate, session.username, session);
       if (!updated) {
         return NextResponse.json(
           { message: "لا يمكن تأجيل عمل وصل أو أُلغي." },
           { status: 409 },
         );
       }
-      return NextResponse.json(updated);
+      return await orderResponse(updated);
     }
 
     const status = typeof source.status === "string" ? source.status : "";
@@ -197,6 +216,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       }
     }
     const updated = await setLabOrderStatus(id, status as LabOrderStatus, {
+      session,
       actor: session.username,
       actorRole: session.role,
       notes: typeof source.note === "string" && source.note.trim() ? source.note.trim().slice(0, 300) : null,
@@ -225,9 +245,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actorRole: session.role,
       });
     }
-    return NextResponse.json(updated);
+    return await orderResponse(updated);
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
+    if (code === "LAB_PATIENT_SCOPE_DENIED") return NextResponse.json({ message: "الإرسالية غير متاحة." }, { status: 403 });
     if (code === "lab_order_accounting_price_invalid") return NextResponse.json({ code, message: "التكلفة المعدّلة يجب أن تكون مبلغًا موجبًا؛ لا يمكن مسح الالتزام المالي من هذا الإجراء." }, { status: 400 });
     const accountingConflicts: Record<string, string> = {
       lab_order_accounting_settled: "للإرسالية أثر سداد؛ لا يمكن تغيير بياناتها المالية. راجع التسوية المحاسبية دون تعديل المدفوعات السابقة.",
