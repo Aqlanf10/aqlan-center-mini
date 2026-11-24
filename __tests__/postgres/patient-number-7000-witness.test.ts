@@ -4,6 +4,7 @@ import { beforeEach, afterEach, describe, expect, it } from 'vitest';
 import { stubPostgresEnv } from './_setup';
 import { validatePostgresTestTarget } from './_safe-target';
 import { PATIENT_NUMBER_SQL } from '../../lib/document-numbers';
+import { patientNumberBackupSql } from '../../lib/patient-number-backup-sql';
 import { RESET_SEQUENCES } from '../../lib/clinic-reset';
 import { parseCsv } from '../../lib/patient-import';
 
@@ -147,6 +148,140 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
     expect(a).not.toBeNull();expect((await db.getPatient(a!.patientId))?.patientNumber).toBe('P-07000');
     expect(await db.confirmBookingRequest({id:request.id,date:'2026-11-19',time:'12:00',durationMinutes:30})).toBeNull();
     expect((await db.createPatient(input('AFTER BOOKING'))).patientNumber).toBe('P-07001');
+  });
+  it('concurrent ordinary, walk-in and booking file creation share a unique archive counter even on replay', async () => {
+    const visit=await db.addVisit({patientName:'SYNTHETIC MIXED WALK IN',patientPhone:null,note:null});
+    const request=await db.createBookingRequest({fullName:'SYNTHETIC MIXED BOOKING',phone:'999900002',reason:null,preferredDate:null,preferredPeriod:'any'},'synthetic-mixed-numbering');
+    const booking={id:request.id,date:'2026-11-19',time:'12:00',durationMinutes:30};
+    const [ordinary,walk,book]=await Promise.all([
+      db.createPatient(input('MIXED ORDINARY')),
+      db.openVisitPatientFile(visit.id),
+      db.confirmBookingRequest(booking),
+    ]);
+    if(!walk.ok || !book)throw new Error('Synthetic mixed entry failed');
+    const walkPatient=await db.getPatient(walk.patientId);
+    const bookPatient=await db.getPatient(book.patientId);
+    expect(walkPatient).not.toBeNull();expect(bookPatient).not.toBeNull();
+    const numbers=[ordinary.patientNumber,walkPatient!.patientNumber,bookPatient!.patientNumber];
+    expect(new Set(numbers).size).toBe(3);
+    expect(numbers.every(n=>/^P-[0-9]{5,}$/.test(n))).toBe(true);
+    expect(numbers).toContain('P-07000');
+    for(const n of numbers)expect((await db.searchPatients(n)).map(p=>p.patientNumber)).toContain(n);
+
+    // A lost response may be retried after the original write committed.
+    const [walkReplay,bookReplay]=await Promise.all([
+      db.openVisitPatientFile(visit.id),db.confirmBookingRequest(booking),
+    ]);
+    if(!walkReplay.ok)throw new Error('Synthetic walk-in replay failed');
+    expect(walkReplay.patientId).toBe(walk.patientId);expect(walkReplay.created).toBe(false);
+    expect(bookReplay).toBeNull();
+    expect((await q('SELECT count(*)::int AS n FROM patients')).rows[0].n).toBe(4);
+    await restart();
+    const next=await db.createPatient(input('AFTER MIXED REPLAY'));
+    const issuedHigh=Math.max(...numbers.map(n=>Number(n.slice(2))));
+    expect(Number(next.patientNumber.slice(2))).toBeGreaterThan(issuedHigh);
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
+  it('simultaneous replay of the same walk-in and booking cannot create a second archive file', async () => {
+    const visit=await db.addVisit({patientName:'SYNTHETIC SAME WALK IN',patientPhone:null,note:null});
+    const request=await db.createBookingRequest({fullName:'SYNTHETIC SAME BOOKING',phone:'999900003',reason:null,preferredDate:null,preferredPeriod:'any'},'synthetic-same-numbering');
+    const booking={id:request.id,date:'2026-11-19',time:'12:00',durationMinutes:30};
+    const [walkA,walkB,bookA,bookB]=await Promise.all([
+      db.openVisitPatientFile(visit.id),db.openVisitPatientFile(visit.id),
+      db.confirmBookingRequest(booking),db.confirmBookingRequest(booking),
+    ]);
+    if(!walkA.ok || !walkB.ok)throw new Error('Synthetic concurrent walk-in failed');
+    expect(walkA.patientId).toBe(walkB.patientId);
+    expect([walkA.created,walkB.created].filter(Boolean)).toHaveLength(1);
+    const booked=bookA ?? bookB;
+    expect([bookA,bookB].filter(Boolean)).toHaveLength(1);
+    if(!booked)throw new Error('Synthetic concurrent booking failed');
+    expect(booked.patientId).not.toBe(walkA.patientId);
+    const walkPatient=await db.getPatient(walkA.patientId);
+    const bookPatient=await db.getPatient(booked.patientId);
+    if(!walkPatient || !bookPatient)throw new Error('Synthetic archived patient missing');
+    const numbers=[walkPatient.patientNumber,bookPatient.patientNumber];
+    expect(new Set(numbers).size).toBe(2);
+    expect(numbers.every(n=>/^P-[0-9]{5,}$/.test(n))).toBe(true);
+    expect((await q('SELECT count(*)::int AS n FROM patients')).rows[0].n).toBe(3);
+    await restart();
+    const next=await db.createPatient(input('AFTER SAME REQUEST RACE'));
+    expect(Number(next.patientNumber.slice(2))).toBeGreaterThan(Math.max(...numbers.map(n=>Number(n.slice(2)))));
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
+  it('concurrent CSV import and ordinary registration share the archive counter, not the external number', async () => {
+    // Distinct synthetic names: the old fixture shared all three name tokens
+    // with ordinary registration, triggering the intended possible-duplicate filter.
+    const csv='الاسم,الهاتف,رقم الملف\nSYNTHETIC CSV ARCHIVE ALPHA,,900000';
+    const [imported,ordinary]=await Promise.all([
+      db.commitPatientImport({rows:parseCsv(csv),fileSha256:createHash('sha256').update(csv).digest('hex'),fileName:'synthetic-concurrent-numbering.csv',today:'2026-11-19',includePossibleDuplicates:false,actor:'synthetic-admin',actorRole:'admin'}),
+      db.createPatient(input('CONCURRENT WITH IMPORT')),
+    ]);
+    if(!imported.ok)throw new Error(imported.reason);
+    expect(imported.created).toHaveLength(1);
+    const fromImport=imported.created[0];
+    const numbers=[fromImport.patientNumber,ordinary.patientNumber];
+    expect(new Set(numbers).size).toBe(2);
+    expect(numbers).toContain('P-07000');
+    expect(numbers.every(n=>/^P-[0-9]{5,}$/.test(n) && Number(n.slice(2))>=7000 && Number(n.slice(2))<900000)).toBe(true);
+    expect((await db.getPatient(fromImport.id))?.note).toContain('رقم الملف في النظام القديم: 900000');
+    for(const n of numbers)expect((await db.searchPatients(n)).map(p=>p.patientNumber)).toContain(n);
+    expect((await q('SELECT count(*)::int AS n FROM patients')).rows[0].n).toBe(3);
+    await restart();
+    const next=await db.createPatient(input('AFTER CONCURRENT IMPORT'));
+    expect(Number(next.patientNumber.slice(2))).toBeGreaterThan(Math.max(...numbers.map(n=>Number(n.slice(2)))));
+    expect(Number(next.patientNumber.slice(2))).toBeLessThan(900000);
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
+  it('a fresh database pool preserves the issued high-water and historical archive identifiers', async () => {
+    // Unlike restart() alone, this closes the old application pool and reconnects.
+    // It is not a physical backup restore or a full process restart.
+    const issued=await db.createPatient(input('BEFORE POOL RECONNECT'));
+    expect(issued.patientNumber).toBe('P-07000');
+    const before=(await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0];
+    expect(before).toEqual({last_value:'7000',is_called:true});
+    await db.resetPoolForTesting();
+    await restart();
+    expect((await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0]).toEqual(before);
+    expect((await db.getPatient(issued.id))?.patientNumber).toBe(issued.patientNumber);
+    expect((await db.searchPatients(issued.patientNumber)).map(p=>p.patientNumber)).toContain(issued.patientNumber);
+    expect((await db.createPatient(input('AFTER POOL RECONNECT'))).patientNumber).toBe('P-07001');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
+  it('database uniqueness rejects an explicit duplicate archive number without changing the issued file', async () => {
+    // Synthetic database only: verify the persistence boundary even if a writer
+    // bypasses createPatient and attempts to insert an already issued number.
+    const issued=await db.createPatient(input('ORIGINAL UNIQUE NUMBER'));
+    expect(issued.patientNumber).toBe('P-07000');
+    await expect(q('INSERT INTO patients(patient_number,full_name) VALUES($1,$2)',
+      [issued.patientNumber,'SYNTHETIC CONFLICTING ARCHIVE'])).rejects.toMatchObject({code:'23505'});
+    const rows=(await q('SELECT id,patient_number FROM patients WHERE patient_number=$1',[issued.patientNumber])).rows;
+    expect(rows).toHaveLength(1);
+    expect(String(rows[0].id)).toBe(String(issued.id));
+    await restart();
+    expect((await db.getPatient(issued.id))?.patientNumber).toBe('P-07000');
+    expect((await db.createPatient(input('AFTER DUPLICATE CONFLICT'))).patientNumber).toBe('P-07001');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
+  it('older backup cursor cannot rewind a newer consumed archive number on the same target', async () => {
+    // Cursor replay only, against the owned synthetic database. An old full
+    // backup restored to an empty target still needs an external high-water.
+    const first=await db.createPatient(input('BEFORE OLD CURSOR SNAPSHOT'));
+    expect(first.patientNumber).toBe('P-07000');
+    const old=(await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0];
+    const newer=await db.createPatient(input('AFTER OLD CURSOR SNAPSHOT'));
+    expect(newer.patientNumber).toBe('P-07001');
+    // Model another issued/reserved number without a surviving patient row.
+    expect((await q("SELECT nextval('patient_number_seq')::text AS number")).rows[0].number).toBe('7002');
+    const before=(await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0];
+    await q(patientNumberBackupSql(old.last_value,old.is_called));
+    await q(patientNumberBackupSql(before.last_value,false));
+    expect((await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0]).toEqual(before);
+    await restart();
+    expect((await db.getPatient(first.id))?.patientNumber).toBe('P-07000');
+    expect((await db.getPatient(newer.id))?.patientNumber).toBe('P-07001');
+    expect((await db.createPatient(input('AFTER OLD CURSOR REPLAY'))).patientNumber).toBe('P-07003');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
   });
   it('equal and occupied unconsumed number is marked consumed, not allocated again', async () => {
     await q("INSERT INTO patients(patient_number,full_name) VALUES('P-07000','SYNTHETIC OCCUPIED TARGET')");
