@@ -29,7 +29,7 @@ vi.mock("@/lib/db", () => ({
   browsePatients: mocks.browse,
   deletePatientCascade: mocks.delete,
 }));
-import { POST } from "../app/api/patients/route";
+import { GET, POST } from "../app/api/patients/route";
 import { PATCH } from "../app/api/patients/[id]/route";
 
 const session: SessionPayload = {
@@ -272,5 +272,49 @@ describe("POST patient creation route boundary", () => {
     expect(response.status).toBe(401);
     expect(req.bodyUsed).toBe(false);
     expectNoWrites();
+  });
+});
+
+describe("patient collection cache boundary", () => {
+  it.each(["?q=Synthetic", ""])("keeps receptionist GET responses private and administrative: %s", async (query) => {
+    mocks.session.mockResolvedValue({ ...session, role: "reception" });
+    const clinical = { ...patient, note: "synthetic clinical note", medicalAlert: "synthetic alert" };
+    mocks.search.mockResolvedValue([clinical]);
+    mocks.browse.mockResolvedValue({ rows: [clinical], total: 1 });
+    const response = await GET(new Request("http://test.invalid/api/patients" + query));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    const body = await response.json();
+    const rows = query ? body : body.rows;
+    expect(rows).toEqual([{ id: patient.id, patientNumber: patient.patientNumber, fullName: patient.fullName, phone: patient.phone }]);
+  });
+
+  it("marks successful creation and unauthorized reads as private", async () => {
+    const created = await POST(request("POST"));
+    expect(created.status).toBe(201);
+    expect(created.headers.get("Cache-Control")).toBe("private, no-store");
+    mocks.session.mockResolvedValue(null);
+    const denied = await GET(new Request("http://test.invalid/api/patients"));
+    expect(denied.status).toBe(401);
+    expect(denied.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+
+  it.each([["malformed", 400], ["oversized", 413]])("marks %s body errors as private before writes", async (mode, status) => {
+    const req = new Request("http://test.invalid/api/patients", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(mode === "oversized" ? { "content-length": "999999999" } : {}) },
+      body: "{",
+    });
+    const response = await POST(req);
+    expect(response.status).toBe(status);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expectNoWrites();
+  });
+
+  it("marks search failures as private", async () => {
+    mocks.search.mockRejectedValue(new Error("synthetic search failure"));
+    const response = await GET(new Request("http://test.invalid/api/patients?q=Synthetic"));
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
   });
 });
