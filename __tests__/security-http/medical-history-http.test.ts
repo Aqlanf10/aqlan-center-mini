@@ -3,7 +3,7 @@ import { Client } from "pg";
 import { authedGet, authedMutation, harness } from "./_server";
 
 /**
- * (PAT-2) التاريخ الطبي والعلامات الحيوية عبر المسار الحقيقي: الاستقبال والمدير يعبّئان،
+ * (PAT-2) التاريخ الطبي والعلامات الحيوية عبر المسار الحقيقي: المدير والطبيب المخوّل فقط يعبّئان،
  * الأدوار المالية لا ترى شيئًا طبيًّا، والطبيب يرى مرضاه فقط، والمستحيل يُرفض بالعربية.
  */
 
@@ -22,10 +22,23 @@ beforeAll(async () => {
 afterAll(async () => { await db?.end(); });
 
 describe("(PAT-2) /api/patients/[id]/medical-history and /vitals", () => {
-  it("reception fills the questionnaire; the file then shows derived alerts and no review due", async () => {
-    const before = await (await authedGet(`/api/patients/${patientId}/medical-history`, h.sessions.reception)).json() as { review: { due: boolean } };
+  it("denies reception clinical history and vitals GET/POST with synthetic fixture, preserving financial scope elsewhere", async () => {
+    for (const part of ["medical-history", "vitals"]) {
+      const path = `/api/patients/${patientId}/${part}`;
+      const read = await authedGet(path, h.sessions.reception);
+      expect(read.status).toBe(403);
+      expect(read.headers.get("Cache-Control")).toBe("private, no-store");
+      expect((await read.text())).not.toContain("بنسلين");
+      const write = await authedMutation(path, h.sessions.reception, "POST", JSON.stringify({ pulse: 70 }));
+      expect(write.status).toBe(403);
+      expect(write.headers.get("Cache-Control")).toBe("private, no-store");
+    }
+  });
+
+  it("admin fills the questionnaire; the file then shows derived alerts and no review due", async () => {
+    const before = await (await authedGet(`/api/patients/${patientId}/medical-history`, h.sessions.admin)).json() as { review: { due: boolean } };
     expect(before.review.due).toBe(true);
-    const saved = await authedMutation(`/api/patients/${patientId}/medical-history`, h.sessions.reception, "POST", JSON.stringify({
+    const saved = await authedMutation(`/api/patients/${patientId}/medical-history`, h.sessions.admin, "POST", JSON.stringify({
       answers: { anticoagulants: "yes" }, allergies: [{ substance: "بنسلين", severity: "severe" }], bloodGroup: "B+", patientConfirmed: true,
     }));
     expect(saved.status).toBe(201);
@@ -38,18 +51,18 @@ describe("(PAT-2) /api/patients/[id]/medical-history and /vitals", () => {
   });
 
   it("records vitals and refuses impossible readings in Arabic", async () => {
-    expect((await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.reception, "POST",
+    expect((await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.admin, "POST",
       JSON.stringify({ bpSystolic: 120, bpDiastolic: 80, pulse: 70 }))).status).toBe(201);
-    const bad = await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.reception, "POST", JSON.stringify({ pulse: 999 }));
+    const bad = await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.admin, "POST", JSON.stringify({ pulse: 999 }));
     expect(bad.status).toBe(400);
     expect((await bad.json() as { message: string }).message).toMatch(arabic);
   });
 
   it("saves the chosen historical date and alert together without putting the backdated reading first", async () => {
-    const current = await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.reception, "POST",
+    const current = await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.admin, "POST",
       JSON.stringify({ pulse: 75, medicalAlert: "تنبيه حالي" }));
     expect(current.status).toBe(201);
-    const old = await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.reception, "POST",
+    const old = await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.admin, "POST",
       JSON.stringify({ pulse: 72, recordedAt: "2025-03-04", medicalAlert: "تنبيه سابق" }));
     expect(old.status).toBe(201);
     const oldVital = await old.json() as { id: number };
@@ -59,9 +72,9 @@ describe("(PAT-2) /api/patients/[id]/medical-history and /vitals", () => {
        FROM patient_vitals v JOIN patients p ON p.id = v.patient_id WHERE v.id = $1`, [oldVital.id]);
     expect(saved).toEqual({ day: "2025-03-04", medical_alert: "تنبيه سابق" });
     expect((oldVital as { medicalAlert?: string }).medicalAlert).toBe(saved.medical_alert);
-    const list = await (await authedGet(`/api/patients/${patientId}/vitals`, h.sessions.reception)).json() as { vitals: { id: number }[] };
+    const list = await (await authedGet(`/api/patients/${patientId}/vitals`, h.sessions.admin)).json() as { vitals: { id: number }[] };
     expect(list.vitals[0].id).not.toBe(oldVital.id);
-    expect((await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.reception, "POST",
+    expect((await authedMutation(`/api/patients/${patientId}/vitals`, h.sessions.admin, "POST",
       JSON.stringify({ pulse: 70, recordedAt: "2025-02-30" }))).status).toBe(400);
   });
 
