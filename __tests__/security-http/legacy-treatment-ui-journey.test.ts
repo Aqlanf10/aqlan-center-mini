@@ -139,7 +139,7 @@ describe("pre-system treatment through the built form", () => {
 
     // A second tooth inside the recorded bridge cannot be billed again through the invoice preview.
     const preview = await fetch(`${baseUrl}/api/invoices/clinical-preview`, { method: "POST",
-      headers: { "Content-Type": "application/json", Cookie: h.sessions.reception.cookie, Origin: baseUrl, "Sec-Fetch-Site": "same-origin" },
+      headers: { "Content-Type": "application/json", Cookie: h.sessions.admin.cookie, Origin: baseUrl, "Sec-Fetch-Site": "same-origin" },
       body: JSON.stringify({ patientId, currency: "YER", discount: "", discountReason: "", idempotencyKey: `lgui-${stamp}`,
         items: [{ serviceId: bridge, description: "", price: "", quantity: 1, toothCode: 15, episodeTeeth: [15] }] }) });
     const previewBody = await preview.json() as { lines?: { refusal: string | null }[]; message?: string };
