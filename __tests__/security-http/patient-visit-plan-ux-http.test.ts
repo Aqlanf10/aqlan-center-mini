@@ -130,8 +130,8 @@ describe("(P6) billing preview is read-only", () => {
 });
 
 describe("(P2) treatment entry creates the plan through the canonical invoice and price authority", () => {
-  it("the catalog price creates a linked plan; a lower price from reception without a reason is refused", async () => {
-    const plan = (unitPriceMinor: number) => post("reception", "/api/invoices", {
+  it("the administrator creates the linked plan at catalogue price and must explain a lower price", async () => {
+    const plan = (unitPriceMinor: number) => post("admin", "/api/invoices", {
       patientId: ownedId, currency: "YER",
       items: [{ serviceId, quantity: 1, toothCode: 16, price: String(unitPriceMinor), sessions: 1 }],
     });

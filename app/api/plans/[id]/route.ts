@@ -158,8 +158,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
-    return NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
+  if (session.role !== "admin") {
+    return NextResponse.json({ message: "تعديل اتفاق العلاج يتطلب صلاحية الإدارة." }, { status: 403 });
   }
 
   const { id: rawId } = await context.params;

@@ -5,7 +5,7 @@ import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpe
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
-import { requireCollectionScope } from "./reception-collection-scope";
+import { CollectionScopeDenied, requireCollectionScope } from "./reception-collection-scope";
 import { patientNumberBackupSql } from "./patient-number-backup-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
 import { assertSimilarCollectionReviewed, type SimilarCollectionReview } from "./similar-collection";
@@ -20421,9 +20421,21 @@ export async function recordPlanInstallmentReminders(input: {
   await ensureSchema();
   const now = new Date();
   return withTransaction(getPool(), async client => {
-    // Lock in deterministic order. The batch, its timestamps and mandatory audit are atomic.
-    const { rows: plans } = await client.query<{ id: number }>(
-      "SELECT id FROM treatment_plans WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE", [planIds]);
+    const authorizedPatients = new Set<number>();
+    if (input.actorRole === "reception") {
+      const { rows } = await client.query<{ patient_id: number }>(
+        "SELECT DISTINCT patient_id FROM treatment_plans WHERE id = ANY($1::int[]) ORDER BY patient_id", [planIds]);
+      for (const { patient_id } of rows) {
+        await requireCollectionScope(client, input.actorRole, patient_id, input.actor, CLINIC_TIME_ZONE);
+        authorizedPatients.add(patient_id);
+      }
+    }
+    // Lock plans after patient authorization and recheck their ownership before writing the batch.
+    const { rows: plans } = await client.query<{ id: number; patient_id: number }>(
+      "SELECT id, patient_id FROM treatment_plans WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE", [planIds]);
+    if (input.actorRole === "reception" && (plans.length !== planIds.length || plans.some(plan => !authorizedPatients.has(plan.patient_id)))) {
+      throw new CollectionScopeDenied();
+    }
     let updatedCount = 0;
     for (const plan of plans) {
       if (input.installmentNumber !== undefined) {
