@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, browsePatients, createPatient, duplicateCandidates, findUserByUsername, getSettings, isPeriodLocked, recordAudit, searchPatients, setPatientOpeningBalance } from "@/lib/db";
+import { CLINIC_TIME_ZONE, browsePatients, createPatientWithDuplicateReview, findUserByUsername, getSettings, isPeriodLocked, recordAudit, searchPatients, setPatientOpeningBalance } from "@/lib/db";
 import { parseListFilter, parseListSort } from "@/lib/patient-browse";
 import { openingBalanceAccess, parseOpeningInput, type OpeningInput } from "@/lib/opening-access";
 import { PATIENT_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
 import { validatePatient } from "@/lib/patient";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
-import { duplicateWarning, findDuplicates } from "@/lib/duplicates";
+import { duplicateWarning } from "@/lib/duplicates";
 import { isRestrictedRole } from "@/lib/role-routes";
 
 export const dynamic = "force-dynamic";
@@ -133,17 +133,14 @@ export async function POST(request: Request) {
      * ولذلك يُرسل `confirmDuplicate` من الواجهة بعد أن يراها الموظف بعينه.
      */
     const confirmed = (body as Record<string, unknown>)?.confirmDuplicate === true;
-    if (!confirmed) {
-      const candidates = await duplicateCandidates(validation.value);
-      const matches = findDuplicates(validation.value, candidates);
-      if (matches.length > 0) {
-        return NextResponse.json(
-          { message: duplicateWarning(matches), duplicates: matches },
-          { status: 409 },
-        );
-      }
+    const registration = await createPatientWithDuplicateReview(validation.value, confirmed);
+    if (!registration.ok) {
+      return NextResponse.json(
+        { message: duplicateWarning(registration.duplicates), duplicates: registration.duplicates },
+        { status: 409 },
+      );
     }
-    const created = await createPatient(validation.value);
+    const created = registration.patient;
     // (P1-4) الإنشاء يُدقَّق بلقطته — ومع علامة إن أُكِّد رغم تحذير التكرار.
     await recordAudit({
       action: "patient.create",

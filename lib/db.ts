@@ -56,7 +56,7 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
-import { withTransaction } from "./transactions";
+import { withIsolation, withTransaction } from "./transactions";
 import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
 import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
@@ -3185,7 +3185,7 @@ import {
 } from "./appointment-lifecycle";
 
 import { ageFromBirthDate, ageFromBirthYear, type Gender, type Patient, type PatientInput } from "./patient";
-import { nameTokens, type CandidatePatient } from "./duplicates";
+import { findDuplicates, nameTokens, type CandidatePatient, type DuplicateMatch } from "./duplicates";
 
 /** ما يكفي لقائمة بحث: الحقول الثقيلة لا تُحمَّل لعشرين نتيجة لن تُقرأ. */
 export interface PatientSummary {
@@ -3557,8 +3557,8 @@ export async function listPatients(
  */
 export async function duplicateCandidates(input: {
   fullName: string; phone: string | null; altPhone: string | null;
-}): Promise<CandidatePatient[]> {
-  await ensureSchema();
+}, client?: Pick<DbClient, "query">): Promise<CandidatePatient[]> {
+  if (!client) await ensureSchema();
   const phones = [
     ...phoneLookupForms(input.phone),
     ...phoneLookupForms(input.altPhone),
@@ -3575,7 +3575,7 @@ export async function duplicateCandidates(input: {
   // (LIKE ANY لا يقبل ESCAPE مخصّصًا — فالهروب بالشرطة المائلة الافتراضية.)
   const patterns = words.map((word) => `%${normalizeSearchText(word).replace(/[\\%_]/g, (char) => `\\${char}`)}%`);
 
-  const { rows } = await getPool().query<{
+  const { rows } = await (client ?? getPool()).query<{
     id: number; patient_number: string; full_name: string;
     phone: string | null; alt_phone: string | null; birth_year: number | null;
   }>(
@@ -3607,11 +3607,8 @@ const PATIENT_IMPORT_LOCK_KEY = "patient_import";
 export const PATIENT_CREATE_SHARED_LOCK_SQL = `SELECT pg_advisory_xact_lock_shared(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
 const PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
 
-export async function createPatient(input: PatientInput): Promise<Patient> {
-  await ensureSchema();
-  const { rows } = await withTransaction(getPool(), async (client) => {
-    await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
-    return client.query<PatientRow>(
+async function insertPatientRow(client: DbClient, input: PatientInput): Promise<PatientRow> {
+  const { rows } = await client.query<PatientRow>(
     `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                            birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
      VALUES (
@@ -3635,9 +3632,35 @@ export async function createPatient(input: PatientInput): Promise<Patient> {
       input.referralSource ?? null,
       input.referredBy ?? null,
     ],
-    );
+  );
+  return rows[0];
+}
+
+export async function createPatient(input: PatientInput): Promise<Patient> {
+  await ensureSchema();
+  const row = await withTransaction(getPool(), async (client) => {
+    await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    return insertPatientRow(client, input);
   });
-  return toPatient(rows[0]);
+  return toPatient(row);
+}
+
+/** Ordinary form registration: check against committed imports before allocating. */
+export async function createPatientWithDuplicateReview(
+  input: PatientInput, confirmed: boolean,
+): Promise<{ ok: true; patient: Patient } | { ok: false; duplicates: DuplicateMatch[] }> {
+  await ensureSchema();
+  const result = await withIsolation(getPool(), "READ COMMITTED", async (client) => {
+    // This lock can wait for CSV import. The following statement must see the
+    // completed import on this very connection, even with a different DB default.
+    await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    if (!confirmed) {
+      const duplicates = findDuplicates(input, await duplicateCandidates(input, client));
+      if (duplicates.length > 0) return { ok: false, duplicates } as const;
+    }
+    return { ok: true, row: await insertPatientRow(client, input) } as const;
+  });
+  return result.ok ? { ok: true, patient: toPatient(result.row) } : result;
 }
 
 /**
@@ -3663,7 +3686,8 @@ export async function commitPatientImport(input: {
 > {
   await ensureSchema();
   const source = await currentAuditSource();
-  return withTransaction(getPool(), async (client) => {
+  return withIsolation(getPool(), "READ COMMITTED", async (client) => {
+    // Reclassify against the committed files after waiting for registration.
     await client.query(PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL);
     const previous = await client.query<{ created_at: Date; actor: string }>(
       `SELECT created_at, actor FROM audit_log
@@ -6059,7 +6083,7 @@ export async function listLabOrders(filters?: {
   const whereClause = hasFilters ? `WHERE ${conditions.join(" AND ")}` : "";
   // النافذة اليومية (بلا فلاتر): المفتوح + ما رُكّب خلال شهر — أداة عمل لا أرشيف.
   const openWindow = !hasFilters
-    ? `AND (l.status IN ('needed', 'sent', 'in_progress', 'received')
+    ? `WHERE (l.status IN ('needed', 'sent', 'in_progress', 'received', 'remake')
             OR l.delivered_at > NOW() - INTERVAL '30 days')`
     : "";
   const limitClause = `LIMIT ${filters?.limit ? Math.min(filters.limit, 500) : 300}`;
