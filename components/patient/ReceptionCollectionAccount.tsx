@@ -10,6 +10,7 @@ import { CheckoutDueSummary } from "./CheckoutDueSummary";
 type Ledger = Awaited<ReturnType<typeof readReceptionCollectionLedger>>;
 export function ReceptionCollectionAccount({ patientId, patientName, actor }: { patientId: number; patientName: string; actor: string }) {
   const [ledger, setLedger] = useState<Ledger | null>(null);
+  const [refreshing, setRefreshing] = useState(true);
   const [message, setMessage] = useState("");
   const [debtHeld, setDebtHeld] = useState(false);
   const [collecting, setCollecting] = useState(false);
@@ -17,7 +18,7 @@ export function ReceptionCollectionAccount({ patientId, patientName, actor }: { 
   useEffect(() => {
     const controller = new AbortController();
     async function load() {
-      setLedger(null);
+      setRefreshing(true);
       setMessage("");
       try {
         const response = await fetch(`/api/patients/${patientId}/ledger`, { cache: "no-store", signal: controller.signal });
@@ -25,14 +26,19 @@ export function ReceptionCollectionAccount({ patientId, patientName, actor }: { 
         if (!response.ok || body.patientId !== patientId) throw new Error(body.message || "تعذّر تحميل بيانات التحصيل.");
         if (!controller.signal.aborted) setLedger(body);
       } catch (error) {
-        if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "تعذّر تحميل بيانات التحصيل.");
+        if (!controller.signal.aborted) {
+          setLedger(null);
+          setMessage(error instanceof Error ? error.message : "تعذّر تحميل بيانات التحصيل.");
+        }
+      } finally {
+        if (!controller.signal.aborted) setRefreshing(false);
       }
     }
     void load();
     return () => controller.abort();
   }, [patientId, revision]);
-  if (!ledger) return <p role="status">{message || "جارٍ تحميل الحساب…"}</p>;
-  return <section className="space-y-4 rounded-xl bg-white p-4">
+  if (!ledger || ledger.patientId !== patientId) return <p role="status">{message || "جارٍ تحميل الحساب…"}</p>;
+  return <fieldset disabled={refreshing} aria-label="تحصيل المريض" className="min-w-0 space-y-4 rounded-xl bg-white p-4">
     <CheckoutDueSummary recommendation={ledger.dueRecommendation} />
     <button type="button" disabled={debtHeld} className="rounded-lg bg-emerald-700 px-4 py-2 text-white" onClick={() => setCollecting(true)}>تسجيل تحصيل</button>
     {!collecting && <ReceptionDebtRepayments patientId={patientId} actor={actor} revision={revision}
@@ -45,5 +51,5 @@ export function ReceptionCollectionAccount({ patientId, patientName, actor }: { 
     <CollectPaymentModal patientId={patientId} patientName={patientName} isOpen={collecting} invoices={ledger.invoices}
       plans={ledger.plans} openings={ledger.openings} onClose={() => setCollecting(false)}
       onSuccess={() => { setCollecting(false); setRevision(previous => previous + 1); }} />
-  </section>;
+  </fieldset>;
 }

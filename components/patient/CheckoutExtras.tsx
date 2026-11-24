@@ -95,9 +95,9 @@ export function CheckoutExtras(props: CheckoutExtrasProps) {
   const session = useSession();
   if (!session) return null;
   const owner = JSON.stringify([props.visitId, props.expectedPatientId, session.username, session.role, session.permissions ?? null]);
-  return <OwnedCheckoutExtras key={owner} {...props} />;
+  return <OwnedCheckoutExtras key={owner} {...props} canPrintWalkout={session.role !== "reception"} />;
 }
-function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = true, financialRevision = 0, dueRecommendation = null, financialSummary = null, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
+function OwnedCheckoutExtras({ canPrintWalkout, visitId, expectedPatientId, financialVerified = true, financialRevision = 0, dueRecommendation = null, financialSummary = null, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps & { canPrintWalkout: boolean }) {
   const mounted = useRef(true);
   const command = useRef(false);
   const [walkoutRead, setWalkout] = useState<CheckoutWalkout | null>(null);
@@ -286,10 +286,10 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
             </button>
           )
         ) : null}
-        <a href={`/print/walkout/${visitId}`} target="_blank" rel="noopener"
+        {canPrintWalkout && <a href={`/print/walkout/${visitId}`} target="_blank" rel="noopener"
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800">
           🖨️ ملخّص المغادرة
-        </a>
+        </a>}
       </div>
 
       {booked || walkout?.nextAppointment ? (

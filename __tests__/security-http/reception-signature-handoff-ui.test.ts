@@ -159,7 +159,7 @@ describe("reception signature discovery on the built application", () => {
         await checkout.waitFor();
         await expect.poll(() => checkout.innerText()).toContain(`زيارة #${visitId}`);
         expect(await receptionPage.getByRole("region", { name: "الزيارة المحددة للتحصيل" }).innerText()).toContain(`#${newerVisit}`);
-        expect(await checkout.getByRole("link", { name: "🖨️ ملخّص المغادرة" }).getAttribute("href")).toBe(`/print/walkout/${visitId}`);
+        expect(await checkout.getByRole("link", { name: "🖨️ ملخّص المغادرة" }).count()).toBe(0);
         expect(await receptionPage.getByRole("region", { name: "زيارة اليوم", exact: true }).count()).toBe(0);
         expect((await db.query(`SELECT status, invoice_id, signed_at FROM visits WHERE id = $1`, [visitId])).rows[0]).toMatchObject({ status: "done", invoice_id: null, signed_at: expect.any(Date) });
         expect((await db.query(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).rows).toHaveLength(0);
