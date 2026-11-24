@@ -5,6 +5,7 @@ import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpe
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
+import { patientNumberBackupSql } from "./patient-number-backup-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
 import { assertSimilarCollectionReviewed, type SimilarCollectionReview } from "./similar-collection";
 import { INVENTORY_PURCHASE_RECEIPTS_SQL } from "./inventory-purchase-schema";
@@ -16296,11 +16297,26 @@ export async function* backupSqlLines(source?: Queryable): AsyncGenerator<string
 export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<string> {
 
   const { rows: tableRows } = (await pool.query(
-    `SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-      ORDER BY table_name`,
-  )) as { rows: { table_name: string }[] };
-  const tables = tableRows.map((row) => row.table_name);
+    `SELECT table_name::text AS table_name, false AS uncaptured_patients
+     FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+     UNION ALL
+     SELECT NULL::text, true
+     WHERE EXISTS (
+       SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname='patients'
+     ) AND NOT EXISTS (
+       SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name = 'patients'
+     )
+     ORDER BY table_name`,
+  )) as { rows: { table_name: string | null; uncaptured_patients?: boolean }[] };
+  const tables = tableRows.map((row) => {
+    // information_schema is visibility-filtered; an existing public relation
+    // cannot masquerade as a deliberately patient-less export.
+    if (row.uncaptured_patients || row.table_name === null) throw new Error("Public patients table is not exportable");
+    return row.table_name;
+  });
 
   // الترتيب من مفاتيح القاعدة نفسها لا من قائمة مكتوبة بيد: قائمةٌ يدوية تنسى جدولًا
   // يُضاف غدًا، فتفشل الاستعادة بخطأ مفتاح أجنبي في أسوأ لحظة.
@@ -16410,27 +16426,21 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
-  // The archive number is a standalone sequence, not a SERIAL id. A retired
-  // allocation may have no corresponding row; reconstructing from MAX(id) or
-  // MAX(patient_number) can reissue a paper-file number after restoration.
+  // Only genuinely patient-less exports omit fixed-P state. In a patient
+  // export an absent, unreadable or malformed public cursor is a hard failure.
   if (tables.includes("patients")) {
-    const { rows: [presence] } = await pool.query(
-      "SELECT to_regclass('public.patient_number_seq') IS NOT NULL AS present",
+    // Standalone numbering isn't an id-owned serial. Capture it last:
+    // sequence state is non-MVCC, even inside this row snapshot. A later
+    // observation can safely leave a gap; no backup can cover writes after it.
+    const { rows: patientNumberState } = await pool.query(
+      `SELECT p.last_value::text, p.is_called FROM public.patient_number_seq p
+       WHERE EXISTS (
+         SELECT 1 FROM pg_catalog.pg_sequence s
+         WHERE s.seqrelid=pg_catalog.to_regclass('public.patient_number_seq')
+       )`,
     );
-    if (presence?.present === true) {
-      const { rows: [archive] } = await pool.query(
-        "SELECT last_value::text AS last_value, is_called FROM public.patient_number_seq",
-      );
-      if (typeof archive?.last_value !== "string" || !/^[1-9]\d{0,18}$/.test(archive.last_value)
-          || BigInt(archive.last_value) > 9223372036854775807n || typeof archive.is_called !== "boolean") {
-        throw new Error("Invalid patient archive sequence state in backup");
-      }
-      const value = archive.last_value;
-      const called = archive.is_called ? "true" : "false";
-      // Preserve a higher target fence too. The target must be isolated from
-      // live writers during restore; sequence changes are not MVCC snapshots.
-      yield `SELECT setval('public.patient_number_seq'::regclass, GREATEST(last_value, ${value}::bigint), CASE WHEN last_value > ${value}::bigint THEN is_called WHEN last_value = ${value}::bigint THEN is_called OR ${called} ELSE ${called} END) FROM public.patient_number_seq;\n`;
-    }
+    if (patientNumberState.length !== 1) throw new Error("Patient-number sequence snapshot unavailable");
+    yield `${patientNumberBackupSql(patientNumberState[0].last_value, patientNumberState[0].is_called)}\n`;
   }
   yield `COMMIT;\n`;
 }
