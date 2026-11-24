@@ -2266,6 +2266,15 @@ function debtReport(ctx: ReportContext): ReportResult {
 /** حركة المديونية الشهرية ضمن حدود الفترة المختارة. */
 function debtMovementReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors } = ctx;
+  const currency = filters.currency;
+  const visibleCurrencies = currency === "all" ? CURRENCIES : [currency];
+  // The report's chart uses the base currency; never show it for another bucket.
+  const showBaseChart = currency === "all" || currency === base;
+  const movementKpis = (key: string, label: string, amounts: Record<Currency, number>, tone?: KpiItem["tone"]) => {
+    if (currency === "all") return moneyKpis(key, label, amounts, tone);
+    const suffix = currency === base ? "" : `-${currency}`;
+    return [moneyKpi(key + suffix, suffix ? `${label} (${currency})` : label, amounts[currency], currency, tone)];
+  };
   const firstYear = filters.from.slice(0, 4);
   const lastYear = filters.to.slice(0, 4);
   const spansYears = firstYear !== lastYear;
@@ -2303,7 +2312,7 @@ function debtMovementReport(ctx: ReportContext): ReportResult {
     const closingByCurrency = balanceAsOf(ctx, mTo);
 
     // (P-01/D-1) صفٌّ لكل (شهر × عملة نشطة) — لا عمود يمزج الدلاء.
-    for (const currency of CURRENCIES) {
+    for (const currency of visibleCurrencies) {
       const active = newDebtByCurrency[currency] !== 0 || collectedByCurrency[currency] !== 0
         || refundsByCurrency[currency] !== 0 || openingByCurrency[currency] !== 0
         || closingByCurrency[currency] !== 0;
@@ -2318,7 +2327,7 @@ function debtMovementReport(ctx: ReportContext): ReportResult {
         closingMinor: closingByCurrency[currency],
       });
     }
-    bars.push({ label: monthLabel, minor: closingByCurrency[base] });
+    if (showBaseChart) bars.push({ label: monthLabel, minor: closingByCurrency[base] });
   }
 
   const periodOpening = balanceAsOf(ctx, addDays(filters.from, -1));
@@ -2340,11 +2349,11 @@ function debtMovementReport(ctx: ReportContext): ReportResult {
     periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
-      ...moneyKpis("opening", "مديونية أول الفترة", periodOpening),
-      ...moneyKpis("new", "ديون جديدة", sumByCurrency("newDebtMinor"), "warn"),
-      ...moneyKpis("collected", "تحصيل ديون", sumByCurrency("collectedMinor"), "good"),
-      ...moneyKpis("adj", "تسويات (استردادات)", sumByCurrency("adjustmentsMinor"), "bad"),
-      ...moneyKpis("closing", "مديونية آخر الفترة", periodClosing, "warn"),
+      ...movementKpis("opening", "مديونية أول الفترة", periodOpening),
+      ...movementKpis("new", "ديون جديدة", sumByCurrency("newDebtMinor"), "warn"),
+      ...movementKpis("collected", "تحصيل ديون", sumByCurrency("collectedMinor"), "good"),
+      ...movementKpis("adj", "تسويات (استردادات)", sumByCurrency("adjustmentsMinor"), "bad"),
+      ...movementKpis("closing", "مديونية آخر الفترة", periodClosing, "warn"),
     ],
     monthly: {
       columns: [
@@ -2364,7 +2373,10 @@ function debtMovementReport(ctx: ReportContext): ReportResult {
     notes: [
       "حركات كل شهر ضمن الأيام المختارة. الافتتاح رصيد نهاية اليوم السابق لأول يوم معروض، والإقفال رصيد نهاية آخر يوم معروض.",
       "«التسويات» هنا = الاستردادات؛ قيود التسوية اليدوية على ذمم المرضى تُقرأ من دفتر اليومية.",
-      "(P-01) كل شهر بصفوفٍ لعملاته النشطة — والأشرطة بدلو العملة الأساسية وحده.",
+      "فلتر العملة في حركة المديونية يختار عملة تسوية الحساب، وقد تختلف عن عملة السند.",
+      showBaseChart
+        ? "(P-01) الأشرطة بدلو العملة الأساسية وحده."
+        : "أُخفي الرسم لأن العملة المختارة تختلف عن العملة الأساسية.",
     ],
   };
 }
@@ -3033,7 +3045,7 @@ export function collectionsReport(ctx: ReportContext, caller = "collections"): R
   const refundsByCurrency = emptyCurrencyRecord();
   const nativeCurrencies = new Set<Currency>();
   const refundCurrencies = new Set<Currency>();
-  const rows: ReportRow[] = [];
+  const orderedReceipts: { row: ReportRow; sourceAt: string; id: number }[] = [];
 
   for (const patient of ctx.movements) {
     if (filters.specialty && !patientHasSpecialty(patient, filters.specialty)) continue;
@@ -3063,7 +3075,7 @@ export function collectionsReport(ctx: ReportContext, caller = "collections"): R
       const hasRecordedTarget = payment.invoiceId != null || payment.planId != null || payment.openingCurrency != null;
       const crossCurrency = hasRecordedTarget && payment.settlementCurrency !== payment.currency;
 
-      rows.push({
+      const row: ReportRow = {
         receiptId: payment.id,
         date: formatArabicDate(payment.date),
         patientId: patient.patientId,
@@ -3083,10 +3095,15 @@ export function collectionsReport(ctx: ReportContext, caller = "collections"): R
         methodLabel: PAYMENT_METHOD_LABEL[payment.method] ?? payment.method,
         receiver: payment.createdBy ?? "—",
         note: payment.note ?? "",
-      });
+      };
+      orderedReceipts.push({ row, sourceAt: payment.at ?? payment.date, id: payment.id });
     }
   }
-  rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  // Source instants are normalized ISO UTC by the movement loader. Keep the
+  // internal sort facts out of the public rows and use receipt ID for exact ties.
+  const rows = orderedReceipts.sort((a, b) =>
+    a.sourceAt === b.sourceAt ? b.id - a.id : a.sourceAt < b.sourceAt ? 1 : -1,
+  ).map(({ row }) => row);
 
   const visibleCurrencies = CURRENCIES.filter((currency) => nativeCurrencies.has(currency)
     || filters.currency === currency || (rows.length === 0 && filters.currency === "all"));
