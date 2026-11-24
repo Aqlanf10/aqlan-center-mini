@@ -5,6 +5,8 @@ import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {usesSharedLocalDatabaseConnection,type DbClient,type DbPool} from "./db";
 import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
+import { isDisbursementReport } from "./report-access";
+import { loadDisbursementReport } from "./report-disbursements";
 /**
  * محرك التقارير — كل الحساب يجري هنا على الخادم.
  *
@@ -1195,6 +1197,12 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
 
 /** يبني التقرير كاملًا وفق نوعه وفلاتره. */
 export async function buildReport(report: string, filters: ReportFilters): Promise<ReportResult> {
+  if (isDisbursementReport(report)) {
+    validateDisbursementDays(filters.from, filters.to);
+    return withFinancialReadSnapshot(getPool(), runner =>
+      loadDisbursementReport(report, filters, CLINIC_TIME_ZONE, runner), usesSharedLocalDatabaseConnection());
+  }
+
   // نتحقق من المدى قبل تحميل السياق حتى عند استدعاء الباني مباشرةً.
   const range = validateReportMonthRange(report, filters.debtMode, filters.from, filters.to);
   if (range) {
@@ -6116,14 +6124,49 @@ function validateReportMonthRange(
   if (report === "debt" && debtMode === "movement") return validateMonthRange(from, to, "movement");
 }
 
+const EXPENSE_SELECTOR = /^[0-9a-f]{64}$/;
+function validateDisbursementDays(from: string | null, to: string | null): void {
+  const date = (value: string | null) => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) return NaN;
+    const instant = toUTC(value);
+    return Number.isFinite(instant) && fromUTC(instant) === value ? instant : NaN;
+  };
+  const first = date(from), last = date(to);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || first > last) {
+    throw new ReportInputError("اختر تاريخي بداية ونهاية صحيحين بالترتيب.");
+  }
+  if ((last - first) / 86_400_000 >= 366) {
+    throw new ReportInputError("اختر فترة لا تتجاوز ٣٦٦ يومًا. يمكنك تصدير فترات أطول على دفعات.");
+  }
+}
+
 export function validateCustomReportRange(params: URLSearchParams) {
+  const report = params.get("report");
+  if (isDisbursementReport(report)) {
+    for (const key of ["report", "currency", "preset", "from", "to", "expenseRecipient", "expenseCategory"]) {
+      if (params.getAll(key).length > 1) throw new ReportInputError("الفلاتر المكررة غير صالحة.");
+    }
+    const currency = params.get("currency");
+    if (currency !== null && currency !== "all" && !isCurrency(currency)) {
+      throw new ReportInputError("اختر عملة صحيحة.");
+    }
+    if (report === "expense-payees") {
+      for (const key of ["expenseRecipient", "expenseCategory"]) {
+        const value = params.get(key);
+        if (value !== null && !EXPENSE_SELECTOR.test(value)) throw new ReportInputError("اختيار المستفيد أو البند غير صالح.");
+      }
+    }
+    if (params.get("preset") === "custom") validateDisbursementDays(params.get("from"), params.get("to"));
+    return;
+  }
+
   if (params.get("preset") === "custom") {
     validateReportMonthRange(params.get("report"), params.get("debtMode"), params.get("from"), params.get("to"));
   }
 }
 
 export function parseFilters(params: URLSearchParams, today?: string): ReportFilters {
-  const presetRaw = params.get("preset") ?? "this_month";
+  const presetRaw = params.get("preset") ?? (isDisbursementReport(params.get("report")) ? "today" : "this_month");
   const preset = (["today", "yesterday", "this_week", "this_month", "prev_month", "this_quarter", "this_year", "prev_year", "custom"] as const)
     .includes(presetRaw as PeriodPreset) ? (presetRaw as PeriodPreset) : "this_month";
   // فحص تواريخ الرابط الخام قبل أن يستبدل محلّل الفلاتر القيم الناقصة.
@@ -6164,6 +6207,10 @@ export function parseFilters(params: URLSearchParams, today?: string): ReportFil
     currency, patientStatus, debtStatus, debtMode, compare,
     method: params.get("method") || null,
     receivedBy: params.get("receivedBy") || null,
+    ...(params.get("report") === "expense-payees" ? {
+      expenseRecipient: params.get("expenseRecipient"),
+      expenseCategory: params.get("expenseCategory"),
+    } : {}),
   };
 }
 

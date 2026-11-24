@@ -1,4 +1,4 @@
-import { onClinicDaySql } from "./clinic-day-sql";
+import { onClinicDaySql, onClinicDaysSql } from "./clinic-day-sql";
 import { CURRENCIES, isCurrency, requireCurrency, type Currency } from "./money";
 
 /** Recorded spending vouchers, not an accrual income statement or every cash-ledger entry. */
@@ -9,6 +9,14 @@ export interface DailyClinicExpenseQuery {
 }
 
 /** The caller owns the read-only, repeatable-read snapshot. No pool/schema side effects here. */
+export type ClinicExpenseRangeQuery = Omit<DailyClinicExpenseQuery, "date"> & { from: string; to: string };
+type ClinicExpenseRangeMovement = DailyClinicExpenseMovement & { categoryGroupKey: string };
+export type ClinicExpenseRangeReport = Omit<DailyClinicExpenseReport, "date" | "movements"> & {
+  from: string;
+  to: string;
+  movements: ClinicExpenseRangeMovement[];
+};
+
 export interface DailyClinicExpenseQueryRunner {
   query(sql: string, values: unknown[]): Promise<{ rows: unknown[] }>;
 }
@@ -93,6 +101,7 @@ export interface DailyClinicExpenseSourceRow {
   shift_id: unknown;
   category: unknown;
   category_name: unknown;
+  resolved_category_key?: unknown;
   party_id: unknown;
   party_name: unknown;
   party_kind: unknown;
@@ -202,15 +211,21 @@ function recipientOf(row: DailyClinicExpenseSourceRow): DailyClinicExpenseRecipi
   };
 }
 
-/** Pure projection used by the loader and synthetic unit fixtures. All selected-day rows are validated. */
-export function buildDailyClinicExpenseReport(
-  rows: readonly DailyClinicExpenseSourceRow[], query: DailyClinicExpenseQuery,
-): DailyClinicExpenseReport {
-  validateDailyClinicExpenseQuery(query);
+function validateRange(query: ClinicExpenseRangeQuery): void {
+  validateDailyClinicExpenseQuery({ ...query, date: query.from });
+  validateDailyClinicExpenseQuery({ ...query, date: query.to });
+  if (query.from > query.to) reject();
+}
+
+/** One canonical voucher projection; validate every source row before optional currency filtering. */
+export function buildClinicExpenseRangeReport(
+  rows: readonly DailyClinicExpenseSourceRow[], query: ClinicExpenseRangeQuery,
+): ClinicExpenseRangeReport {
+  validateRange(query);
   const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: query.timeZone, hourCycle: "h23",
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const seen = new Set<number>();
-  const movements: DailyClinicExpenseMovement[] = [];
+  const movements: ClinicExpenseRangeMovement[] = [];
   let missingPayable = false;
   for (const row of rows) {
     const expenseId = id(row.id);
@@ -221,7 +236,7 @@ export function buildDailyClinicExpenseReport(
     const parts = formatter.formatToParts(created);
     const part = (name: string) => parts.find((item) => item.type === name)?.value ?? reject();
     const clinicDate = `${part("year").padStart(4, "0")}-${part("month")}-${part("day")}`;
-    if (clinicDate !== query.date) reject();
+    if (clinicDate < query.from || clinicDate > query.to) reject();
     const currency = requireCurrency(row.currency, "سند صرف", voucherNumber);
     const amountMinor = integer(row.amount_minor);
     const reversalOfId = nullableId(row.reversal_of_id);
@@ -257,10 +272,11 @@ export function buildDailyClinicExpenseReport(
     if ((payableId !== null && allocations.length > 0) || Math.abs(allocated) > Math.abs(amountMinor)) reject();
     const supplier = recipient.partyKind === "supplier" || recipient.partyKind === "lab";
     const categoryKey = requiredText(row.category);
-    const movement: DailyClinicExpenseMovement = {
+    const movement: ClinicExpenseRangeMovement = {
       id: expenseId, voucherNumber, createdAt: created.toISOString(), clinicDate,
       clinicTime: `${part("hour")}:${part("minute")}:${part("second")}`,
       shiftId: id(row.shift_id), categoryKey, categoryLabel: nullableText(row.category_name)?.trim() || categoryKey,
+      categoryGroupKey: nullableText(row.resolved_category_key) || categoryKey,
       recipient, amountMinor, currency, reversalOfId,
       kind: reversalOfId !== null ? "reversal" : amountMinor < 0 ? "negative_adjustment" : amountMinor > 0 ? "outflow" : "zero",
       originalVoucherNumber: nullableText(row.original_voucher_number), payableId, payableSourceType, allocations,
@@ -299,7 +315,9 @@ export function buildDailyClinicExpenseReport(
     accumulate(group.totals, movement);
   }
   const caveats = [
-    "يشمل الكشف سندات الصرف المسجّلة على مستوى المركز في يوم العيادة، ولا يمثّل قائمة مصروفات الاستحقاق أو كل القيود اليدوية والتحويلات.",
+    query.from === query.to
+      ? "يشمل الكشف سندات الصرف المسجّلة على مستوى المركز في يوم العيادة، ولا يمثّل قائمة مصروفات الاستحقاق أو كل القيود اليدوية والتحويلات."
+      : "يشمل الكشف سندات الصرف المسجّلة خلال الفترة، ولا يمثّل قائمة مصروفات الاستحقاق أو كل القيود اليدوية والتحويلات.",
     "كل عملة مستقلة. الإبطالات والتصحيحات السالبة تظهر في يوم تسجيلها؛ صافي السندات ليس ربحًا.",
     "اسم الجهة المرتبطة هو اسمها الحالي؛ اسم المستفيد النصي المسجّل يظهر مستقلًا عند توافره، وليس لكل سند لقطة اسم تاريخية.",
     "السندات تخص درج النقد بحسب نموذج النظام. ردود المرضى وحوالاتهم تظهر في قسم حركات المرضى ولا تدخل هذه الإجماليات.",
@@ -308,18 +326,15 @@ export function buildDailyClinicExpenseReport(
   if (missingPayable) caveats.push("بعض روابط الالتزامات غير متاحة؛ مبالغ السندات محفوظة دون افتراض نوع الالتزام المفقود.");
   if (movements.some((row) => row.recipient.nameSource === "missing")) caveats.push("توجد سندات لم يتوافر فيها اسم مستفيد؛ لم يُستنتج الاسم من بند المصروف أو مسجّل السند.");
   if (totals.negativeAdjustmentCount > 0) caveats.push("توجد مبالغ سالبة بلا رابط إبطال؛ تظهر كتصحيحات سالبة غير مرتبطة ويحتاج أصلها إلى مراجعة.");
-  return { date: query.date, timeZone: query.timeZone, scope: "clinic_spending_vouchers", currency: query.currency ?? "all",
+  return { from: query.from, to: query.to, timeZone: query.timeZone, scope: "clinic_spending_vouchers", currency: query.currency ?? "all",
     movements, recipientTotals: [...recipientMap.values()], totals, caveats };
 }
 
-/** One SELECT, one row per voucher, no voucher-row limit or current exchange-rate conversion. */
-export async function loadDailyClinicExpenseReport(
-  query: DailyClinicExpenseQuery, runner: DailyClinicExpenseQueryRunner,
-): Promise<DailyClinicExpenseReport> {
-  validateDailyClinicExpenseQuery(query);
-  const result = await runner.query(`
+/** One SELECT definition, one row per voucher, no current FX conversion. */
+const CLINIC_EXPENSE_SELECT = `
     SELECT e.id, e.voucher_number, e.created_at, e.shift_id, e.category,
-           ec.name AS category_name, e.party_id, p.name AS party_name, p.kind AS party_kind,
+           ec.name AS category_name,
+           CASE WHEN ec.key = e.category OR ec.matches = 1 THEN ec.key END AS resolved_category_key, e.party_id, p.name AS party_name, p.kind AS party_kind,
            e.payee_text, e.amount_minor::text, e.currency, e.reversal_of_id,
            original.voucher_number AS original_voucher_number, original.currency AS original_currency,
            e.payable_id, bill.source_type AS payable_source_type, bill.party_id AS payable_party_id,
@@ -329,7 +344,7 @@ export async function loadDailyClinicExpenseReport(
       LEFT JOIN payables bill ON bill.id = e.payable_id
       LEFT JOIN expenses original ON original.id = e.reversal_of_id
       LEFT JOIN LATERAL (
-        SELECT c.name FROM expense_categories c
+        SELECT c.name, c.key, COUNT(*) OVER () AS matches FROM expense_categories c
          WHERE c.key = e.category OR c.name = e.category
          ORDER BY (c.key = e.category) DESC, c.id LIMIT 1
       ) ec ON TRUE
@@ -341,11 +356,39 @@ export async function loadDailyClinicExpenseReport(
         ) ORDER BY x.id) AS allocations
           FROM expense_payable_allocations x LEFT JOIN payables b ON b.id = x.payable_id
          WHERE x.expense_id = e.id
-      ) a ON TRUE
-     WHERE ${onClinicDaySql("e.created_at", "$1", "$2::date")}
-     ORDER BY e.created_at, e.id`, [query.timeZone, query.date]);
+      ) a ON TRUE`;
+
+async function expenseSource(runner: DailyClinicExpenseQueryRunner, timePredicate: string, values: string[]): Promise<DailyClinicExpenseSourceRow[]> {
+  const result = await runner.query(`${CLINIC_EXPENSE_SELECT} WHERE ${timePredicate} ORDER BY e.created_at, e.id`, values);
   for (const row of result.rows) {
     if (typeof row !== "object" || row === null || Array.isArray(row)) reject();
   }
-  return buildDailyClinicExpenseReport(result.rows as DailyClinicExpenseSourceRow[], query);
+  return result.rows as DailyClinicExpenseSourceRow[];
+}
+
+export function buildDailyClinicExpenseReport(
+  rows: readonly DailyClinicExpenseSourceRow[], query: DailyClinicExpenseQuery,
+): DailyClinicExpenseReport {
+  const range = buildClinicExpenseRangeReport(rows, { ...query, from: query.date, to: query.date });
+  return {
+    date: range.from, currency: range.currency, timeZone: range.timeZone, scope: range.scope,
+    recipientTotals: range.recipientTotals, totals: range.totals, caveats: range.caveats,
+    movements: range.movements.map(({ categoryGroupKey: _categoryGroupKey, ...movement }) => movement),
+  };
+}
+
+export async function loadDailyClinicExpenseReport(
+  query: DailyClinicExpenseQuery, runner: DailyClinicExpenseQueryRunner,
+): Promise<DailyClinicExpenseReport> {
+  validateDailyClinicExpenseQuery(query);
+  return buildDailyClinicExpenseReport(await expenseSource(runner,
+    onClinicDaySql("e.created_at", "$1", "$2::date"), [query.timeZone, query.date]), query);
+}
+
+export async function loadClinicExpenseRangeReport(
+  query: ClinicExpenseRangeQuery, runner: DailyClinicExpenseQueryRunner,
+): Promise<ClinicExpenseRangeReport> {
+  validateRange(query);
+  return buildClinicExpenseRangeReport(await expenseSource(runner,
+    onClinicDaysSql("e.created_at", "$1", "$2::date", "$3::date"), [query.timeZone, query.from, query.to]), query);
 }

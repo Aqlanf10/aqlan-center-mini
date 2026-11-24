@@ -493,16 +493,20 @@ export interface FilterState {
   compare: CompareMode;
   method: string | null;
   receivedBy: string | null;
+  expenseRecipient?: string | null;
+  expenseCategory?: string | null;
 }
 
 export function FilterBar({
-  state, onChange, options, showDebtMode, showCompare, onPatientPicked, onApply,
+  state, onChange, options, showDebtMode, showCompare, disbursementMode, expenseOptions, onPatientPicked, onApply,
 }: {
   state: FilterState;
   onChange: (patch: Partial<FilterState>) => void;
   options: ReportOptions | null;
   showDebtMode: boolean;
   showCompare: boolean;
+  disbursementMode?: "daily-outflow" | "expense-payees";
+  expenseOptions?: ReportResult["expenseFilterOptions"];
   onPatientPicked: (patient: { id: number; name: string } | null) => void;
   onApply: () => void;
 }) {
@@ -617,8 +621,40 @@ export function FilterBar({
         </div>
       ) : null}
 
+      {disbursementMode ? (
+        <div className="mt-2.5 grid grid-cols-1 gap-2 border-t border-slate-100 pt-2.5 sm:grid-cols-3">
+          <label className="block text-xs font-bold text-slate-600">
+            العملة
+            <select value={state.currency} onChange={(event) => onChange({ currency: event.target.value as FilterState["currency"] })}
+              className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-2 py-2">
+              <option value="all">كل العملات</option>
+              {["YER", "SAR", "USD"].map(currency => <option key={currency} value={currency}>{currency}</option>)}
+            </select>
+          </label>
+          {disbursementMode === "expense-payees" ? ([
+            { key: "expenseRecipient", label: "المستفيد", empty: "كل المستفيدين", entries: expenseOptions?.payees },
+            { key: "expenseCategory", label: "بند المصروف", empty: "كل البنود", entries: expenseOptions?.categories },
+          ] as const).map(field => (
+            <label key={field.key} className="block text-xs font-bold text-slate-600">
+              {field.label}
+              <select value={state[field.key] ?? ""} onChange={(event) => onChange({ [field.key]: event.target.value || null })}
+                className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-2 py-2">
+                <option value="">{field.empty}</option>
+                {state[field.key] && !field.entries?.some(option => option.value === state[field.key]) ? (
+                  <option value={state[field.key] ?? ""}>الاختيار الحالي غير موجود في الفترة</option>
+                ) : null}
+                {field.entries?.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+          )) : null}
+          {disbursementMode === "expense-payees" ? (
+            <p className="text-[11px] text-slate-600 sm:col-span-3">اختر الفترة وطبّقها أولًا لتظهر الأسماء والبنود المسجّلة خلالها.</p>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* الفلاتر المتقدمة */}
-      <div className="mt-2.5 border-t border-slate-100 pt-2.5">
+      {!disbursementMode ? <div className="mt-2.5 border-t border-slate-100 pt-2.5">
         <button
           type="button"
           onClick={() => setAdvancedOpen((open) => !open)}
@@ -797,7 +833,7 @@ export function FilterBar({
             </div>
           </div>
         ) : null}
-      </div>
+      </div> : null}
 
       <div className="mt-2.5 flex items-center justify-between border-t border-slate-100 pt-2.5">
         <p className="text-[10px] font-medium text-slate-400">
