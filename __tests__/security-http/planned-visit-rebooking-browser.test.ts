@@ -48,7 +48,7 @@ beforeAll(async () => {
 }, 240_000);
 afterAll(async () => { try { await browser?.close(); } finally { await db?.end(); } });
 
-async function fixture(status: "no_show" | "cancelled") {
+async function fixture(status: "no_show" | "cancelled", role: Role = "admin") {
   const serial = ++sequence;
   const unique = `${prefix}-${serial}`;
   const today = clinicDateString(new Date(), timeZone);
@@ -88,7 +88,7 @@ async function fixture(status: "no_show" | "cancelled") {
   const projected = workflow.plannedVisits.find(row => row.id === planned)!;
   expect(projected.canRebook).toBe(true);
   expect(projected.rebookGeneration).toMatch(/^[a-f0-9]{32}$/);
-  return { patient, name, number: unique, title, old, planned, status, date: addDays(today, 950 + serial), time: "10:00",
+  return { patient, name, number: unique, title, displayTitle: role === "reception" ? `جلسة رقم ${planned}` : title, old, planned, status, date: addDays(today, 950 + serial), time: "10:00",
     generation: projected.rebookGeneration };
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -187,7 +187,7 @@ async function connected(f: Fixture, session: Session, width: number) {
       write.result = await response.json() as Result;
       write.status = response.status();
       expect(write.status).toBe(writes.length === 1 ? 201 : 200);
-      expect(write.result).toMatchObject({ title: f.title, replayed: writes.length > 1 });
+      expect(write.result).toMatchObject({ title: f.displayTitle, replayed: writes.length > 1 });
       if (writes.length > 1) expect(write.result.appointmentId).toBe(writes[0].result!.appointmentId);
       await admission.gate.promise;
       if (admission.mode === "drop") await route.abort("failed");
@@ -216,14 +216,15 @@ async function connected(f: Fixture, session: Session, width: number) {
 }
 
 const plannedSection = (page: Page) => page.getByRole("region", { name: "الجلسات المخطَّطة", exact: true });
-const formFor = (page: Page, f: Fixture) => page.getByRole("form", { name: `إعادة حجز ${f.title}`, exact: true });
+const formFor = (page: Page, f: Fixture) => page.getByRole("form", { name: `إعادة حجز ${f.displayTitle}`, exact: true });
 async function openPatient(page: Page, f: Fixture) {
   // Genuine authenticated document navigation, never a URL-only history patch,
   // injected router/anchor or replaced patient GET (including projections).
   const response = await page.goto(`${baseUrl}/patients/${f.patient}?tab=summary`, { waitUntil: "domcontentloaded" });
   expect(response?.status()).toBe(200);
   await expect.poll(() => page.getByTestId("patient-tab-summary").getAttribute("aria-current"), pollOptions).toBe("page");
-  await plannedSection(page).getByText(f.title, { exact: false }).waitFor();
+  await plannedSection(page).getByText(f.displayTitle, { exact: false }).waitFor();
+  if (f.displayTitle !== f.title) expect(await plannedSection(page).innerText()).not.toContain(f.title);
   expect(await plannedSection(page).innerText()).toContain("تحتاج إعادة حجز");
   expect(await plannedSection(page).getByRole("button", { name: "ابدأ الزيارة", exact: true }).count()).toBe(0);
 }
@@ -277,7 +278,7 @@ describe("planned-session rebooking through the real patient Summary", () => {
     { role: "admin", width: 1280, status: "cancelled" }, { role: "admin", width: 390, status: "no_show" },
     { role: "reception", width: 1280, status: "no_show" }, { role: "reception", width: 390, status: "cancelled" },
   ] as const)("$role at $width px preserves $status history and recovers a committed lost reply without duplication", async ({ role, width, status }) => {
-    const f = await fixture(status);
+    const f = await fixture(status, role);
     const before = await history(f), untouched = await untouchedFingerprint();
     const ui = await connected(f, h.sessions[role], width);
     await ui.run(async () => {

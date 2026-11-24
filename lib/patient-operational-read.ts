@@ -1,5 +1,6 @@
-import { CLINIC_TIME_ZONE, computeDebtRows, ensureSchema, getPool } from "./db";
+import { CLINIC_TIME_ZONE, computeDebtRows, ensureSchema, getPool, listPatientPlannedVisits } from "./db";
 import { CLINIC_BASE_CURRENCY, CURRENCIES } from "./money";
+import { projectPlannedVisitRebooking } from "./planned-visit-projection";
 import { clinicDateString } from "./schedule";
 
 type OperationalRole = "reception" | "assistant";
@@ -26,6 +27,18 @@ export async function readOperationalWorkflow(patientId: number, role: Operation
     FROM visits WHERE patient_id=$1 AND signed_at IS NULL AND (arrived_at AT TIME ZONE $2)::date=$3::date
     ORDER BY (status='done'), arrived_at DESC LIMIT 1`, [patientId, CLINIC_TIME_ZONE, today]);
   const desk = role === "reception" && financialAccess;
+  const [plannedVisits, appointments, signedVisits] = role === "reception" ? await Promise.all([
+    listPatientPlannedVisits(patientId, "scheduling"),
+    getPool().query(`SELECT id, scheduled_date::text AS date, to_char(scheduled_time, 'HH24:MI') AS time,
+        duration_minutes AS "durationMinutes", status
+      FROM appointments WHERE patient_id=$1 AND scheduled_date >= $2::date AND status IN ('booked','arrived')
+      ORDER BY scheduled_date, scheduled_time, id LIMIT 1`, [patientId, today]),
+    getPool().query(`SELECT id, (signed_at AT TIME ZONE $2)::date::text AS date FROM visits
+      WHERE patient_id=$1 AND (signed_at AT TIME ZONE $2)::date=$3::date
+      ORDER BY signed_at DESC, id DESC LIMIT 1`, [patientId, CLINIC_TIME_ZONE, today]),
+  ]) : [[], { rows: [] }, { rows: [] }];
+  const next = appointments.rows[0];
+  const signed = signedVisits.rows[0];
   const debts = desk ? await computeDebtRows([patientId], true) : [];
   const byCurrency = Object.fromEntries(CURRENCIES.map(currency => {
     const debt = debts.find(row => row.currency === currency);
@@ -33,8 +46,9 @@ export async function readOperationalWorkflow(patientId: number, role: Operation
   }));
   return {
     patient: { id: patientId }, today, timeZone: CLINIC_TIME_ZONE,
-    openVisit: visit ?? null, lastVisit: null, nextAppointment: null,
-    activePlans: [], plannedVisits: [], alerts: [], assessmentCases: [], legacyCases: [],
+    openVisit: visit ?? null, lastVisit: signed ? { ...signed, proceduresSummary: null, treatmentDone: null, nextPlan: null } : null,
+    nextAppointment: next ? { ...next, appointmentType: null, note: null } : null,
+    activePlans: [], plannedVisits: plannedVisits.map(visit => projectPlannedVisitRebooking(visit, { role })), alerts: [], assessmentCases: [], legacyCases: [],
     counts: { visits: 0, openLabOrders: 0, documents: 0, orthoCase: false },
     financial: desk ? { ...byCurrency[CLINIC_BASE_CURRENCY], byCurrency } : null, canSeeFinancial: desk,
   };
