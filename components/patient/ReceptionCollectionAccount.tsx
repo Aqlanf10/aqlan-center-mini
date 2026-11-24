@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import type { readReceptionCollectionLedger } from "@/lib/reception-collection-ledger";
 import { formatMoney } from "@/lib/money";
 import { CollectPaymentModal } from "../CollectPaymentModal";
+import { ReceptionDebtRepayments } from "./ReceptionDebtRepayments";
 import { CheckoutDueSummary } from "./CheckoutDueSummary";
 
 type Ledger = Awaited<ReturnType<typeof readReceptionCollectionLedger>>;
-export function ReceptionCollectionAccount({ patientId, patientName }: { patientId: number; patientName: string }) {
+export function ReceptionCollectionAccount({ patientId, patientName, actor }: { patientId: number; patientName: string; actor: string }) {
   const [ledger, setLedger] = useState<Ledger | null>(null);
   const [message, setMessage] = useState("");
+  const [debtHeld, setDebtHeld] = useState(false);
   const [collecting, setCollecting] = useState(false);
   const [revision, setRevision] = useState(0);
   useEffect(() => {
@@ -32,7 +34,9 @@ export function ReceptionCollectionAccount({ patientId, patientName }: { patient
   if (!ledger) return <p role="status">{message || "جارٍ تحميل الحساب…"}</p>;
   return <section className="space-y-4 rounded-xl bg-white p-4">
     <CheckoutDueSummary recommendation={ledger.dueRecommendation} />
-    <button type="button" className="rounded-lg bg-emerald-700 px-4 py-2 text-white" onClick={() => setCollecting(true)}>تسجيل تحصيل</button>
+    <button type="button" disabled={debtHeld} className="rounded-lg bg-emerald-700 px-4 py-2 text-white" onClick={() => setCollecting(true)}>تسجيل تحصيل</button>
+    {!collecting && <ReceptionDebtRepayments patientId={patientId} actor={actor} revision={revision}
+      onHold={setDebtHeld} onChanged={() => setRevision(previous => previous + 1)} />}
     {ledger.payments.length > 0 && <ul aria-label="سندات قبض الموظف لهذا المريض">
       {ledger.payments.map(row => <li key={row.id}><a className="underline" href={`/print/receipt/${row.id}`} target="_blank" rel="noopener">
         طباعة {row.receiptNumber} · {formatMoney(row.amountMinor, row.currency)}

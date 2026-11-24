@@ -1376,7 +1376,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           onOpenTabletMode={() => setShowTabletMode(true)}
         />
       ) : tab === "account" && session?.role === "reception" ? (
-        <ReceptionCollectionAccount key={patient.id} patientId={patient.id} patientName={patient.fullName} />
+        <ReceptionCollectionAccount key={JSON.stringify([patient.id, session.username])} patientId={patient.id} actor={session.username} patientName={patient.fullName} />
       ) : tab === "account" ? (
         <>
           {admin && <CollectionAssignment key={patient.id} patientId={patient.id} />}

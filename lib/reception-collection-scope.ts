@@ -6,10 +6,16 @@ export class CollectionScopeDenied extends Error {
   constructor() { super(COLLECTION_SCOPE_MESSAGE); }
 }
 
-/** The assignment writer locks the same patient FOR UPDATE before appending its decision. */
+/** An assignment change waits for in-flight collections. Concurrent collections keep
+ * the payment writers' existing lock order and idempotency behaviour. */
+export async function lockCollectionAssignment(db: Reader, patientId: number, mode: "read" | "change") {
+  const fn = mode === "change" ? "pg_advisory_xact_lock" : "pg_advisory_xact_lock_shared";
+  await db.query(`SELECT ${fn}(hashtextextended('aqlan:reception-collection:' || $1::text, 0))`, [patientId]);
+}
+
 export async function receptionCollectionAllowed(db: Reader, patientId: number, username: string, timeZone: string, lock = false) {
   if (!Number.isSafeInteger(patientId) || patientId < 1 || !username) return false;
-  if (lock) await db.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE", [patientId]);
+  if (lock) await lockCollectionAssignment(db, patientId, "read");
   const share = lock ? "FOR SHARE" : "";
   const { rows } = await db.query<{ allowed: boolean }>(`SELECT EXISTS (
     SELECT 1 FROM patients p JOIN users u ON u.username=$2 AND u.role='reception' AND u.is_active

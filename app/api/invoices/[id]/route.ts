@@ -38,6 +38,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
+  if (session.role === "reception") {
+    return NextResponse.json({ message: "تحديث الفواتير يتطلب صلاحية الفوترة." }, { status: 403 });
+  }
   if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }

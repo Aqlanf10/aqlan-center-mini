@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ensureSchema, getPool, insertAuditRow } from "@/lib/db";
+import { lockCollectionAssignment } from "@/lib/reception-collection-scope";
 import { requireSession, revalidateSessionInTransaction } from "@/lib/session";
 import { readJsonBody, bodyErrorResponse } from "@/lib/http-body";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -23,6 +24,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       await client.query("ROLLBACK");
       return NextResponse.json({ message: "تغيّرت صلاحيات الحساب." }, { status: 403 });
     }
+    await lockCollectionAssignment(client, patientId, "change");
     const { rows: [patient] } = await client.query("SELECT patient_number FROM patients WHERE id=$1 FOR UPDATE", [patientId]);
     const { rows: [user] } = await client.query("SELECT id FROM users WHERE lower(username)=lower($1) AND role='reception' AND is_active FOR SHARE", [body.username.trim()]);
     if (!patient || !user) {

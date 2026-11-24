@@ -49,6 +49,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role === "reception") {
+    return NextResponse.json({ message: "التحصيل من حساب المريض المخوّل. إصدار الفاتورة يتطلب صلاحية الفوترة." }, { status: 403 });
+  }
   if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
