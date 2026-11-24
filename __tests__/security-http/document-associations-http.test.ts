@@ -145,11 +145,11 @@ describe("document association boundary over real authenticated HTTP", () => {
     }
   });
 
-  it("allows upload-only reception to save a synthetic external xray without returning its metadata", async () => {
-    const externalTitle = `SYNTHETIC external xray ${stamp}`;
+  it.each(["xray", "report"] as const)("allows upload-only reception to save an external %s without returning metadata", async (kind) => {
+    const externalTitle = `SYNTHETIC external ${kind} ${stamp}`;
     const form = new FormData();
-    form.set("file", new Blob([new Uint8Array(png)], { type: "image/png" }), "synthetic-xray.png");
-    form.set("kind", "xray");
+    form.set("file", new Blob([new Uint8Array(png)], { type: "image/png" }), `synthetic-${kind}.png`);
+    form.set("kind", kind);
     form.set("title", externalTitle);
     const saved = await fetch(`${baseUrl}/api/patients/${ownPatient}/documents`, {
       method: "POST",
@@ -162,8 +162,8 @@ describe("document association boundary over real authenticated HTTP", () => {
     expect(saved.headers.get("cache-control")).toContain("no-store");
     expect(await saved.json()).toEqual({ uploaded: true });
     const rows = (await db.query<{ id: number }>(
-      "SELECT id FROM patient_documents WHERE patient_id=$1 AND title=$2 AND kind='xray'",
-      [ownPatient, externalTitle],
+      "SELECT id FROM patient_documents WHERE patient_id=$1 AND title=$2 AND kind=$3",
+      [ownPatient, externalTitle, kind],
     )).rows;
     expect(rows).toHaveLength(1);
     const path = `/api/documents/${rows[0].id}`;
@@ -173,6 +173,29 @@ describe("document association boundary over real authenticated HTTP", () => {
     const denied = await authedGet(path, h.sessions.reception);
     expect(denied.status).toBe(403);
     expect(denied.headers.get("cache-control")).toContain("no-store");
+  });
+
+  it.each(["photo", "consent"] as const)("rejects reception upload of clinical %s without persisting metadata", async (kind) => {
+    const rejectedTitle = `SYNTHETIC forbidden reception ${kind} ${stamp}`;
+    const form = new FormData();
+    form.set("file", new Blob([new Uint8Array(png)], { type: "image/png" }), "synthetic-forbidden.png");
+    form.set("kind", kind);
+    form.set("title", rejectedTitle);
+    const response = await fetch(`${baseUrl}/api/patients/${ownPatient}/documents`, {
+      method: "POST",
+      headers: { Cookie: h.sessions.reception.cookie, Origin: baseUrl, "Sec-Fetch-Site": "same-origin" },
+      body: form,
+      redirect: "manual",
+    });
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toContain("private");
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(await response.json()).toEqual({ message: "يمكن رفع أشعة أو تقرير خارجي فقط." });
+    const rows = (await db.query<{ n: number }>(
+      "SELECT COUNT(*)::int AS n FROM patient_documents WHERE patient_id=$1 AND title=$2",
+      [ownPatient, rejectedTitle],
+    )).rows;
+    expect(rows[0].n).toBe(0);
   });
 
   it("rejects foreign, missing, unlinked and mismatched references without revealing their identity or inserting rows", async () => {
