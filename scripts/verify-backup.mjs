@@ -264,6 +264,23 @@ try {
   const next = await db.createPatient({ fullName: "SYNTHETIC AFTER ARCHIVE RESTORE", phone: null, altPhone: null, gender: "unknown", birthYear: null, address: null, medicalAlert: null, note: null });
   check("P0-A: first new file after restore is P-07002", next.patientNumber === "P-07002");
   check("P0-A: restored file is searchable by canonical number", (await db.searchPatients("P-07000")).some(row => row.patientNumber === "P-07000"));
+
+  // Reapply only the archive-fence SQL from the older backup to this isolated
+  // target after another allocation. This proves a lower snapshot cannot
+  // rewind an already higher target fence; it is not a second full restore.
+  const archiveFenceLines = sql.split("\n").filter(line =>
+    line.startsWith("SELECT setval('public.patient_number_seq'::regclass, GREATEST("));
+  check("P0-A: backup contains exactly one standalone archive fence", archiveFenceLines.length === 1);
+  if (archiveFenceLines.length === 1) {
+    const { rows: [higherBefore] } = await db.getPool().query("SELECT last_value::text, is_called FROM patient_number_seq");
+    await db.getPool().query(archiveFenceLines[0]);
+    const { rows: [higherAfter] } = await db.getPool().query("SELECT last_value::text, is_called FROM patient_number_seq");
+    check("P0-A: replay of older archive fence preserves higher target state",
+      higherBefore.last_value === "7002" && higherBefore.is_called === true &&
+      higherAfter.last_value === higherBefore.last_value && higherAfter.is_called === higherBefore.is_called);
+    const afterReplay = await db.createPatient({ fullName: "SYNTHETIC AFTER OLDER FENCE REPLAY", phone: null, altPhone: null, gender: "unknown", birthYear: null, address: null, medicalAlert: null, note: null });
+    check("P0-A: first new file after older fence replay is P-07003", afterReplay.patientNumber === "P-07003");
+  }
 } catch (error) {
   console.error(`  ✗ سقط التمرين: ${error.message}`);
   failed = true;
