@@ -6,7 +6,7 @@ import { parseDoctorPermissions } from "../lib/doctor-permissions";
 // All persistence and session boundaries are mocked; no database is opened.
 const mocks = vi.hoisted(() => ({
   session: vi.fn(), user: vi.fn(), create: vi.fn(), update: vi.fn(),
-  audit: vi.fn(), opening: vi.fn(), duplicates: vi.fn(), file: vi.fn(),
+  audit: vi.fn(), opening: vi.fn(), file: vi.fn(),
   owns: vi.fn(), visitToday: vi.fn(), settings: vi.fn(), locked: vi.fn(),
   search: vi.fn(), browse: vi.fn(), delete: vi.fn(),
 }));
@@ -14,11 +14,10 @@ vi.mock("@/lib/session", () => ({ requireSession: mocks.session }));
 vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden",
   findUserByUsername: mocks.user,
-  createPatient: mocks.create,
+  createPatientWithDuplicateReview: mocks.create,
   updatePatient: mocks.update,
   recordAudit: mocks.audit,
   setPatientOpeningBalance: mocks.opening,
-  duplicateCandidates: mocks.duplicates,
   getPatientFile: mocks.file,
   doctorOwnsPatient: mocks.owns,
   patientHasVisitToday: mocks.visitToday,
@@ -60,11 +59,10 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.session.mockResolvedValue(session);
   mocks.user.mockResolvedValue(currentDoctor());
-  mocks.duplicates.mockResolvedValue([]);
   mocks.file.mockResolvedValue({ patient });
   mocks.owns.mockResolvedValue(true);
   mocks.visitToday.mockResolvedValue(true);
-  mocks.create.mockResolvedValue({ ...patient, fullName });
+  mocks.create.mockResolvedValue({ ok: true, patient: { ...patient, fullName } });
   mocks.update.mockResolvedValue({ ...patient, fullName });
 });
 
@@ -87,7 +85,6 @@ describe.each(cases)("$method patient write authority", ({ method, permission, s
     expect(mocks.user).toHaveBeenCalledExactlyOnceWith(session.username);
     expect(mocks.owns).not.toHaveBeenCalled();
     expect(mocks.file).not.toHaveBeenCalled();
-    expect(mocks.duplicates).not.toHaveBeenCalled();
     expectNoWrites();
   });
 
@@ -112,7 +109,7 @@ describe.each(cases)("$method patient write authority", ({ method, permission, s
     expect(await response.json()).toMatchObject({ id: patient.id, fullName });
     expect(writer).toHaveBeenCalledTimes(1);
     if (method === "POST") {
-      expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ fullName }));
+      expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ fullName }), false);
       expect(mocks.update).not.toHaveBeenCalled();
     } else {
       expect(mocks.owns).toHaveBeenCalledExactlyOnceWith(7, patient.id);

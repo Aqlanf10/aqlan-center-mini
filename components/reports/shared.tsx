@@ -191,6 +191,18 @@ export function DataTable({
     return output;
   }, [filtered, groupKey]);
 
+  // Preserve the label cell and the selected column grid, even for money-only
+  // views. The official print renderer owns its own totals on a separate route.
+  function renderLeadingScreenTotal(totalRows: ReportRow[]) {
+    const first = columns[0];
+    if (first?.type !== "money" || first.aggregate === "none") return null;
+    return (
+      <span className="block font-mono tabular-nums print:hidden">
+        {currencyTotalsContent(totalRows, first, base)}
+      </span>
+    );
+  }
+
   function renderRow(row: ReportRow, index: number) {
     return (
       <tr
@@ -298,7 +310,10 @@ export function DataTable({
                 {segment.rows.map((row, index) => renderRow(row, index))}
                 {hasMoneyColumns ? (
                   <tr className="border-b border-slate-200 bg-white text-[11px] font-bold text-navy-800">
-                    <td className="px-2.5 py-1.5">مجموع {segment.label}</td>
+                    <td className="px-2.5 py-1.5">
+                      مجموع {segment.label}
+                      {renderLeadingScreenTotal(segment.rows)}
+                    </td>
                     {columns.slice(1).map((column) => (
                       <td key={column.key} className="px-2.5 py-1.5 font-mono tabular-nums">
                         {column.type === "money" ? currencyTotalsContent(segment.rows, column, base) : ""}
@@ -312,7 +327,10 @@ export function DataTable({
           {hasMoneyColumns && filtered.length > 0 ? (
             <tfoot>
               <tr className="border-t-2 border-slate-200 bg-navy-50/60 font-bold text-navy-900 print:bg-white">
-                <td className="px-2.5 py-2.5">الإجمالي ({filtered.length} صفًا)</td>
+                <td className="px-2.5 py-2.5">
+                  الإجمالي ({filtered.length} صفًا)
+                  {renderLeadingScreenTotal(filtered)}
+                </td>
                 {columns.slice(1).map((column) => (
                   <td key={column.key} className="px-2.5 py-2.5 font-mono tabular-nums">
                     {column.type === "money" ? currencyTotalsContent(filtered, column, base) : ""}
