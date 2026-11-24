@@ -82,10 +82,10 @@ function orthoPayload() {
 }
 
 type Write = { method: string; path: string; body: unknown; status: 409 | 500; release: () => void };
-async function fixture(width: number, options: { role?: "doctorA" | "reception"; planVisible?: boolean; malformed?: boolean; invalidContext?: boolean } = {}) {
+async function fixture(width: number, options: { planVisible?: boolean; malformed?: boolean; invalidContext?: boolean } = {}) {
   const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 },
     locale: "ar-YE", timezoneId: "Asia/Aden", serviceWorkers: "block" });
-  const [name, ...value] = h.sessions[options.role ?? "doctorA"].cookie.split("=");
+  const [name, ...value] = h.sessions.doctorA.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const unexpected: string[] = [], errors: string[] = [], downloads: string[] = [];
   const documents: string[] = [], writes: Write[] = [];
@@ -457,26 +457,34 @@ describe("Cases to Ortho navigation on the real built RTL patient page", () => {
     });
   });
 
-  for (const role of ["reception", "doctorA"] as const) {
-    it.each([1280, 390])(`keeps the shortcut independent of ${role} write and plan visibility at %ipx`, async width => {
-      const f = await fixture(width, { role, planVisible: false });
-      await f.run(async () => {
-        expect(await view(f.page).innerText()).toContain("عرض خطط العلاج غير مفعّل لحسابك.");
-        expect(await view(f.page).getByRole("button", { name: OPEN, exact: true }).count()).toBe(2);
-        expect(await view(f.page).getByLabel(`أولوية ${SERVICE}`, { exact: true }).count()).toBe(0);
-        if (role === "reception") {
-          expect(await view(f.page).locator("input,textarea,select").count()).toBe(0);
-          expect((await view(f.page).getByRole("button").allTextContents()).map(text => text.trim())).toEqual(["فاتورة / اتفاق علاج", "بنود خطة هذه الحالة", OPEN, OPEN, "بنود خطة هذه الحالة", "بنود خطة هذه الحالة"]);
-        } else {
-          expect(await view(f.page).getByRole("button", { name: "+ حالة جديدة", exact: true }).count()).toBe(1);
-          expect(await view(f.page).getByRole("button", { name: "فاتورة / اتفاق علاج", exact: true }).count()).toBe(0);
-        }
-        const original = f.page.url(), length = await f.page.evaluate(() => history.length);
-        await shortcut(f.page).click(); await opened(f.page, original, length);
-        expect(f.writes).toEqual([]); expect(f.documents).toHaveLength(1);
-      });
+  it.each([1280, 390])("keeps an authorized doctor's case shortcut independent of plan visibility at %ipx", async width => {
+    const f = await fixture(width, { planVisible: false });
+    await f.run(async () => {
+      expect(await view(f.page).innerText()).toContain("عرض خطط العلاج غير مفعّل لحسابك.");
+      expect(await view(f.page).getByRole("button", { name: OPEN, exact: true }).count()).toBe(2);
+      expect(await view(f.page).getByLabel(`أولوية ${SERVICE}`, { exact: true }).count()).toBe(0);
+      expect(await view(f.page).getByRole("button", { name: "+ حالة جديدة", exact: true }).count()).toBe(1);
+      expect(await view(f.page).getByRole("button", { name: "فاتورة / اتفاق علاج", exact: true }).count()).toBe(0);
+      const original = f.page.url(), length = await f.page.evaluate(() => history.length);
+      await shortcut(f.page).click(); await opened(f.page, original, length);
+      expect(f.writes).toEqual([]); expect(f.documents).toHaveLength(1);
     });
-  }
+  });
+
+  it.each([1280, 390])("withholds clinical case records and their shortcuts from reception at %ipx", async width => {
+    const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE" });
+    try {
+      const [name, ...value] = h.sessions.reception.cookie.split("=");
+      await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+      const page = await context.newPage();
+      await page.goto(entry());
+      await page.getByTestId("patient-workspace").waitFor();
+      const response = await context.request.get(`${baseUrl}/api/patients/${h.seeded.patientAId}/cases`);
+      expect(response.status()).toBe(403);
+      expect(Object.keys(await response.json())).toEqual(["message"]);
+      expect(await page.getByRole("button", { name: OPEN, exact: true }).count()).toBe(0);
+    } finally { await context.close(); }
+  });
 
   it("withholds all row shortcuts after a cross-patient Cases response until a verified retry", async () => {
     const f = await fixture(390, { malformed: true });

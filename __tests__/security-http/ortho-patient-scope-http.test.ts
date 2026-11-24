@@ -34,7 +34,7 @@ beforeAll(async () => {
   const partyB = doctors.find((row) => row.username === "secdoctorb")!.party_id;
   const addPatient = async (label: string, doctor: number) => (await db.query<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ($1, $2, $3) RETURNING id`,
-    [`OSP-${label}-${stamp}`, label === "B" ? privateB : `Ortho scope patient ${label}`, doctor],
+    [`OSP-${label}-${stamp}`, `Ortho scope patient ${label}`, doctor],
   )).rows[0].id;
   patientA = await addPatient("A", partyA); patientB = await addPatient("B", partyB);
   const addCase = async (patient: number, note: string) => (await db.query<{ id: number }>(
@@ -83,6 +83,7 @@ describe("ortho list patient and image isolation over real HTTP", () => {
     const a = await listAs(h.sessions.doctorA);
     expect(a.cases.map((row) => row.id)).toContain(caseA);
     expect(a.cases.map((row) => row.id)).not.toContain(caseB);
+    expect(JSON.stringify(a)).not.toContain("Ortho scope patient B");
     expect(JSON.stringify(a)).not.toContain(privateB);
     expect(a.cases.find((row) => row.id === caseA)).toMatchObject({
       photosVisible: true, adjustments: [expect.objectContaining({ photos: [expect.objectContaining({ id: photoA })] })],
@@ -129,7 +130,9 @@ describe("ortho list patient and image isolation over real HTTP", () => {
     }
     const desk = await authedGet(`/api/patients/${patientB}?projection=workspace`, h.sessions.reception);
     expect(desk.status).toBe(200);
-    expect(JSON.stringify(await desk.json())).not.toContain(privateB);
+    const workspace = await desk.json();
+    expect(workspace.patient).toMatchObject({ id: patientB, fullName: "Ortho scope patient B" });
+    expect(JSON.stringify(workspace)).not.toContain(privateB);
   });
 
   it("preserves the explicit all-patient grant even without a linked doctor party", async () => {

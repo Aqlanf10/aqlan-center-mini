@@ -59,7 +59,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const [message, status] = messages[result.reason];
       return json(message, status);
     }
-    return NextResponse.json(result.referral);
+    return NextResponse.json(session.role === "reception"
+      ? { id: result.referral.id, status: result.referral.status }
+      : result.referral);
   } catch {
     return json("تعذّر تحديث الإحالة. أعد المحاولة.", 500);
   }

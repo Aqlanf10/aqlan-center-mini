@@ -42,12 +42,12 @@ beforeAll(async () => {
 afterAll(async () => { await db?.end(); });
 
 describe("ENDO-2 — permissions", () => {
-  it("reception reads but cannot open a treatment (Arabic 403); cashier/accountant are outside entirely", async () => {
-    expect((await authedGet(base(), h.sessions.reception)).status).toBe(200);
+  it("the assigned doctor can read while reception cannot read or open endodontic treatment", async () => {
+    expect((await authedGet(base(), h.sessions.doctorA)).status).toBe(200);
     const denied = await send("reception", "POST", base(), { toothCode: 36, caseId });
     expect(denied.status).toBe(403);
-    expect(await messageOf(denied)).toContain("يكتبها الطبيب");
-    for (const who of ["cashier", "accountant"] as const) {
+    expect(await messageOf(denied)).toMatch(/[؀-ۿ]/);
+    for (const who of ["reception", "cashier", "accountant"] as const) {
       const response = await authedGet(base(), h.sessions[who]);
       expect(response.status).toBe(403);
       expect(await messageOf(response)).toMatch(/[؀-ۿ]/);
@@ -121,7 +121,7 @@ describe("ENDO-2 — workflow over HTTP", () => {
     expect(frozen.status).toBe(409);
     expect(await messageOf(frozen)).toContain("بملحق");
 
-    const list = await (await authedGet(base(), h.sessions.reception)).json() as { treatments: { visits: { id: number; note: string }[] }[] };
+    const list = await (await authedGet(base(), h.sessions.doctorA)).json() as { treatments: { visits: { id: number; note: string }[] }[] };
     const endoVisitId = list.treatments[0].visits[0].id;
     expect(list.treatments[0].visits[0].note).toBe("محدَّث");
 
