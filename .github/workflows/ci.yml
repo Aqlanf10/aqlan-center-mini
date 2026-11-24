@@ -13,6 +13,8 @@ concurrency:
 
 jobs:
   quality:
+    permissions:
+      contents: read
     name: Typecheck, Lint, Unit, Audit, Build
     runs-on: ubuntu-latest
     # Code/unit/audit/build gates; DB integration and hosted HTTP have isolated runners.
@@ -73,6 +75,8 @@ jobs:
         run: npm test
 
       - name: Dependency audit
+        env:
+          AQLAN_ADVISORY_READ_TOKEN: ${{ github.token }}
         # Preserve complete raw reports. Only the exact reviewed braces advisory
         # may receive a disposition after independent fail-closed verification;
         # every other advisory, malformed report or failed lookup blocks.
