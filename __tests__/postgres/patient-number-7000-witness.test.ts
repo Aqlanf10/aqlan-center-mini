@@ -148,6 +148,39 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
     expect(await db.confirmBookingRequest({id:request.id,date:'2026-11-19',time:'12:00',durationMinutes:30})).toBeNull();
     expect((await db.createPatient(input('AFTER BOOKING'))).patientNumber).toBe('P-07001');
   });
+  it('concurrent ordinary, walk-in and booking file creation share a unique archive counter even on replay', async () => {
+    const visit=await db.addVisit({patientName:'SYNTHETIC MIXED WALK IN',patientPhone:null,note:null});
+    const request=await db.createBookingRequest({fullName:'SYNTHETIC MIXED BOOKING',phone:'999900002',reason:null,preferredDate:null,preferredPeriod:'any'},'synthetic-mixed-numbering');
+    const booking={id:request.id,date:'2026-11-19',time:'12:00',durationMinutes:30};
+    const [ordinary,walk,book]=await Promise.all([
+      db.createPatient(input('MIXED ORDINARY')),
+      db.openVisitPatientFile(visit.id),
+      db.confirmBookingRequest(booking),
+    ]);
+    if(!walk.ok || !book)throw new Error('Synthetic mixed entry failed');
+    const walkPatient=await db.getPatient(walk.patientId);
+    const bookPatient=await db.getPatient(book.patientId);
+    expect(walkPatient).not.toBeNull();expect(bookPatient).not.toBeNull();
+    const numbers=[ordinary.patientNumber,walkPatient!.patientNumber,bookPatient!.patientNumber];
+    expect(new Set(numbers).size).toBe(3);
+    expect(numbers.every(n=>/^P-[0-9]{5,}$/.test(n))).toBe(true);
+    expect(numbers).toContain('P-07000');
+    for(const n of numbers)expect((await db.searchPatients(n)).map(p=>p.patientNumber)).toContain(n);
+
+    // A lost response may be retried after the original write committed.
+    const [walkReplay,bookReplay]=await Promise.all([
+      db.openVisitPatientFile(visit.id),db.confirmBookingRequest(booking),
+    ]);
+    if(!walkReplay.ok)throw new Error('Synthetic walk-in replay failed');
+    expect(walkReplay.patientId).toBe(walk.patientId);expect(walkReplay.created).toBe(false);
+    expect(bookReplay).toBeNull();
+    expect((await q('SELECT count(*)::int AS n FROM patients')).rows[0].n).toBe(4);
+    await restart();
+    const next=await db.createPatient(input('AFTER MIXED REPLAY'));
+    const issuedHigh=Math.max(...numbers.map(n=>Number(n.slice(2))));
+    expect(Number(next.patientNumber.slice(2))).toBeGreaterThan(issuedHigh);
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
   it('equal and occupied unconsumed number is marked consumed, not allocated again', async () => {
     await q("INSERT INTO patients(patient_number,full_name) VALUES('P-07000','SYNTHETIC OCCUPIED TARGET')");
     await q("SELECT setval('patient_number_seq',7000,false)");await restart();
