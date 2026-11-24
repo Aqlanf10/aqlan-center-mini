@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, scrypt as scryptCb, timingSafeEqual } from "node:crypto";
+import { classifySessionEnvelope, decodeSessionBody, hasCanonicalSessionMarker, splitSessionEnvelope } from "./session-envelope";
 import { promisify } from "node:util";
 import { financeAccessFor, type FinanceAccess } from "./finance-permissions";
 
@@ -83,28 +84,25 @@ export function sessionPermissionVersion(role: string, raw: unknown): string {
 
 /** جلسة موقّعة: البيانات ظاهرة، والتوقيع هو ما يمنع تزويرها. */
 export function createSessionToken(payload: SessionPayload): string {
+  if (hasCanonicalSessionMarker(payload)) throw new Error("CANONICAL_SESSION_ISSUANCE_UNSUPPORTED");
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return `${body}.${sign(body)}`;
 }
 
-export function readSessionToken(token: string | undefined): SessionPayload | null {
-  if (!token) return null;
-  const [body, signature] = token.split(".");
-  if (!body || !signature) return null;
-
-  const expected = sign(body);
+/** Signature envelope only, NOT authentication. Canonical and legacy payloads
+ * have separate strict consumers; no caller-provided identity is trusted here. */
+export function readSignedSessionEnvelope(token: string | undefined): unknown | null {
+  const envelope = splitSessionEnvelope(token);
+  if (!envelope) return null;
+  const { body, signature } = envelope;
   const given = Buffer.from(signature);
-  const want = Buffer.from(expected);
+  const want = Buffer.from(sign(body));
   if (given.length !== want.length || !timingSafeEqual(given, want)) return null;
-
-  try {
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as SessionPayload;
-    // التوقيع يمنع التزوير، والانتهاء يمنع بقاء جلسة مسروقة صالحة إلى الأبد.
-    if (typeof payload.expiresAt !== "number" || payload.expiresAt < Date.now()) return null;
-    if (typeof payload.userId !== "number") return null;
-    return payload;
-  } catch {
-    return null;
-  }
+  try { return decodeSessionBody(body); }
+  catch { return null; }
 }
 
+export function readSessionToken(token: string | undefined): SessionPayload | null {
+  const selection = classifySessionEnvelope(readSignedSessionEnvelope(token));
+  return selection?.kind === "legacy" ? selection.payload as unknown as SessionPayload : null;
+}

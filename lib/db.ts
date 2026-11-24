@@ -1,3 +1,4 @@
+import { classifyStaffPermissionEnvelope } from "./staff-permission-envelope";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
@@ -3082,7 +3083,8 @@ export async function findUserByUsername(username: string, client?: DbClient): P
     `SELECT * FROM users WHERE LOWER(username) = LOWER($1) AND is_active LIMIT 1${client ? " FOR SHARE" : ""}`,
     [username],
   );
-  return rows[0] ? toUser(rows[0]) : null;
+  if (!rows[0] || classifyStaffPermissionEnvelope(rows[0].permissions ?? null).kind !== "legacy") return null;
+  return toUser(rows[0]);
 }
 
 export async function countUsers(): Promise<number> {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canAccessUnifiedReport, reportIsAdminOnly } from "../lib/report-access";
+import { reportVisibleToRole, UNIFIED_REPORT_IDS, canAccessUnifiedReport, reportIsAdminOnly } from "../lib/report-access";
 
 describe("reports access policy", () => {
   it("keeps center-wide financial and commission reports admin-only", () => {
@@ -22,3 +22,14 @@ describe("reports access policy", () => {
     expect(canAccessUnifiedReport("doctor", "doctor")).toBe(false);
   });
 });
+
+it("applies the accountant's report grant to every known report and the navigation projection", () => {
+    for (const report of ["options", ...UNIFIED_REPORT_IDS]) {
+      expect(canAccessUnifiedReport("accountant", report, { viewReports: false, viewCommissions: true })).toBe(false);
+      expect(reportVisibleToRole("accountant", report, { viewReports: false })).toBe(false);
+    }
+    expect(canAccessUnifiedReport("accountant", "daily", { viewReports: true })).toBe(true);
+    expect(canAccessUnifiedReport("accountant", "doctor-commission", { viewReports: true, viewCommissions: false })).toBe(false);
+    expect(canAccessUnifiedReport("admin", "daily", { viewReports: false })).toBe(true);
+    expect(canAccessUnifiedReport("reception", "visits", { viewReports: false })).toBe(true);
+  });
