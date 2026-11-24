@@ -1,3 +1,17 @@
+import { newIdempotencyKey } from "./idempotency-key";
+
+/** Retain the key for this submitted form until its acknowledgment is received. */
+export function createRegistrationKey() {
+  let pending: { body: string; key: string } | null = null;
+  return {
+    forBody(body: string) {
+      if (!pending || pending.body !== body) pending = { body, key: newIdempotencyKey("register") };
+      return pending.key;
+    },
+    acknowledged() { pending = null; },
+  };
+}
+
 /** Local UI acknowledgement only. Not an API grant or idempotency key. */
 export interface PatientCreateAttempt {
   readonly snapshot: string;
@@ -12,6 +26,7 @@ export function createPatientDuplicateWarningGuard() {
   let active: PatientCreateAttempt | null = null;
   let warning: PatientCreateAttempt | null = null;
   return {
+    registrationKey: createRegistrationKey(),
     edit() {
       revision += 1;
       warning = null;

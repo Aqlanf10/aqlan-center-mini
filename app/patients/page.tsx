@@ -316,7 +316,7 @@ function NewPatientForm({ onCreated, onCancel }: {
     try {
       const response = await fetch("/api/patients", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "Idempotency-Key": warningGuard.current.registrationKey.forBody(JSON.stringify(fields)) },
         body: JSON.stringify({ ...fields, confirmDuplicate }),
       });
       const payload = await response.json().catch(() => null);
@@ -335,6 +335,7 @@ function NewPatientForm({ onCreated, onCancel }: {
         return;
       }
       if (typeof payload?.warning === "string") window.alert(payload.warning);
+      warningGuard.current.registrationKey.acknowledged();
       const familyWarning = await linkNewPatientToFamily(payload.id, family);
       if (familyWarning) window.alert(familyWarning);
       onCreated(payload as { id: number });

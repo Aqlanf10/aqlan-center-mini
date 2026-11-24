@@ -5,6 +5,10 @@
  */
 import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount, type Currency } from "./money";
 
+export class ReceptionOpeningDisabled extends Error {
+  constructor() { super("إضافة الرصيد السابق من الاستقبال معطّلة في إعدادات المركز."); }
+}
+
 export interface OpeningAccess {
   add: boolean;
   edit: boolean;
