@@ -40,8 +40,11 @@ async function doctorBlocked(patientId: number, skipAllGrant = false): Promise<s
   }
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (!skipAllGrant && user?.permissions?.canViewAllPatients) return null;
-    const doctorPartyId = user?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+    // Never fall back to a stale party binding or grant from the signed cookie.
+    // The current active account is authoritative even if lookup fails.
+    if (!user?.isActive) return "انتهت الجلسة. سجّل الدخول من جديد.";
+    if (!skipAllGrant && user.permissions?.canViewAllPatients) return null;
+    const doctorPartyId = user.partyId;
     if (!doctorPartyId) {
       return "حساب الطبيب غير مرتبط بجهة سريرية معتمدة. تواصل مع إدارة المركز.";
     }
@@ -71,7 +74,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   const blocked = await doctorBlocked(id);
   if (blocked) {
-    return NextResponse.json({ message: blocked }, { status: blocked.includes("جلسة") ? 401 : 403 });
+    return NextResponse.json({ message: blocked }, {
+      status: blocked.includes("جلسة") ? 401 : 403,
+      headers: { "Cache-Control": "private, no-store" },
+    });
   }
 
   // Bounded appointments projection deliberately retains its own authorization.
