@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { KpiGrid } from "../components/reports/shared";
+import { DataTable, KpiGrid } from "../components/reports/shared";
+import { reportCsv } from "../lib/report-export";
 import { PrintableReportDocument } from "../components/reports/PrintableReportDocument";
 import { SETTING_DEFAULTS } from "../lib/settings";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -210,6 +211,58 @@ describe("debt movement clips each monthly row to the selected clinic dates", ()
       expect(html).not.toMatch(/>\s*(good|bad|warn)\s*</);
       for (const card of result.kpis) expect(html).toContain(card.label);
     }
+  });
+
+  it("filters each output by settlement currency, not the tender currency", async () => {
+    const pid = await patient();
+    const yer = await invoice(pid, "YER", 10_000, "2026-12-31T12:00:00+03:00");
+    const sar = await invoice(pid, "SAR", 40, "2027-01-01T12:00:00+03:00");
+    await invoice(pid, "USD", 20, "2027-01-01T12:00:00+03:00");
+    const cross = async (kind: "payment" | "refund", tender: number, settled: number, at: string, reversed: number | null) =>
+      (await q(`INSERT INTO payments (receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,
+        exchange_rate,base_amount_minor,base_currency,method,created_at,reversal_of_id)
+        VALUES ($1,$2,$3,$4,$5,$6,'SAR',150,$7,'YER','cash',$8::timestamptz,$9) RETURNING id`,
+      [`CUT-P-${++serial}`,pid,yer,shift,kind,tender,settled,at,reversed])).rows[0].id as number;
+    const original = await cross("payment", 1_000, 1_500, "2026-12-31T13:00:00+03:00", null);
+    await cross("refund", 100, 150, "2027-01-31T23:59:59+03:00", original);
+    await payment(pid, sar, "SAR", 5, "2027-01-01T13:00:00+03:00");
+
+    const run = (currency: "all" | "YER" | "SAR" | "USD", to = "2027-01-31") => buildReport("debt",
+      parseFilters(new URLSearchParams({ report: "debt", debtMode: "movement", preset: "custom",
+        from: "2026-12-31", to, patientId: String(pid), currency })));
+    const all = await run("all");
+    expect(all.monthly?.rows.map(row => row.currency)).toEqual(["YER", "YER", "SAR", "USD"]);
+    const filtered = await run("SAR");
+    expect(filtered.monthly?.rows).toEqual([{
+      monthLabel: "يناير 2027", currency: "SAR", openingMinor: 0, newDebtMinor: 4_000,
+      collectedMinor: 500, adjustmentsMinor: 0, closingMinor: 3_500,
+    }]);
+    expect(filtered.kpis.map(card => [card.key, card.currency, card.minor])).toEqual([
+      ["opening-SAR", "SAR", 0], ["new-SAR", "SAR", 4_000], ["collected-SAR", "SAR", 500],
+      ["adj-SAR", "SAR", 0], ["closing-SAR", "SAR", 3_500],
+    ]);
+    expect(filtered.bars).toEqual([]);
+    const monthly = filtered.monthly!;
+    const screens = [
+      renderToStaticMarkup(createElement(DataTable, { columns: monthly.columns, rows: monthly.rows, base: filtered.baseCurrency })),
+      renderToStaticMarkup(createElement(PrintableReportDocument, {
+        result: filtered, settings: SETTING_DEFAULTS, generatedAt: "2027-01-31", generatedBy: "اختبار",
+      })),
+    ];
+    for (const page of screens) {
+      expect(page).toContain("35.00 ر.س");
+      expect(page).not.toContain("8,650");
+      expect(page).not.toContain("report-bars-table");
+    }
+    const csv = reportCsv(monthly.columns, monthly.rows, filtered.baseCurrency);
+    expect(csv.split("\r\n")).toHaveLength(2);
+    expect(csv).toContain('"35.00 SAR"');
+    expect(csv).not.toMatch(/YER|USD/);
+    const base = await run("YER");
+    expect(base.monthly?.rows.map(row => [row.collectedMinor, row.adjustmentsMinor])).toEqual([[1_500, 0], [0, 150]]);
+    expect(base.bars).toEqual(all.bars);
+    expect((await run("YER", "2027-01-01")).monthly?.rows.every(row => row.adjustmentsMinor === 0)).toBe(true);
+    expect((await run("USD")).monthly?.rows).toEqual(all.monthly?.rows.filter(row => row.currency === "USD"));
   });
 
   it("keeps native amounts at both endpoints of a 120-month window ending on January 1", async () => {
