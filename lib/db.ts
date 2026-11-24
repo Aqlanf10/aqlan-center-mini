@@ -19986,11 +19986,10 @@ async function assertOpeningCorrectionAllowedInTx(
 export async function setPatientOpeningBalance(input: SetOpeningBalanceInput, transaction?: DbClient): Promise<OpeningBalance | null> {
   if (!transaction) await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
-  const write = async (client: DbClient): Promise<number | null> => {
+  const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
     if (!input.addOnly) await assertOpeningCorrectionAllowedInTx(client, input.patientId, currency, input.amountMinor);
     return (await setPatientOpeningBalanceInTx(client, input))?.patientId ?? null;
-  };
-  const saved = transaction ? await write(transaction) : await withTransaction(getPool(), write);
+  }, transaction);
   return saved === null ? null : getPatientOpeningBalance(saved, currency, transaction);
 }
 
