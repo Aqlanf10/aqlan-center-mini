@@ -179,7 +179,7 @@ async function invoice(patientId: number, category: Category, tooth: number | nu
 }
 
 async function consent(planId: number) {
-  await mutate("reception", "POST", `/api/plans/${planId}/consent`, { note: "موافقة صريحة اصطناعية بعد تقييم الطبيب" }, 201);
+  await mutate("admin", "POST", `/api/plans/${planId}/consent`, { note: "موافقة صريحة اصطناعية بعد تقييم الطبيب" }, 201);
   expect((await q(`SELECT consent_at FROM treatment_plans WHERE id = $1`, [planId]))[0].consent_at).not.toBeNull();
 }
 async function planned(itemId: number): Promise<Planned[]> {

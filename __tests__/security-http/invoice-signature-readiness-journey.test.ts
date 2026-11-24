@@ -47,7 +47,7 @@ async function mutation<T>(who: "admin" | "reception" | "doctorA", path: string,
   return JSON.parse(text) as T;
 }
 async function consent(f: Fixture) {
-  await mutation("reception", `/api/plans/${f.planId}/consent`, { note: "موافقة سريرية صريحة للاختبار" }, 201);
+  await mutation("admin", `/api/plans/${f.planId}/consent`, { note: "موافقة سريرية صريحة للاختبار" }, 201);
 }
 async function fixture(label: string, knownProvider: boolean, withConsent: boolean): Promise<Fixture> {
   const { rows: [{ id: patientId }] } = await db.query<{ id: number }>(`INSERT INTO patients
