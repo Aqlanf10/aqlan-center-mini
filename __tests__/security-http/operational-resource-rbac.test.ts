@@ -18,15 +18,20 @@ beforeAll(async () => { h = await harness(); }, 240_000);
 
 /** موعدٌ حقيقيّ للمريض ب — يُنشأ بجلسةٍ تملكه، فالرقم صالحٌ وموجود. */
 async function appointmentForB(time: string): Promise<number> {
-  const response = await authedMutation(
-    "/api/appointments", h.sessions.reception, "POST",
-    JSON.stringify({
-      patientId: h.seeded.patientBId,
-      date: "2026-08-11", time, durationMinutes: 30, appointmentType: "consultation",
-    }),
+  const payload = { patientId: h.seeded.patientBId, date: "2026-08-11", time,
+    durationMinutes: 30, appointmentType: "consultation" };
+  const book = (nearbyAppointmentConfirmation?: string) => authedMutation(
+    "/api/appointments", h.sessions.reception, "POST", JSON.stringify({ ...payload, nearbyAppointmentConfirmation }),
   );
-  const body = await response.json().catch(() => null);
-  expect(typeof body?.id, "تعذّر تهيئة موعد المريض ب").toBe("number");
+  let response = await book();
+  if (response.status === 409) {
+    const warning = await response.json();
+    expect(warning).toMatchObject({ kind: "nearby_patient_appointments", confirmationToken: expect.any(String) });
+    response = await book(warning.confirmationToken);
+  }
+  expect(response.status).toBe(201);
+  const body = await response.json();
+  expect(typeof body.id).toBe("number");
   return body.id as number;
 }
 
