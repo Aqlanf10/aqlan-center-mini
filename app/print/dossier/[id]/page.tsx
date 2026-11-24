@@ -92,11 +92,15 @@ export default async function PatientDossierPage({
 }) {
   const session = await requireSession();
   if (!session) notFound();
+  // This A4 document contains clinical visits, diagnoses, vitals and tooth charts.
+  // The general reception patient scope grants administrative access only; it is
+  // never authority to print a clinical dossier, even for a patient on today's queue.
+  if (session.role !== "admin" && session.role !== "doctor") notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
-  if (!(await canAccessPatient(session, id))) notFound();
+  if (!(await canAccessPatient(session, id).catch(() => false))) notFound();
   const showFinance = await canAccessPatient(session, id, "canViewPatientPayments");
 
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);

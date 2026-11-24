@@ -19,7 +19,7 @@ it.each([
 ])("rejects malformed or scope-expanding payload %#",async value=>{expect((await post(value)).status).toBe(400);expect(deps.rebook).not.toHaveBeenCalled();});
 it("passes canonical body plus authenticated server session only",async()=>{
   const response=await post(); expect(response.status).toBe(201);expect(response.headers.get("cache-control")).toBe("private, no-store");
-  expect(await response.json()).toEqual({appointmentId:44,title:"Synthetic session",replayed:false});
+  expect(await response.json()).toEqual({appointmentId:44,title:"جلسة رقم 10",replayed:false});
   expect(deps.rebook).toHaveBeenCalledWith({plannedVisitId:10,...body},{username:"synthetic",role:"reception"});
 });
 it("maps recovered retry to 200 and every domain refusal without inventing success",async()=>{

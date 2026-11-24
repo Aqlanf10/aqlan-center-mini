@@ -67,7 +67,8 @@ describe("POST /api/patients/import/legacy", () => {
     expect(ledger.balances.SAR.dueMinor).toBe(167122);
     expect(ledger.balances.USD.dueMinor).toBe(10000);
 
-    const history = await (await authedGet(`/api/patients/${ids.salem}/legacy`, h.sessions.reception)).json() as { treatments: { legacyNumber: number }[] };
+    expect((await authedGet(`/api/patients/${ids.salem}/legacy`, h.sessions.reception)).status).toBe(403);
+    const history = await (await authedGet(`/api/patients/${ids.salem}/legacy`, h.sessions.admin)).json() as { treatments: { legacyNumber: number }[] };
     expect(history.treatments.map((row) => row.legacyNumber)).toEqual([1, 3, 5]);
     expect((await authedGet(`/api/patients/${ids.salem}/legacy`, h.sessions.doctorB)).status).toBe(404);
 

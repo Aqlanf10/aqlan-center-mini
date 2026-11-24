@@ -45,7 +45,7 @@ async function patient() {
 async function open(width = 390, historical = false) {
   const patientId = await patient();
   const context = await browser.newContext({ viewport: { width, height: 1040 }, locale: "ar-YE", serviceWorkers: "block" });
-  const [name, ...value] = h.sessions.reception.cookie.split("=");
+  const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage(); page.setDefaultTimeout(15000);
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });

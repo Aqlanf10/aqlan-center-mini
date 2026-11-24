@@ -165,6 +165,22 @@ describe("official withdrawal evidence", () => {
 
 describe("unavailable official services fail closed", () => {
   const url = "https://api.github.com/advisories/GHSA-vfj7-8cjw-p6xm";
+  it("sends the workflow credential only to the official GitHub advisory API", async () => {
+    vi.stubEnv("AQLAN_ADVISORY_READ_TOKEN", "synthetic-workflow-token");
+    try {
+      for (const [target, authorized] of [[url, true], ["https://api.github.com/advisories?ecosystem=npm", true],
+        ["https://registry.npmjs.org/braces", false], ["https://api.github.com/repos/example", false]]) {
+        await fetchOfficialJson(target, async (address, request) => {
+          expect(request.headers.Authorization).toBe(authorized ? "Bearer synthetic-workflow-token" : undefined);
+          expect(request.redirect).toBe("error");
+          return Object.defineProperty(Response.json({}), "url", { value: address });
+        });
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it.each([
     ["network failure", () => Promise.reject(new TypeError("fetch failed"))],
     ["503", async () => new Response("unavailable", { status: 503, headers: { "content-type": "text/plain" } })],

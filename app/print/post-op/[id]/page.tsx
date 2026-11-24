@@ -35,7 +35,7 @@ export default async function PostOpPrintPage({
   searchParams: Promise<PostOpSearchParams>;
 }) {
   const session = await requireSession();
-  if (!session) notFound();
+  if (!session || session.role === "reception") notFound();
 
   const { id: rawId } = await params;
   const patientId = Number(rawId);

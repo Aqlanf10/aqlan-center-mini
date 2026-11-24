@@ -43,7 +43,9 @@ describe("P3-8 — الإحالات الصادرة", () => {
   it("الاستقبال لا يصدر خطاب إحالة", async () => {
     const response = await create("reception");
     expect(response.status).toBe(403);
-    expect((await response.json() as { message: string }).message).toContain("الطبيب المعالج");
+    const payload = await response.json();
+    expect(Object.keys(payload)).toEqual(["message"]);
+    expect(payload.message).toMatch(/[؀-ۿ]/);
   });
 
   it("طبيبٌ لا يملك المريض لا يحيله", async () => {
@@ -79,7 +81,7 @@ describe("P3-8 — الإحالات الصادرة", () => {
     const done = await authedMutation(`/api/referrals/${referralId}`, h.sessions.reception, "PATCH",
       JSON.stringify({ action: "complete", note: "قُلعت الأربعة" }));
     expect(done.status).toBe(200);
-    expect(await done.json()).toMatchObject({ status: "completed", outcomeNote: "قُلعت الأربعة" });
+    expect(await done.json()).toEqual({ id: referralId, status: "completed" });
     const again = await authedMutation(`/api/referrals/${referralId}`, h.sessions.reception, "PATCH",
       JSON.stringify({ action: "cancel", note: "خطأ" }));
     expect(again.status).toBe(409);

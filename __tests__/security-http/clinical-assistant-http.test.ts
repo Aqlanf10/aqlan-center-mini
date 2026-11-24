@@ -62,7 +62,8 @@ afterAll(async () => { await db?.end(); });
 describe("(P0-F) the clinical assistant finalizes today's visit under their own name", () => {
   it("reads today's visit, but not another patient's file or an old visit", async () => {
     expect((await get(`/api/visits/${todayVisit}/clinical`)).status).toBe(200);
-    expect((await get(`/api/patients/${todayPatient}`)).status).toBe(200);
+    expect((await get(`/api/patients/${todayPatient}`)).status).toBe(403);
+    expect((await get(`/api/patients/${todayPatient}?projection=workspace`)).status).toBe(200);
     await expectArabicDenied(await get(`/api/patients/${otherPatient}`));
     await expectArabicDenied(await get(`/api/visits/${oldVisit}/clinical`));
   });

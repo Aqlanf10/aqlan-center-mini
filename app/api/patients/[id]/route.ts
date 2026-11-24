@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readOperationalPatient } from "@/lib/patient-operational-read";
 import { patientAppointmentsResponse } from "@/lib/patient-appointments-response";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -7,13 +8,14 @@ import {
   deletePatientCascade,
   doctorOwnsPatient, patientHasVisitToday,
   findUserByUsername,
-  getPatientFile,
+  getPatient, getPatientFile,
   getSettings,
   recordAudit,
   updatePatient,
 } from "@/lib/db";
 import { PATIENT_AUDIT_FIELDS, auditChanges } from "@/lib/audit-diff";
-import { validatePatient } from "@/lib/patient";
+import { validatePatient, type PatientInput } from "@/lib/patient";
+import { isPatientAdministrativePatchField } from "@/lib/patient-administrative-edit";
 import { isPreferredChannel, normalizePatientEmail, normalizePatientFlags, parseFlagList } from "@/lib/patient-identity";
 import { isAdmin } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
@@ -58,21 +60,40 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const id = readId(rawId);
   if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
 
+  // Patient's unrestricted dossier contains clinical and financial data.
+  // Reception and other operational roles use bounded appointment/collection APIs,
+  // not this full-file reader. Fail before any clinical database lookup.
+  const projectionRequested = new URL(_request.url).searchParams.has("projection");
+  if (!projectionRequested && session.role !== "admin" && session.role !== "doctor") {
+    return NextResponse.json(
+      { message: "الملف السريري الكامل متاح فقط للطبيب المخوّل والإدارة؛ استخدم واجهات المواعيد أو التحصيل المصرّح بها." },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
+
   const blocked = await doctorBlocked(id);
   if (blocked) {
     return NextResponse.json({ message: blocked }, { status: blocked.includes("جلسة") ? 401 : 403 });
   }
 
-  // The existing patient authorization runs first. This explicit, bounded read mode
-  // never invokes the full patient/financial file and does not change ordinary GET.
-  if (new URL(_request.url).searchParams.has("projection")) {
+  // Bounded appointments projection deliberately retains its own authorization.
+  const projections = new URL(_request.url).searchParams.getAll("projection");
+  if (projections.length === 1 && projections[0] === "workspace") {
+    if (session.role !== "reception" && session.role !== "assistant") {
+      return NextResponse.json({ message: "هذا العرض مخصص للتشغيل اليومي." }, { status: 403 });
+    }
+    const patient = await readOperationalPatient(id, session.role);
+    return NextResponse.json(patient ? { patient, visits: [], appointments: [] } : { message: "الملف غير متاح." },
+      { status: patient ? 200 : 404, headers: { "Cache-Control": "private, no-store" } });
+  }
+  if (projectionRequested) {
     return patientAppointmentsResponse(_request, session, rawId);
   }
 
   try {
     const file = await getPatientFile(id);
     if (!file) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
-    return NextResponse.json(file);
+    return NextResponse.json(file, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل ملف المريض." }, { status: 500 });
   }
@@ -81,6 +102,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  // Defense in depth: the HTTP proxy also restricts PATCH, but the route must
+  // never allow non-clinical accounts through if called without that proxy.
+  if (!["admin", "doctor", "reception"].includes(session.role)) {
+    return NextResponse.json({ message: "تعديل بيانات المريض غير مصرّح لهذا الدور." },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } });
+  }
   const { id: rawId } = await context.params;
   const id = readId(rawId);
   if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
@@ -108,34 +135,48 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+  const reception = session.role === "reception";
+  const noStore = { "Cache-Control": "private, no-store" };
+  if (reception) {
+    if (!body || typeof body !== "object" || Array.isArray(body) || !Object.keys(source).length) {
+      return NextResponse.json({ message: "أرسل بيانات إدارية للتعديل." }, { status: 400, headers: noStore });
+    }
+    if (Object.keys(source).some((key) => !isPatientAdministrativePatchField(key))) {
+      return NextResponse.json({ message: "هذا الحقل غير مصرح للاستقبال بتعديله." }, { status: 403, headers: noStore });
+    }
+  }
 
-  // التعديل يمرّ من نفس تحقّق الإنشاء: قاعدتان مختلفتان للاسم أو سنة الميلاد تعنيان
-  // أن ما يُرفض عند الإنشاء يدخل من باب التعديل.
+  // A reception edit does not need the clinical file, financial rows or documents.
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const current = await getPatientFile(id).catch(() => null);
+  const current = reception ? await getPatient(id).catch(() => null)
+    : (await getPatientFile(id).catch(() => null))?.patient ?? null;
   if (!current) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
+  const provided = (key: string) => Object.hasOwn(source, key);
+  const inputValue = (key: keyof PatientInput, fallback: unknown) =>
+    reception && provided(key) ? source[key] : source[key] ?? fallback;
 
+  // Existing values can support validation, but are not forwarded as receptionist writes.
+  // A supplied date drives its year; a year-only update reconciles against the actual database row.
   const merged = {
-    fullName: source.fullName ?? current.patient.fullName,
-    phone: source.phone ?? current.patient.phone ?? "",
-    altPhone: source.altPhone ?? current.patient.altPhone ?? "",
-    gender: source.gender ?? current.patient.gender,
-    birthYear: source.birthYear ?? current.patient.birthYear ?? "",
-    address: source.address ?? current.patient.address ?? "",
-    medicalAlert: source.medicalAlert ?? current.patient.medicalAlert ?? "",
-    note: source.note ?? current.patient.note ?? "",
-    /* (P2-8) تعديل سنة الميلاد وحدها يُسقط تاريخًا كاملًا لم يعد يوافقها — لا يُترك
-       الملف بتاريخين متناقضين ولا يُرفض تعديلٌ صحيح. */
+    fullName: inputValue("fullName", current.fullName),
+    phone: inputValue("phone", current.phone ?? ""),
+    altPhone: inputValue("altPhone", current.altPhone ?? ""),
+    gender: inputValue("gender", current.gender),
+    birthYear: reception && provided("birthDate") && !provided("birthYear") ? "" : inputValue("birthYear", current.birthYear ?? ""),
+    address: inputValue("address", current.address ?? ""),
+    medicalAlert: reception ? "" : inputValue("medicalAlert", current.medicalAlert ?? ""),
+    note: reception ? "" : inputValue("note", current.note ?? ""),
     birthDate: source.birthDate !== undefined
       ? source.birthDate
-      : source.birthYear !== undefined && current.patient.birthDate
-        && Number(current.patient.birthDate.slice(0, 4)) !== Number(source.birthYear)
-        ? "" : current.patient.birthDate ?? "",
-    guardianName: source.guardianName ?? current.patient.guardianName ?? "",
-    guardianPhone: source.guardianPhone ?? current.patient.guardianPhone ?? "",
-    nationalId: source.nationalId ?? current.patient.nationalId ?? "",
-    referralSource: source.referralSource ?? current.patient.referralSource ?? "",
-    referredBy: source.referredBy ?? current.patient.referredBy ?? "",
+      : reception && provided("birthYear") ? ""
+      : source.birthYear !== undefined && current.birthDate
+        && Number(current.birthDate.slice(0, 4)) !== Number(source.birthYear)
+        ? "" : current.birthDate ?? "",
+    guardianName: inputValue("guardianName", current.guardianName ?? ""),
+    guardianPhone: inputValue("guardianPhone", current.guardianPhone ?? ""),
+    nationalId: reception ? "" : inputValue("nationalId", current.nationalId ?? ""),
+    referralSource: inputValue("referralSource", current.referralSource ?? ""),
+    referredBy: inputValue("referredBy", current.referredBy ?? ""),
   };
 
   const validation = validatePatient(merged, today);
@@ -159,19 +200,30 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (source.flags !== undefined) {
     const settings = await getSettings().catch(() => null);
     if (!settings) return NextResponse.json({ message: "تعذّر قراءة قائمة الأعلام. أعد المحاولة." }, { status: 500 });
-    const flags = normalizePatientFlags(source.flags, parseFlagList(settings["patients.flags"]), current.patient.flags ?? []);
+    const flags = normalizePatientFlags(source.flags, parseFlagList(settings["patients.flags"]), current.flags ?? []);
     if (!flags.ok) return NextResponse.json({ message: flags.message, field: "flags" }, { status: 400 });
     identity.flags = flags.flags;
   }
 
   try {
-    const updated = await updatePatient(id, { ...validation.value, ...identity });
+    const validated = { ...validation.value, ...identity };
+    const writes: Partial<PatientInput> = reception
+      ? Object.fromEntries(Object.entries(validated).filter(([key]) => isPatientAdministrativePatchField(key)
+        && (provided(key) || (key === "birthYear" && provided("birthDate") && validation.value.birthDate !== null))))
+      : validated;
+    const yearOnly = reception && provided("birthYear") && !provided("birthDate");
+    const updated = yearOnly ? await updatePatient(id, writes, { reconcileYearOnlyBirthDate: true })
+      : await updatePatient(id, writes);
     if (!updated) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
-    // (P1-4) ما تغيّر فقط، بقيمته قبل وبعد — «من غيّر هاتف هذا المريض؟» له جواب.
+    // Audit only what this request can have changed, not a concurrent clinician's update.
+    const auditFields = reception
+      ? Object.fromEntries(Object.entries(PATIENT_AUDIT_FIELDS)
+        .filter(([key]) => Object.hasOwn(writes, key) || (yearOnly && key === "birthDate")))
+      : PATIENT_AUDIT_FIELDS;
     const changes = auditChanges(
-      current.patient as unknown as Record<string, unknown>,
+      current as unknown as Record<string, unknown>,
       updated as unknown as Record<string, unknown>,
-      PATIENT_AUDIT_FIELDS,
+      auditFields,
     );
     if (Object.keys(changes).length > 0) {
       await recordAudit({
@@ -181,7 +233,19 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         actor: session.username, actorRole: session.role,
       });
     }
-    return NextResponse.json(updated);
+    // A successful PATCH previously returned the entire updated Patient,
+    // including medicalAlert, note and photoDocumentId, to reception.
+    // Return an explicit administrative projection, never a spread of the row.
+    const responsePatient = reception ? {
+      id: updated.id, patientNumber: updated.patientNumber,
+      fullName: updated.fullName, phone: updated.phone, altPhone: updated.altPhone,
+      gender: updated.gender, birthYear: updated.birthYear, birthDate: updated.birthDate,
+      address: updated.address, guardianName: updated.guardianName, guardianPhone: updated.guardianPhone,
+      referralSource: updated.referralSource, referredBy: updated.referredBy,
+      email: updated.email, preferredChannel: updated.preferredChannel,
+      flags: updated.flags, createdAt: updated.createdAt,
+    } : updated;
+    return NextResponse.json(responsePatient, { headers: noStore });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ التعديل. أعد المحاولة." }, { status: 500 });
   }

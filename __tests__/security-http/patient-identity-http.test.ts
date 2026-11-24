@@ -131,11 +131,14 @@ describe("(PAT-3) PUT /api/patients/[id]/photo", () => {
     const { rows: [document] } = await db.query<{ id: number }>(
       `INSERT INTO patient_documents (patient_id, kind, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
        VALUES ($1, 'photo', 'صورة', 'image/jpeg', 10, repeat('b', 64), 'k/' || gen_random_uuid(), 'x') RETURNING id`, [other.id]);
-    const foreign = await authedMutation(`/api/patients/${patientId}/photo`, h.sessions.reception, "PUT", JSON.stringify({ documentId: document.id }));
+    const foreign = await authedMutation(`/api/patients/${patientId}/photo`, h.sessions.admin, "PUT", JSON.stringify({ documentId: document.id }));
     expect(foreign.status).toBe(404);
     expect((await foreign.json() as { message: string }).message).toMatch(arabic);
     expect((await authedMutation(`/api/patients/${patientId}/photo`, h.sessions.cashier, "PUT", JSON.stringify({ documentId: null }))).status).toBe(403);
-    const own = await authedMutation(`/api/patients/${other.id}/photo`, h.sessions.reception, "PUT", JSON.stringify({ documentId: document.id }));
+    const denied = await authedMutation(`/api/patients/${other.id}/photo`, h.sessions.reception, "PUT", JSON.stringify({ documentId: document.id }));
+    expect(denied.status).toBe(403);
+    expect(Object.keys(await denied.json())).toEqual(["message"]);
+    const own = await authedMutation(`/api/patients/${other.id}/photo`, h.sessions.admin, "PUT", JSON.stringify({ documentId: document.id }));
     expect(own.status).toBe(200);
     expect(await own.json()).toMatchObject({ photoDocumentId: document.id });
   });

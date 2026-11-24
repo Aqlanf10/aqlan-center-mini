@@ -42,13 +42,17 @@ describe("(P0-D) arrival panel access", () => {
     }
   });
 
-  it("the cashier gets money only — no appointments, cases or orthodontic detail; collection follows the role", async () => {
+  it("keeps orthodontic details off both desks and shows them to the treating doctor", async () => {
     await db.query(`INSERT INTO ortho_cases (patient_id, created_by, upper_wire) VALUES ($1, 'dr', '019×025 SS')`, [ownedId]);
     const cashier = await (await get("cashier", ownedId)).json() as Record<string, unknown>;
     expect(cashier).toMatchObject({ appointments: [], cases: [], ortho: null, activeVisit: null, canCollect: true });
     expect(JSON.stringify(cashier)).not.toContain("019×025");
     const reception = await (await get("reception", ownedId)).json() as { ortho: { upperWire: string } | null; canCollect: boolean };
-    expect(reception).toMatchObject({ ortho: { upperWire: "019×025 SS" }, canCollect: true });
+    expect(reception).toMatchObject({ ortho: null, canCollect: true });
+    expect(JSON.stringify(reception)).not.toContain("019×025");
+    const clinical = await get("doctorA", ownedId);
+    expect(clinical.status).toBe(200);
+    expect(await clinical.json()).toMatchObject({ ortho: { upperWire: "019×025 SS" } });
   });
 
   it("a doctor sees only own patients, and no money without the payments permission", async () => {

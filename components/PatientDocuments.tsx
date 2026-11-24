@@ -68,6 +68,8 @@ function PatientDocumentsForPatient({
 }: PatientDocumentsProps) {
   const session = useSession();
   const admin = isAdmin(session?.role);
+  // Reception documents outside records by upload only; it cannot enumerate stored files.
+  const receptionUploadOnly = session?.role === "reception";
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   const [documents, setDocuments] = useState<PatientDocument[]>([]);
@@ -75,6 +77,7 @@ function PatientDocumentsForPatient({
   const [storageMessage, setStorageMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [uploadReceipt, setUploadReceipt] = useState(false);
 
   // (PAT-3) صورة المريض من مستنداته — تمييز المتشابهة أسماؤهم في الترويسة.
   const setAsPhoto = async (documentId: number) => {
@@ -105,6 +108,11 @@ function PatientDocumentsForPatient({
   const [photoView, setPhotoView] = useState<PhotoView | "">("");
 
   const load = useCallback(async () => {
+    // Fail closed even if a caller accidentally tries to refresh after upload.
+    if (receptionUploadOnly) {
+      setDocuments([]); setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const response = await fetch(`/api/patients/${patientId}/documents`, { cache: "no-store" });
@@ -119,9 +127,15 @@ function PatientDocumentsForPatient({
     } finally {
       setLoading(false);
     }
-  }, [patientId]);
+  }, [patientId, receptionUploadOnly]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (receptionUploadOnly) {
+      setDocuments([]); setViewing(null); setShowSliderModal(false); setLoading(false);
+      return;
+    }
+    void load();
+  }, [load, receptionUploadOnly]);
 
   const upload = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -148,7 +162,11 @@ function PatientDocumentsForPatient({
       setPhotoView("");
       if (fileInput.current) fileInput.current.value = "";
       if (cameraInput.current) cameraInput.current.value = "";
-      await load();
+      if (receptionUploadOnly) {
+        setUploadReceipt(true); // Do not GET the saved document or preview.
+      } else {
+        await load();
+      }
     } catch {
       setError("تعذّر الاتصال بالخادم.");
     } finally {
@@ -225,8 +243,19 @@ function PatientDocumentsForPatient({
         </div>
       ) : null}
 
+      {receptionUploadOnly && (
+        <p data-testid="reception-document-upload-only" className="mb-3 rounded-xl bg-slate-50 p-3 text-xs text-slate-700">
+          رفع الأشعة والصور والتقارير الخارجية للتوثيق فقط. لا يتيح هذا الحساب معاينة أو تنزيل المستندات المحفوظة.
+        </p>
+      )}
+      {uploadReceipt && receptionUploadOnly && (
+        <p role="status" className="mb-3 rounded-xl bg-emerald-50 p-3 text-xs text-emerald-700">
+          تم رفع الملف للتوثيق بنجاح.
+        </p>
+      )}
+
       {/* شريط الأدوات السريرية: الإقرارات الطبية ومقارنة الابتسامة */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-navy-50/40 p-2.5">
+      {!receptionUploadOnly && <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-gradient-to-r from-slate-50 to-navy-50/40 p-2.5">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
@@ -252,7 +281,7 @@ function PatientDocumentsForPatient({
         <div className="text-[11px] font-semibold text-slate-500">
           إجمالي المستندات: <span className="font-mono font-bold text-navy-900">{documents.length}</span>
         </div>
-      </div>
+      </div>}
 
       <form onSubmit={upload} className="mb-3 rounded-2xl border border-slate-200 bg-white p-3">
         <div className="mb-2 flex flex-wrap items-end gap-2">
@@ -261,7 +290,7 @@ function PatientDocumentsForPatient({
             <select value={kind} onChange={(event) => setKind(event.target.value as DocumentKind)}
               aria-label="نوع المستند"
               className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
-              {KINDS.map((value) => (
+              {KINDS.filter(value => !receptionUploadOnly || value === "xray" || value === "report").map((value) => (
                 <option key={value} value={value}>{KIND_LABEL[value]}</option>
               ))}
             </select>
@@ -328,7 +357,7 @@ function PatientDocumentsForPatient({
           </label>
           {/* كاميرا الجوال من داخل الملف: العنصر المخفي بـ`capture` يفتح الكاميرا
               مباشرة، والصورة تدخل مسار الرفع نفسه — لا مجلّد جوالٍ يضيع. */}
-          <input ref={cameraInput} type="file" id="document-camera" aria-label="كاميرا التصوير"
+          {!receptionUploadOnly && <><input ref={cameraInput} type="file" id="document-camera" aria-label="كاميرا التصوير"
             accept="image/*" capture="environment" disabled={busy}
             onChange={(event) => {
               const cameraFile = event.target.files?.[0];
@@ -340,7 +369,7 @@ function PatientDocumentsForPatient({
           <button type="button" disabled={busy} onClick={() => cameraInput.current?.click()}
             className="rounded-lg bg-navy-800 px-3 py-1.5 text-xs font-extrabold text-white">
             📷 التقاط صورة الآن
-          </button>
+          </button></>}
           <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
             {picked?.name ?? "لم يُختَر ملف بعد — صورة أو PDF"}
           </span>
@@ -351,7 +380,7 @@ function PatientDocumentsForPatient({
         </div>
       </form>
 
-      {loading && documents.length === 0 ? (
+      {!receptionUploadOnly && (loading && documents.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : documents.length === 0 ? (
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
@@ -435,9 +464,9 @@ function PatientDocumentsForPatient({
             </li>
           ))}
         </ul>
-      )}
+      ))}
 
-      {viewing ? (
+      {!receptionUploadOnly && viewing ? (
         <div role="dialog" aria-label={viewing.title}
           onClick={() => setViewing(null)}
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
@@ -467,15 +496,15 @@ function PatientDocumentsForPatient({
         </div>
       ) : null}
 
-      <ConsentModal
+      {!receptionUploadOnly && <ConsentModal
         isOpen={showConsentModal}
         onClose={() => setShowConsentModal(false)}
         patientId={patientId}
         patientName={patientName}
         onSigned={() => void load()}
-      />
+      />}
 
-      {sliderBeforeUrl && sliderAfterUrl && (
+      {!receptionUploadOnly && sliderBeforeUrl && sliderAfterUrl && (
         <BeforeAfterSlider
           isOpen={showSliderModal}
           onClose={() => setShowSliderModal(false)}
