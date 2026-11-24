@@ -79,6 +79,9 @@ describe("built patient walkout verifies balances for reception", () => {
         }
         await json(route, body);
       }
+      else if (method === "GET" && path === "/api/opening-balances/access" && url.search === "") {
+        await json(route, { add: false, edit: false });
+      }
       else if (path === `/api/patients/${patientId}/ledger`) {
         const current = { YER: foreignCurrency ? 0 : 180000, SAR: foreignCurrency ? 0 : 2300, USD: 0 };
         if (foreignCurrency) current[foreignCurrency] = 2300;

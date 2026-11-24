@@ -146,6 +146,10 @@ async function fixture(width: number) {
     if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
     if (method !== "GET") { unexpected.push(method + " " + target); await route.abort(); return; }
     reads.push(target);
+    if (activeRole === "reception" && target === "/api/opening-balances/access") {
+      await route.continue();
+      return;
+    }
     for (const id of ids) {
       const prefix = `/api/patients/${id}`;
       if (target === prefix + "?projection=workspace") { await route.continue(); return; }
