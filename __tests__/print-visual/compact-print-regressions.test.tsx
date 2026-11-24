@@ -50,6 +50,21 @@ function labCss() {
   });
   return css.toString();
 }
+// Poppler can extract the RTL lam-alef ligature in either order. Keep
+// that tolerance in extracted text only; the browser DOM is checked verbatim.
+const RECEPTION_WORD_IN_PDF = /(?:للاستقبال|لالستقبال)/u;
+const compactCardPdfText = (text: string) => text.replace(/[\s\p{M}\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, "");
+
+it("accepts the two documented reception-word forms in Poppler PDF extraction", () => {
+  const documented = [
+    "\u202bاحتفظ بهذه البطاقة وقدّم رقم الملف للاستقبال عند المراجعة\u202c",
+    "\u202bاحتفظ بهذه البطاقة وقدّم رقم الملف لالستقبال عند المراجعة\u202c",
+  ];
+  for (const fragment of documented) expect(compactCardPdfText(fragment)).toMatch(RECEPTION_WORD_IN_PDF);
+  expect(compactCardPdfText("احتفظ بهذه البطاقة لاستقبال الموعد")).not.toMatch(RECEPTION_WORD_IN_PDF);
+  expect(compactCardPdfText("احتفظ بهذه البطاقة لموظف المختبر")).not.toMatch(RECEPTION_WORD_IN_PDF);
+});
+
 describe("native compact print regression witnesses", () => {
   it.each(["receipt", "lab", "prescription-saved", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
     const prescription = kind.startsWith("prescription-");
@@ -109,9 +124,9 @@ describe("native compact print regression witnesses", () => {
           const copy = page.getByText("احتفظ بهذه البطاقة وقدّم رقم الملف للاستقبال عند المراجعة أو الاستفسار عن موعدك القادم.", { exact: true });
           expect(await copy.count()).toBe(1);
           expect(await page.locator(".patient-card-sheet a[href]").count()).toBe(0);
-          const plain = text.replace(/[\s\p{M}\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, "");
+          const plain = compactCardPdfText(text);
           expect(plain).toContain("احتفظ");
-          expect(plain).toContain("للاستقبال");
+          expect(plain).toMatch(RECEPTION_WORD_IN_PDF);
           expect(plain).not.toMatch(/بوابةالمرضى|\/patient-portal|\/portal/u);
           expect(text.replace(/[\s\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")).toContain(SETTING_DEFAULTS["clinic.phone"]);
         }
