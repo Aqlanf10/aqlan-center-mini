@@ -11,7 +11,7 @@ it("retains the browser registration key when a committed HTTP response is lost"
   try {
     await db.connect();
     const context = await browser.newContext();
-    const [name, value] = h.sessions.admin.cookie.split("=");
+    const [name, value] = h.sessions.reception.cookie.split("=");
     await context.addCookies([{ name, value, url: baseUrl }]);
     const page = await context.newPage();
     const keys: (string | undefined)[] = [];

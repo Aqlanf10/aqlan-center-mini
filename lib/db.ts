@@ -5,7 +5,6 @@ import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpe
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
-import { ReceptionOpeningDisabled } from "./opening-access";
 import { CollectionScopeDenied, requireCollectionScope } from "./reception-collection-scope";
 import { patientNumberBackupSql } from "./patient-number-backup-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
@@ -122,7 +121,7 @@ import {
   DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, PATIENT_NUMBER_SQL, documentKindOfSetting, documentNumberSql,
 } from "./document-numbers";
 import { auditSnapshot, PATIENT_AUDIT_FIELDS } from "./audit-diff";
-import { openingBalanceAccess, type OpeningInput } from "./opening-access";
+import { openingBalanceAccess, ReceptionOpeningDisabled, type OpeningInput } from "./opening-access";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import { hasManualCashLine, ManualCashEntryConflictError } from "./manual-cash-entry";

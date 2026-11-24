@@ -101,6 +101,29 @@ describe("(DAY1) previous balance — reception adds, admin edits", () => {
     expect((await audit()).rows).toEqual([{ action: "patient.create" }, { action: "opening_balance.set" }]);
   });
 
+  it("rejects both reception debt entry points when the opening setting is disabled", async () => {
+    const change = async (value: string) => {
+      const current = await (await authedGet("/api/settings", h.sessions.admin)).json();
+      return authedMutation("/api/settings", h.sessions.admin, "PATCH", JSON.stringify({
+        [openingSetting]: value, __versions: { [openingSetting]: current.__versions[openingSetting] ?? null },
+        __reason: "اختبار اصطناعي لصلاحية تسجيل الرصيد",
+      }));
+    };
+    try {
+      expect((await change("false")).status).toBe(200);
+      const fullName = "شاهد اصطناعي لإيقاف الدين السابق";
+      const openingBalance = { amount: "62", currency: "USD" };
+      expect((await authedMutation("/api/patients", h.sessions.reception, "POST",
+        JSON.stringify({ fullName, openingBalance, confirmDuplicate: true }))).status).toBe(403);
+      expect((await authedMutation("/api/opening-balances", h.sessions.reception, "POST",
+        JSON.stringify({ patientId, ...openingBalance }))).status).toBe(403);
+      expect((await db.query("SELECT id FROM patients WHERE full_name=$1", [fullName])).rows).toEqual([]);
+      expect((await db.query("SELECT 1 FROM patient_opening_balances WHERE patient_id=$1 AND currency='USD'", [patientId])).rows).toEqual([]);
+    } finally {
+      expect((await change("true")).status).toBe(200);
+    }
+  });
+
   it("a refused previous balance creates no half patient", async () => {
     const name = `بلا صلاحية ${Date.now()}`;
     const bad = await authedMutation("/api/patients", h.sessions.reception, "POST",

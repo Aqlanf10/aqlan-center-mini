@@ -3,7 +3,7 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { CLINIC_TIME_ZONE, browsePatients, createPatientWithDuplicateReview, findUserByUsername, getSettings, searchPatients } from "@/lib/db";
 import { parseListFilter, parseListSort } from "@/lib/patient-browse";
-import { openingBalanceAccess, parseOpeningInput, type OpeningInput } from "@/lib/opening-access";
+import { openingBalanceAccess, parseOpeningInput, ReceptionOpeningDisabled, type OpeningInput } from "@/lib/opening-access";
 import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 import { validatePatient } from "@/lib/patient";
 import { clinicDateString } from "@/lib/schedule";
@@ -155,7 +155,8 @@ export async function POST(request: Request) {
       );
     }
     return NextResponse.json(registration.patient, { status: 201 });
-  } catch {
+  } catch (error) {
+    if (error instanceof ReceptionOpeningDisabled) return NextResponse.json({ message: error.message }, { status: 403 });
     return NextResponse.json({ message: "تعذّر حفظ المريض. أعد المحاولة." }, { status: 500 });
   }
 }
