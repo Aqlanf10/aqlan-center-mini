@@ -249,7 +249,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/referrals/[id]/transition": { POST: CLINIC },
   "/api/referrals/mine": { GET: CLINICAL },
   "/api/report": { GET: CLINIC },
-  "/api/reports": { GET: ["admin", "accountant"] },
+  "/api/reports": { GET: ["admin", "reception", "accountant"] },
   "/api/reports/daily-clinic": { GET: ADMIN },
   "/api/reports/saved": { GET: ["admin", "reception", "doctor", "accountant"], POST: CLINIC, PATCH: CLINIC, DELETE: CLINIC },
   "/api/service-materials": { GET: CLINIC, POST: FRONT_DESK, DELETE: FRONT_DESK },

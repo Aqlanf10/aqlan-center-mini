@@ -45,8 +45,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   }
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    const rows = await listLegacyBalanceArrangements(patientId, today);
+    const arrangements = session.role === "reception"
+      ? rows.filter(row => row.cancelledAt === null).map(({ id, currency, cadence, installmentMinor, firstDueDate, progress }) =>
+        ({ id, patientId, currency, cadence, installmentMinor, firstDueDate, progress }))
+      : rows;
     return NextResponse.json({
-      arrangements: await listLegacyBalanceArrangements(patientId, today),
+      arrangements,
       canManage: canManage(session.role),
     });
   } catch {

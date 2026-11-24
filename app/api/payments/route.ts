@@ -71,6 +71,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ reason: "invalid_recovery_request", message: "طلب إعادة تحصيل القسط غير صالح. اختر الفاتورة الأصلية ومبلغًا ومفتاح إعادة صالحين دون أهداف أو أسعار صرف إضافية." }, { status: 400 });
   }
   if (recovery.kind === "recovery") {
+    if (session.role === "reception" && !await canViewPatientMoney(session, recovery.intent.patientId)) {
+      return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
+    }
     try {
       const result = await recordReversedInstallmentRecovery({
         ...recovery.intent, idempotencyKey: recovery.idempotencyKey,

@@ -19934,6 +19934,10 @@ export async function setPatientOpeningBalance(input: SetOpeningBalanceInput): P
   await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
   const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
+    if (input.addOnly) {
+      const { rows: [actor] } = await client.query<{ role: string }>("SELECT role FROM users WHERE username=$1 FOR SHARE", [input.createdBy]);
+      await requireCollectionScope(client, actor?.role, input.patientId, input.createdBy, CLINIC_TIME_ZONE);
+    }
     if (!input.addOnly) await assertOpeningCorrectionAllowedInTx(client, input.patientId, currency, input.amountMinor);
     return (await setPatientOpeningBalanceInTx(client, input))?.patientId ?? null;
   });
