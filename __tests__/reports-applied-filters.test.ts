@@ -104,7 +104,10 @@ async function settle() {
 beforeEach(() => {
   harness.states = ["operational", "daily", null,
     { result, generatedAt: "2026-10-02T08:00:00Z", generatedBy: "synthetic", clinicTimeZone: "Asia/Aden", filters: { ...applied }, sectionId: "operational" },
-    false, null, null, EMPTY_REPORT_VIEW, { ...applied }];
+    false, null,
+    null, // failedExpenseScope
+    null, // patientDrill
+    EMPTY_REPORT_VIEW, { ...applied }];
   harness.refs = [];
   harness.session = { role: "admin", username: "synthetic" };
   harness.filterProps = null;
