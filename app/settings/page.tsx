@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoginPhotoEditor } from "@/components/settings/LoginPhotoEditor";
 import { LOGIN_PHOTO_KEYS } from "@/lib/login-photo";
 import { ClinicHoursEditor } from "@/components/settings/ClinicHoursEditor";
+import { PatientNumberingSettingsSlot } from "@/components/settings/PatientNumberingSettingsSlot";
 import { AnnouncementsManager } from "@/components/AnnouncementsManager";
 import { InstallApp } from "@/components/InstallApp";
 import { PageHeader } from "@/components/PageHeader";
@@ -379,6 +380,8 @@ export default function SettingsPage() {
               <h1 className="text-lg font-black text-navy-950">{query ? `نتائج البحث عن «${query}»` : CATEGORY_LABEL[selectedCategory]}</h1>
               <p className="mt-1 text-xs leading-relaxed text-slate-500">{query ? `${searchResults.length} إعدادًا مطابقًا من الفئات الظاهرة.` : CATEGORY_HELP[selectedCategory] ?? "إعدادات مستخدمة فعليًا في النظام الحالي."}</p>
             </div>
+
+            {!query && selectedCategory === "patient_workflow" ? <PatientNumberingSettingsSlot /> : null}
 
             {searchResults.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">لا توجد إعدادات مطابقة. لا نعرض فئات أو مفاتيح بلا مستهلك فعلي.</div>

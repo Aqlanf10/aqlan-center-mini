@@ -49,6 +49,21 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
   it('the demo reset sequence plan does not reset the patient high-water counter', () => {
     expect(RESET_SEQUENCES).toEqual(['invoice_number_seq','receipt_number_seq','voucher_number_seq']);
   });
+  it('a financial counter restart cannot rewind an already issued patient archive number', async () => {
+    // Isolated fixture only. This exercises the reset sequence allowlist, not
+    // the destructive clinic-data reset workflow or a physical backup restore.
+    const issued = await db.createPatient(input('BEFORE COUNTER MAINTENANCE'));
+    expect(issued.patientNumber).toBe('P-07000');
+    for (const sequence of RESET_SEQUENCES) {
+      await q(`ALTER SEQUENCE "${sequence}" RESTART WITH 1`);
+    }
+    await restart();
+    expect((await db.getPatient(issued.id))?.patientNumber).toBe('P-07000');
+    const next = await db.createPatient(input('AFTER COUNTER MAINTENANCE'));
+    expect(next.patientNumber).toBe('P-07001');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
+
   it('ordinary creation after startup yields P-07000 then P-07001 and keeps the historical file', async () => {
     await restart();
     const a=await db.createPatient(input('A'));const b=await db.createPatient(input('B'));
@@ -69,6 +84,17 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
     await q("UPDATE patients SET id=900000,phone='999900000',national_id='SYNTHETIC-ID-900000',note='external legacy reference 900000' WHERE patient_number='P-00042'");
     await restart();expect((await db.createPatient(input('HIGH METADATA'))).patientNumber).toBe('P-07000');
   });
+  it('keeps six-digit patient archive numbers intact in storage and search', async () => {
+    // Canonical numbers must remain printable beyond the five-character padding floor.
+    await q("SELECT setval('patient_number_seq',99999,true)");
+    await restart();
+    const first=await db.createPatient(input('SIX DIGIT BOUNDARY'));
+    const second=await db.createPatient(input('SIX DIGIT NEXT'));
+    expect([first.patientNumber,second.patientNumber]).toEqual(['P-100000','P-100001']);
+    expect((await db.getPatient(first.id))?.patientNumber).toBe('P-100000');
+    expect((await db.searchPatients('P-100000')).map(p=>p.patientNumber)).toContain('P-100000');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
   it('genuinely filed higher canonical number prevents collision', async () => {
     await q("INSERT INTO patients(patient_number,full_name) VALUES('P-900000','SYNTHETIC CANONICAL HIGH')");
     await restart();expect((await db.createPatient(input('AFTER HIGH'))).patientNumber).toBe('P-900001');
@@ -76,6 +102,20 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
   it('previously allocated high sequence is never reused even without a surviving patient row', async () => {
     await q("SELECT setval('patient_number_seq',900000,true)");await restart();
     expect((await db.createPatient(input('RETIRED SEQUENCE'))).patientNumber).toBe('P-900001');
+  });
+  it('never reuses a printed file number after deleting a clean synthetic duplicate', async () => {
+    const issued=await db.createPatient(input('CLEAN DUPLICATE'));
+    expect(issued.patientNumber).toBe('P-07000');
+    const removed=await db.deletePatientCascade(issued.id, {
+      actor:'synthetic-admin',actorRole:'admin',reason:'synthetic duplicate only',
+    });
+    expect(removed.ok).toBe(true);
+    expect((await q('SELECT patient_number FROM patients WHERE id=$1',[issued.id])).rows).toHaveLength(0);
+    await restart();
+    const next=await db.createPatient(input('AFTER DELETION'));
+    expect(next.patientNumber).toBe('P-07001');
+    expect((await db.searchPatients('P-07000')).map(p=>p.patientNumber)).not.toContain('P-07000');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
   });
   it('shared allocator consumes a value even if its transaction rolls back', async () => {
     const c=await db.getPool().connect();try {await c.query('BEGIN');expect((await c.query(`SELECT ${PATIENT_NUMBER_SQL} AS number`)).rows[0].number).toBe('P-07000');await c.query('ROLLBACK');}finally{c.release();}
