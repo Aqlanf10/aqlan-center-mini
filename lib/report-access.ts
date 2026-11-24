@@ -6,7 +6,15 @@
  * لذلك لا نعيد استخدام canHandleMoney هنا.
  */
 
+export const DISBURSEMENT_REPORT_IDS = ["daily-outflow", "expense-payees"] as const;
+export type DisbursementReportId = typeof DISBURSEMENT_REPORT_IDS[number];
+
+export function isDisbursementReport(report: string | null): report is DisbursementReportId {
+  return report === "daily-outflow" || report === "expense-payees";
+}
+
 export const UNIFIED_REPORT_IDS = [
+  ...DISBURSEMENT_REPORT_IDS,
   "daily",
   "monthly",
   "annual",

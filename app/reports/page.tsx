@@ -10,7 +10,7 @@ import { SavedReportsBar } from "@/components/reports/SavedReportsBar";
 import { EMPTY_REPORT_VIEW, parseReportView, writeReportView, type ReportViewSpec } from "@/lib/report-view";
 import { financeLinks } from "@/components/financeLinks";
 import type { ReportOptions, ReportResult } from "@/lib/reports-types";
-import { reportVisibleToRole } from "@/lib/report-access";
+import { isDisbursementReport, reportVisibleToRole } from "@/lib/report-access";
 import { useSession } from "@/components/SessionProvider";
 
 /**
@@ -67,7 +67,9 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
     reports: [
       { id: "monthly", label: "التقرير الشهري", hint: "مع مقارنة اختيارية بالشهر السابق أو قبل سنة" },
       { id: "annual", label: "التقرير السنوي", hint: "الأشهر الاثنا عشر + إجماليات ومتوسطات" },
-      { id: "collections", label: "تقرير التحصيل", hint: "تحصيل جديد مفصولًا عن مديونية سابقة" },
+      { id: "collections", label: "تقرير التحصيل", hint: "سندات التحصيل والرد والعكس بعملة كل سند" },
+      { id: "daily-outflow", label: "حركة الخرج اليومية", hint: "سندات الصرف وردود المرضى والحوالات الداخلية بأقسام واضحة" },
+      { id: "expense-payees", label: "المصروفات حسب المستفيد والبند", hint: "اعرض سندات شخص أو جهة وبند مثل الإيجار، خلال فترة تختارها" },
       { id: "services", label: "الخدمات والإجراءات", hint: "ما أُنجز فعلًا وقيمته" },
       { id: "suppliers", label: "الموردون والذمم الدائنة", hint: "المستحق، المدفوع، المتبقي وتواريخ الاستحقاق" },
     ],
@@ -128,6 +130,15 @@ function reportSearchParams(targetReport: string, state: FilterState, view?: Rep
     params.set("from", state.from);
     params.set("to", state.to);
   }
+  if (isDisbursementReport(targetReport)) {
+    if (state.currency !== "all") params.set("currency", state.currency);
+    if (targetReport === "expense-payees") {
+      if (state.expenseRecipient) params.set("expenseRecipient", state.expenseRecipient);
+      if (state.expenseCategory) params.set("expenseCategory", state.expenseCategory);
+    }
+    if (view) writeReportView(params, view);
+    return params;
+  }
   if (state.specialty) params.set("specialty", state.specialty);
   if (state.doctorId) params.set("doctorId", String(state.doctorId));
   if (state.patientId) params.set("patientId", String(state.patientId));
@@ -171,6 +182,10 @@ function filterStateFromParams(params: URLSearchParams, fallback: FilterState): 
   next.compare = oneOf(params.get("compare"), ["none", "prev_period", "prev_year"] as const, next.compare);
   next.method = params.get("method") || null;
   next.receivedBy = params.get("receivedBy") || null;
+  if (params.get("report") === "expense-payees") {
+    next.expenseRecipient = params.get("expenseRecipient");
+    next.expenseCategory = params.get("expenseCategory");
+  }
   return next;
 }
 
@@ -330,7 +345,9 @@ export default function ReportsPage() {
     const initialReport = reportDef && initialSection.reports.some((item) => item.id === reportDef.id)
       ? reportDef.id
       : initialSection.reports[0].id;
-    const initialState = filterStateFromParams(params, initialFiltersRef.current);
+    const defaultFilters = isDisbursementReport(initialReport)
+      ? { ...initialFiltersRef.current, preset: "today" as const } : initialFiltersRef.current;
+    const initialState = filterStateFromParams(params, defaultFilters);
     const viewFromUrl = parseReportView(params);
     // Statements are an existing drill report, not a section tab. A copied or
     // saved statement URL still needs to hydrate through the same access guard.
@@ -367,13 +384,16 @@ export default function ReportsPage() {
   }
 
   function chooseReport(nextSection: SectionId, nextReport: string) {
-    void load(nextReport, filters, nextSection, () => {
+    const enteringDisbursement = isDisbursementReport(nextReport) && !isDisbursementReport(reportId);
+    const nextFilters: FilterState = enteringDisbursement ? { ...initialFiltersRef.current, preset: "today" } : filters;
+    void load(nextReport, nextFilters, nextSection, () => {
       setSection(nextSection);
       setReportId(nextReport);
       setPatientDrill(null);
       drillSourceRef.current = null;
       setView(EMPTY_REPORT_VIEW);
-      syncReportUrl(nextSection, nextReport, filters, EMPTY_REPORT_VIEW);
+      setFilters(nextFilters);
+      syncReportUrl(nextSection, nextReport, nextFilters, EMPTY_REPORT_VIEW);
     });
   }
 
@@ -411,6 +431,16 @@ export default function ReportsPage() {
         links={financeLinks("/reports")}
       >
         <div className="flex flex-wrap gap-1.5">
+          {([
+            { id: "collections", label: "حركة التحصيل اليومية" },
+            { id: "daily-outflow", label: "حركة الخرج اليومية" },
+            { id: "expense-payees", label: "المصروفات حسب المستفيد والبند" },
+          ] as const).filter(item => reportVisibleToRole(sessionRole, item.id, { viewCommissions })).map(item => (
+            <a key={item.id} href={`/reports?section=financial&report=${item.id}&preset=today`}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+              {item.label}
+            </a>
+          ))}
           {sessionRole === "admin" ? (
             <a
               href="/reports/daily-clinic"
@@ -500,6 +530,8 @@ export default function ReportsPage() {
             options={options}
             showDebtMode={showDebtMode}
             showCompare={showCompare}
+            disbursementMode={isDisbursementReport(reportId) ? reportId : undefined}
+            expenseOptions={data?.result.report === "expense-payees" ? data.result.expenseFilterOptions : undefined}
             onPatientPicked={(patient) => {
               const next = { ...filters, patientId: patient?.id ?? null };
               patchFilters({ patientId: next.patientId });
