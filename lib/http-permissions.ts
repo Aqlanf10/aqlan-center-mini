@@ -138,7 +138,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/inventory/procurement": { GET: CLINIC, POST: CLINIC },
   "/api/inventory/value": { GET: ADMIN },
   "/api/invoices": { GET: ["admin", "reception", "cashier", "accountant"], POST: ADMIN },
-  "/api/invoices/clinical-preview": { POST: FRONT_DESK },
+  "/api/invoices/clinical-preview": { POST: ADMIN },
   "/api/invoices/[id]": { GET: ["admin", "cashier", "accountant"], PATCH: ADMIN },
   "/api/invoices/[id]/correct": { GET: ADMIN, POST: ADMIN },
   "/api/lab": { GET: CLINIC, POST: CLINIC },

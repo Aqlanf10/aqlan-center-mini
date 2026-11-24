@@ -32,7 +32,8 @@ export async function GET(request: Request) {
     } catch { return failed("تعذّر تحديث الزيارات الموقّعة. أعد المحاولة."); }
   }
   try {
-    return NextResponse.json(await listTodayVisits());
+    const visits = await listTodayVisits();
+    return NextResponse.json(session.role === "reception" ? visits.map(visit => ({ ...visit, note: null })) : visits);
   } catch {
     // تفاصيل الاستثناء لا تخرج في الاستجابة — قد تحمل رابط قاعدة البيانات.
     return failed("تعذّر تحميل قائمة اليوم. تحقق من الاتصال ثم أعد المحاولة.");

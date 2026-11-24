@@ -22,9 +22,14 @@ export async function GET() {
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
     const followUpDays = followUpDaysFrom((await getSettings())["followup.proposal_days"]);
-    const rows = await listPendingProposals({ includeMoney: canViewMoney(session.role) });
+    const desk = session.role === "reception";
+    const rows = await listPendingProposals({ includeMoney: !desk && canViewMoney(session.role) });
     const proposals = sortProposals(rows.map((row) => ({
-      ...row,
+      ...(desk ? {
+        planId: row.planId, patientId: row.patientId, patientName: row.patientName, patientPhone: row.patientPhone,
+        doctorName: row.doctorName, createdOn: row.createdOn, lastContactOn: row.lastContactOn,
+        whatsappAllowed: row.whatsappAllowed, title: null, items: null, totalMinor: null,
+      } : row),
       timing: proposalTiming({ createdOn: row.createdOn, lastContactOn: row.lastContactOn, today, followUpDays }),
     })));
     return NextResponse.json({ proposals, followUpDays, today }, { headers: { "Cache-Control": "no-store" } });
