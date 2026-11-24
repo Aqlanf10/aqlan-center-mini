@@ -27,8 +27,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "لا تملك صلاحية عرض أرصدة المرضى." }, { status: 403 });
   }
   try {
-    const includeMoney = desk || await canViewPatientMoney(session, patientId);
-    const panel = await arrivalPanel(patientId, { includeMoney });
+    const includeMoney = session.role === "reception" ? await canViewPatientMoney(session, patientId) : desk || await canViewPatientMoney(session, patientId);
+    const panel = await arrivalPanel(patientId, { includeMoney, ...(session.role === "reception" || cashier ? { operational: true } : {}) });
     if (!panel) return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
     /* الرؤية ليست تحصيلًا: الطبيب لا يقبض، والكاشير الممنوع من التحصيل لا تظهر له أزراره. */
     const canCollect = desk && includeMoney && (!cashier || session.financeAccess?.collectPayments !== false);

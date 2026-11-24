@@ -59,7 +59,12 @@ describe("legacy archive read authority", () => {
     mocks.session.mockResolvedValue({ role, username: "synthetic-reader" });
     expect((await get()).status).toBe(404); expect(mocks.history).not.toHaveBeenCalled();
   });
-  it.each(["admin", "reception", "doctor"])("allows the authorized %s without changing historical facts", async (role) => {
+  it("denies the complete clinical and payment archive to reception", async () => {
+    mocks.session.mockResolvedValue({ role: "reception", username: "synthetic-reader" });
+    expect((await get()).status).toBe(403);
+    expect(mocks.history).not.toHaveBeenCalled();
+  });
+  it.each(["admin", "doctor"])("allows the authorized %s without changing historical facts", async (role) => {
     mocks.session.mockResolvedValue({ role, username: "synthetic-reader" });
     const response = await get(); expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ treatments: [imported], orphanPayments: [] });

@@ -33,6 +33,15 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   const id = await idFrom(context);
   if (!id) return NextResponse.json({ message: "رقم المستند غير صالح." }, { status: 400 });
 
+  // Deny upload-only front desk at the HTTP handler before document metadata,
+  // storage keys or binary bytes are queried. Shared patient scope is a second gate.
+  if (session.role === "reception") {
+    return NextResponse.json(
+      { message: "غير مصرّح لك بعرض هذا المستند." },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
+
   try {
     const found = await getDocumentForDownload(id);
     if (!found) return NextResponse.json({ message: "المستند غير موجود." }, { status: 404 });

@@ -1,3 +1,4 @@
+import { canViewPatientMoney } from "@/lib/patient-access";
 import { invoicePricingSettings } from "@/lib/invoice-price-settings-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -31,8 +32,15 @@ export async function GET(request: Request) {
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
   }
+  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) {
+    return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
+  }
   try {
-    return NextResponse.json(await listPatientInvoices(patientId));
+    const invoices = await listPatientInvoices(patientId);
+    return NextResponse.json(session.role === "reception"
+      ? invoices.filter(row => row.status === "open").map(({ id, invoiceNumber, totalMinor, discountMinor, baseCurrency, status }) => ({
+        id, invoiceNumber, totalMinor, discountMinor, baseCurrency, status,
+      })) : invoices);
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الفواتير." }, { status: 500 });
   }
@@ -41,6 +49,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role === "reception") {
+    return NextResponse.json({ message: "التحصيل من حساب المريض المخوّل. إصدار الفاتورة يتطلب صلاحية الفوترة." }, { status: 403 });
+  }
   if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }

@@ -1193,8 +1193,46 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
   }));
 }
 
+// These three detailed reports mix scheduling data with clinical records or
+// clinic finances. Construct the reception response before table views, saved
+// layouts, PDF, CSV or Excel get access to the result.
+const RECEPTION_WORKLISTS = {
+  visits: {
+    columns: ["patientId", "visitDate", "arrivedTime", "patientNumber", "patientName", "phone", "kind", "doctorName",
+      "appointment", "calledTime", "seatedTime", "finishedTime", "waitMinutes", "sessionMinutes", "statusLabel"],
+    kpis: ["visits", "visitedPatients", "firstVisits", "completed", "avgWait", "avgSession"],
+  },
+  "unscheduled-treatment": {
+    columns: ["patientId", "patientNumber", "patientName", "phone", "doctorName", "lastVisit"],
+    kpis: ["patients"],
+  },
+  "internal-referrals": {
+    columns: ["patientId", "date", "patientName", "from", "to", "state", "days"],
+    kpis: ["open", "requested", "waiting_booking", "scheduled", "in_progress", "returned", "avg_days"],
+  },
+};
+
+function receptionWorklist(result: ReportResult, report: keyof typeof RECEPTION_WORKLISTS): ReportResult {
+  const allowed = RECEPTION_WORKLISTS[report];
+  return {
+    report, title: result.title, periodLabel: result.periodLabel, filtersLabel: result.filtersLabel,
+    from: result.from, to: result.to, baseCurrency: result.baseCurrency,
+    columns: result.columns?.filter(column => allowed.columns.includes(column.key)),
+    rows: result.rows?.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => allowed.columns.includes(key)))),
+    kpis: result.kpis.filter(kpi => allowed.kpis.includes(kpi.key)),
+  };
+}
+
 /** يبني التقرير كاملًا وفق نوعه وفلاتره. */
-export async function buildReport(report: string, filters: ReportFilters): Promise<ReportResult> {
+export async function buildReport(report: string, filters: ReportFilters, role?: string): Promise<ReportResult> {
+  const reception = role === "reception";
+  if (reception) {
+    // Restrict the query as well as its output. A service or financial filter can
+    // otherwise identify people with a particular procedure or payment history.
+    const schedulingSpecialty = report === "appointments" || report === "appointment-performance";
+    filters = { ...filters, serviceId: null, specialty: schedulingSpecialty ? filters.specialty : null,
+      patientStatus: "all", debtStatus: "all", currency: "all", method: null, receivedBy: null };
+  }
   // نتحقق من المدى قبل تحميل السياق حتى عند استدعاء الباني مباشرةً.
   const range = validateReportMonthRange(report, filters.debtMode, filters.from, filters.to);
   if (range) {
@@ -1222,7 +1260,7 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
   }
   if (report === "specialty") ctx.specialty = await loadSpecialtyExtras(filters);
 
-  if (report === "visits") {
+  if (report === "visits" && !reception) {
     // Only source evidence shares this snapshot; existing report context was loaded above.
     ctx.visitSources = await withFinancialReadSnapshot(getPool(), runner =>
       readVisitFinancialContexts(runner,visitsInRange(ctx,filters.from,filters.to).map(visit=>({visitId:visit.id,expectedPatientId:visit.patientId}))),
@@ -1241,11 +1279,17 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "pre-system-receipts": return preSystemReceiptsReport(ctx);
     case "ortho-duplicate-adjustments": return orthoDuplicateAdjustmentsReport(ctx);
     case "commission-detail": return commissionDetailCenterReport(ctx);
-    case "internal-referrals": return internalReferralsReport(ctx);
+    case "internal-referrals": {
+      const result = await internalReferralsReport(ctx);
+      return reception ? receptionWorklist(result, "internal-referrals") : result;
+    }
     case "chair-flow": return chairFlowReport(ctx);
     case "collections": return collectionsReport(ctx);
     case "services": return servicesReport(ctx);
-    case "visits": return visitsReport(ctx);
+    case "visits": {
+      const result = visitsReport(ctx);
+      return reception ? receptionWorklist(result, "visits") : result;
+    }
     case "appointments": return appointmentsReport(ctx);
     case "treatment-plans": return treatmentPlansReport(ctx);
     case "lab": return labReport(ctx);
@@ -1259,7 +1303,10 @@ export async function buildReport(report: string, filters: ReportFilters): Promi
     case "chair-utilization": return chairUtilizationReport(ctx);
     case "appointment-performance": return appointmentPerformanceReport(ctx);
     case "plan-intelligence": return planIntelligenceReport(ctx);
-    case "unscheduled-treatment": return unscheduledTreatmentReport(ctx);
+    case "unscheduled-treatment": {
+      const result = await unscheduledTreatmentReport(ctx);
+      return reception ? receptionWorklist(result, "unscheduled-treatment") : result;
+    }
     case "lab-intelligence": return labIntelligenceReport(ctx);
     case "new-patient-intelligence": return newPatientIntelligenceReport(ctx);
     case "recall-intelligence": return recallIntelligenceReport(ctx);
@@ -6036,21 +6083,22 @@ async function practiceTrendsReport(ctx: ReportContext): Promise<ReportResult> {
 
 // ─── خيارات الفلاتر ─────────────────────────────────────────────────────────
 
-export async function reportOptions(): Promise<ReportOptions> {
+export async function reportOptions(role?: string): Promise<ReportOptions> {
+  const reception = role === "reception";
   const [doctors, services, settings] = await Promise.all([
     listParties("doctor"),
-    listServices(),
+    reception ? [] : listServices(),
     getSettings(),
   ]);
   await ensureSchema();
-  const receiversRes = await getPool().query<{ receiver: string | null }>(
+  const receiversRes = reception ? { rows: [] } : await getPool().query<{ receiver: string | null }>(
     `SELECT DISTINCT created_by AS receiver FROM payments WHERE created_by IS NOT NULL ORDER BY created_by`,
   );
   return {
     doctors: doctors.map((party) => ({ id: party.id, name: party.name })),
     specialties: Object.entries(CATEGORY_LABEL).map(([value, label]) => ({ value, label })),
     services: services.map((service) => ({ id: service.id, name: service.name })),
-    methods: Object.entries(PAYMENT_METHOD_LABEL).map(([value, label]) => ({ value, label })),
+    methods: reception ? [] : Object.entries(PAYMENT_METHOD_LABEL).map(([value, label]) => ({ value, label })),
     receivers: receiversRes.rows.map((row) => row.receiver ?? "").filter(Boolean),
     baseCurrency: CLINIC_BASE_CURRENCY,
     clinicName: String(settings["clinic.name"] ?? "مركز الأسنان"),

@@ -39,7 +39,7 @@ export default async function OfficialReportPrintPage({
     const [today, printSettings] = await Promise.all([dbTodayISO(), getSettingsSafe()]);
     settings = printSettings;
     const filters = parseFilters(params, today);
-    result = await buildReport(report, filters);
+    result = await buildReport(report, filters, session.role);
   } catch (error) {
     if (error instanceof ReportInputError) notFound();
     throw error;

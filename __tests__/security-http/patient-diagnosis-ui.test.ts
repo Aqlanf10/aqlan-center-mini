@@ -246,11 +246,17 @@ describe("case-scoped diagnosis on the built RTL patient page", () => {
     } finally { await f.context.close(); }
   });
 
-  it("keeps reception read-only in the diagnosis panel", async () => {
+  it("withholds case diagnoses from the reception workspace", async () => {
     const f = await fixture(1280, h.sessions.reception); const before = await snapshot();
     try {
-      const panel = await f.open(); await panel.getByText(noteA, { exact: true }).waitFor();
-      expect(await panel.getByRole("button", { name: /تحديث التشخيص|سجّل تشخيص/ }).count()).toBe(0);
+      await f.page.goto(`${baseUrl}/patients/${patient}?tab=treatment&sub=ortho`);
+      await f.page.getByTestId("patient-workspace").waitFor();
+      const denied = await f.context.request.get(`${baseUrl}/api/patients/${patient}/diagnoses`);
+      expect(denied.status()).toBe(403);
+      expect(Object.keys(await denied.json())).toEqual(["message"]);
+      for (const text of [noteA, noteB, standalone]) {
+        expect(await f.page.getByText(text, { exact: true }).count()).toBe(0);
+      }
       expect(f.writes).toEqual([]); expect(await snapshot()).toEqual(before); expect(f.unexpected).toEqual([]); expect(f.pageErrors).toEqual([]);
     } finally { await f.context.close(); }
   });

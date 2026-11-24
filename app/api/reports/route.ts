@@ -42,7 +42,7 @@ export async function GET(request: Request) {
 
   if (report === "options") {
     try {
-      return NextResponse.json(await reportOptions());
+      return NextResponse.json(await reportOptions(session.role));
     } catch {
       return NextResponse.json({ message: "تعذّر تحميل خيارات الفلاتر." }, { status: 500 });
     }
@@ -53,7 +53,7 @@ export async function GET(request: Request) {
     validateCustomReportRange(params);
     // «اليوم» من القاعدة نفسها — مطابقةً للطريقة التي حُسبت بها تواريخ كل حركة.
     const filters = parseFilters(params, await dbTodayISO());
-    const result = await buildReport(report, filters);
+    const result = await buildReport(report, filters, session.role);
     /* (P1-2) العقد الذي تقرؤه الصفحة (`LoadedReport`): التقرير داخل `result`. كان
        يُعاد مسطّحًا ({...result}) فتقرأ الصفحة `data.result` غير معرَّف وتنهار لكل
        مستخدم — والمسار نفسه يعيد 200. */

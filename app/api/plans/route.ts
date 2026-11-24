@@ -17,6 +17,9 @@ const denied = () =>
 
 export async function GET(request: Request) {
   const session = await requireSession();
+  if (session?.role === "reception") {
+    return NextResponse.json({ message: "استخدم حساب التحصيل المخصص للمريض." }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+  }
   if (!session) return denied();
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const patientId = Number(new URL(request.url).searchParams.get("patientId"));

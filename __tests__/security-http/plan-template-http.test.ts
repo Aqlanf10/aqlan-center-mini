@@ -249,9 +249,12 @@ describe("(SPEC-T1) plan from a specialty template", () => {
       expect(identity(recovered.clinical.links)).toEqual(identity(receipt.clinical.links));
       expect(recovered.clinical.links.every(link => link.planItemCreated === false && link.caseCreated === false)).toBe(true);
       expect(await snapshot()).toEqual(before);
-      for (const [session, request] of [[h.sessions.reception, exact], [h.sessions.admin, JSON.stringify({ ...command, note: "نية مختلفة" })]] as const) {
+      for (const [session, request, expectedStatus] of [
+        [h.sessions.reception, exact, 403],
+        [h.sessions.admin, JSON.stringify({ ...command, note: "نية مختلفة" }), 409],
+      ] as const) {
         const refused = await authedMutation("/api/invoices", session, "POST", request);
-        expect(refused.status).toBe(409);
+        expect(refused.status).toBe(expectedStatus);
         expect((await refused.json() as { message: string }).message).toEqual(expect.any(String));
         expect(await snapshot()).toEqual(before);
       }

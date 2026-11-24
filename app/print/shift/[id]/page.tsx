@@ -30,7 +30,9 @@ function clockOf(iso: string): { date: string; time: string } {
 
 export default async function ShiftCloseReportPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
-  if (!session || !canViewMoney(session.role)) notFound();
+  // P1: a Z report discloses clinic-wide cash, expenses and closure reasons.
+  // Reception can collect an authorized patient's payment, not print shifts.
+  if (!session || session.role === "reception" || !canViewMoney(session.role)) notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);

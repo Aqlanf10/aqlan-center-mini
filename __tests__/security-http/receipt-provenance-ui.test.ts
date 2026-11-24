@@ -6,7 +6,7 @@ import { mkdir } from "node:fs/promises";
 import type { ReceiptProvenance } from "../../lib/receipt-provenance";
 import { guardBrowserRoutes } from "../helpers/guarded-browser-routes";
 import { assertPrintPdfHeader, assertReceiptPrintPdfSignature, matchesPrintPdfWord, type PrintPdfPage } from "../helpers/print-pdf-glyphs";
-import { authedGet, authedMutation, baseUrl, harness } from "./_server";
+import { grantReceptionCollection, authedGet, authedMutation, baseUrl, harness } from "./_server";
 import { emitReceiptProvenanceEvidence, emitReceiptProvenanceFailedPdf, type ReceiptProvenanceEvidenceMember } from "./_receipt-provenance-evidence";
 
 // SOURCE-ONLY CANDIDATE. All fixtures belong to the isolated HTTP database.
@@ -118,15 +118,30 @@ function assertProjection(feed: Feed) {
 describe("receipt provenance through existing authorized read routes", () => {
   it("adds separate privacy-minimal provenance while retaining permissions, face values and stored origin links", async () => {
     const before = await snapshot();
+    await grantReceptionCollection(h, patientId);
     for (const role of ["admin", "reception", "cashier", "accountant"] as const) {
       const ledger = await authedGet(`/api/patients/${patientId}/ledger`, h.sessions[role]);
       expect(ledger.status).toBe(200);
       const body = await ledger.json() as Feed;
-      assertProjection(body);
+      if (role === "reception") {
+        // Every source receipt here was issued by another actor.
+        expect(body.payments).toEqual([]);
+        expect(body).not.toHaveProperty("receiptProvenance");
+      } else {
+        assertProjection(body);
+      }
       if (role !== "admin") expect(body.receiptRemaining).toBeUndefined();
       const shift = await authedGet("/api/shifts", h.sessions[role]);
-      expect(shift.status).toBe(200);
-      assertProjection(await shift.json() as Feed);
+      if (role === "reception") {
+        // P1: patient-specific ledger remains visible while clinic-wide shifts do not.
+        expect(shift.status).toBe(403);
+        const denied = await shift.text();
+        expect(denied).not.toContain(original.receiptNumber);
+        expect(denied).not.toContain(privateReason);
+      } else {
+        expect(shift.status).toBe(200);
+        assertProjection(await shift.json() as Feed);
+      }
     }
     for (const role of ["doctorA", "doctorB", "portalA", "portalB"] as const) {
       for (const path of [`/api/patients/${patientId}/ledger`, "/api/shifts", `/print/receipt/${original.id}`]) {

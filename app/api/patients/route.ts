@@ -44,7 +44,7 @@ export async function GET(request: Request) {
   try {
     // Explicit server projection: finance staff never receive clinical fields,
     // even when requesting this API directly rather than through the UI.
-    const financeOnly = isRestrictedRole(session.role);
+    const financeOnly = isRestrictedRole(session.role) || session.role === "reception";
     const financeSummary = (patient: { id: number; patientNumber: string; fullName: string; phone: string | null }) => ({
       id: patient.id, patientNumber: patient.patientNumber, fullName: patient.fullName, phone: patient.phone,
     });
@@ -61,6 +61,9 @@ export async function GET(request: Request) {
     const sort = parseListSort(params.get("sort"));
     // (PAT-3) علَمٌ بعينه — نصٌّ قصير يُقارن حرفيًّا بأعلام المريض (مُعامَلٌ لا يُلصق في SQL).
     const flag = (params.get("flag") ?? "").trim().slice(0, 30) || null;
+    if (financeOnly && (flag || ["alert", "ortho", "debt"].includes(filter))) {
+      return NextResponse.json({ message: "هذا المرشّح غير متاح لهذا الحساب." }, { status: 403 });
+    }
     const { rows, total } = await browsePatients({
       offset: page * PAGE_SIZE, limit: PAGE_SIZE, filter, sort, doctorPartyId, flag,
       today: clinicDateString(new Date(), CLINIC_TIME_ZONE),

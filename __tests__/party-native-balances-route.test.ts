@@ -10,7 +10,7 @@ vi.mock("../lib/db", () => ({
   partyBalances: boundary.partyBalances, partyNativeBalanceSnapshot: boundary.partyNativeBalanceSnapshot,
   partyStatement: boundary.partyStatement, recordAudit: boundary.recordAudit,
 }));
-import { GET } from "../app/api/payables/route";
+import { GET, POST } from "../app/api/payables/route";
 
 const native = [
   { partyId: 1, name: "Synthetic lab", kind: "lab", currency: "USD", dueMinor: 1234 },
@@ -73,9 +73,34 @@ describe("versioned native party balance read", () => {
     expect(JSON.stringify(await response.json())).not.toMatch(/partyIdentities|balancesByCurrency|dueMinor|Synthetic lab|Zero supplier|USD|SAR/);
   });
 
-  it.each(["admin", "reception", "accountant", "cashier"])("preserves existing handler-level %s admission, with unchanged proxy gates", async (role) => {
+  it.each(["admin", "accountant"])("preserves authorized %s supplier-balance reads", async (role) => {
     boundary.requireSession.mockResolvedValue({ username: "synthetic-user", role });
     expect((await request()).status).toBe(200);
+  });
+
+  it.each(["", "view=party-balances-v1", "partyId=1"])(
+    "refuses reception supplier/lab account read %s before any balance or statement query", async (query) => {
+      boundary.requireSession.mockResolvedValue({ username: "synthetic-reception", role: "reception" });
+      const response = await request(query);
+      expect(response.status).toBe(403);
+      noReads();
+      expect(boundary.createPayable).not.toHaveBeenCalled();
+      expect(boundary.recordAudit).not.toHaveBeenCalled();
+      expect(JSON.stringify(await response.json())).not.toMatch(/partyIdentities|balancesByCurrency|owedMinor|dueMinor|Synthetic lab|Zero supplier/);
+    },
+  );
+
+  it("refuses reception payable creation before parsing or accessing financial stores", async () => {
+    boundary.requireSession.mockResolvedValue({ username: "synthetic-reception", role: "reception" });
+    // Intentionally invalid content: role admission must fail before body validation.
+    const response = await POST(new Request("https://synthetic.invalid/api/payables", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{not-json",
+    }));
+    expect(response.status).toBe(403);
+    noReads();
+    expect(boundary.createPayable).not.toHaveBeenCalled();
+    expect(boundary.recordAudit).not.toHaveBeenCalled();
+    expect(await response.json()).not.toHaveProperty("amountMinor");
   });
 
   it.each(["view=", "view=unknown", "view=party-balances-v1&view=party-balances-v1",

@@ -1,29 +1,41 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedGet, authedMutation, harness } from "./_server";
+import { authedGet, authedMutation, grantReceptionCollection, harness } from "./_server";
 
 /**
- * (DAY1 — قرار المالك) الرصيد السابق للمرضى القدامى عبر المسارات الحقيقية: الاستقبال يضيف
- * (من الملف أو عند التسجيل) ولا يعدّل، والمدير يعدّل، والطبيب لا يسجّل رصيدًا ولا يولد ملفٌ
- * ناقص حين يُرفض رصيده.
+ * إضافة الرصيد السابق للمريض المخوّل، وتسجيل ملف المريض الجديد مع إبلاغ الاستقبال
+ * بتأجيل الرصيد حتى التفويض، وتوثيق تعديل الإدارة.
  */
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let patientId = 0;
+let priorOpeningSetting: string | null = null;
+const openingSetting = "finance.reception_adds_opening_balance";
 const arabic = /[؀-ۿ]/;
 
 beforeAll(async () => {
   h = await harness();
   db = new Client({ connectionString: h.seeded.dbUrl, ssl: false });
   await db.connect();
+  const setting = await db.query<{ value: string }>("SELECT value FROM settings WHERE key=$1", [openingSetting]);
+  priorOpeningSetting = setting.rows[0]?.value ?? null;
+  await db.query("INSERT INTO settings(key,value) VALUES ($1,'true') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value", [openingSetting]);
   ({ rows: [{ id: patientId }] } = await db.query<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'مريض قديم عليه مبلغ') RETURNING id`, [`D1H-${Date.now()}`]));
 }, 120_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  if (!db) return;
+  if (priorOpeningSetting === null) await db.query("DELETE FROM settings WHERE key=$1", [openingSetting]);
+  else await db.query("UPDATE settings SET value=$2 WHERE key=$1", [openingSetting, priorOpeningSetting]);
+  await db.end();
+});
 
 describe("(DAY1) previous balance — reception adds, admin edits", () => {
   it("reception adds a balance, cannot replace it, and the admin can", async () => {
+    const unassigned = await authedMutation("/api/opening-balances", h.sessions.reception, "POST", JSON.stringify({ patientId, amount: "120000" }));
+    expect(unassigned.status).toBe(403);
+    await grantReceptionCollection(h, patientId);
     const added = await authedMutation("/api/opening-balances", h.sessions.reception, "POST",
       JSON.stringify({ patientId, amount: "120000", note: "من قبل النظام" }));
     expect(added.status).toBe(201);
@@ -37,10 +49,10 @@ describe("(DAY1) previous balance — reception adds, admin edits", () => {
       JSON.stringify({ patientId, amount: "100000", reason: "تصحيح بعد مراجعة الدفتر" }))).status).toBe(201);
 
     const ledger = await (await authedGet(`/api/patients/${patientId}/ledger`, h.sessions.reception)).json() as {
-      openings: { currency: string; amountMinor: number }[]; openingAccess: { add: boolean; edit: boolean };
+      openings: { currency: string; dueMinor: number }[];
     };
-    expect(ledger.openingAccess).toEqual({ add: true, edit: false });
-    expect(Object.fromEntries(ledger.openings.map((row) => [row.currency, row.amountMinor]))).toEqual({ YER: 100000, SAR: 20000 });
+    expect(ledger).not.toHaveProperty("openingAccess");
+    expect(Object.fromEntries(ledger.openings.map((row) => [row.currency, row.dueMinor]))).toEqual({ YER: 100000, SAR: 20000 });
     const { rows } = await db.query<{ actor: string }>(
       `SELECT actor FROM patient_opening_balance_history WHERE patient_id = $1 ORDER BY id`, [patientId]);
     expect(rows.map((row) => row.actor)).toEqual(["secreception", "secreception", "secadmin"]);
@@ -54,9 +66,9 @@ describe("(DAY1) previous balance — reception adds, admin edits", () => {
     }
   });
 
-  it("reception registers a returning patient with the old amount in one step", async () => {
+  it("admin registers a returning patient and the previous balance in one step", async () => {
     const name = `مريض سابق ${Date.now()}`;
-    const created = await authedMutation("/api/patients", h.sessions.reception, "POST",
+    const created = await authedMutation("/api/patients", h.sessions.admin, "POST",
       JSON.stringify({ fullName: name, gender: "male", confirmDuplicate: true,
         openingBalance: { amount: "75000", currency: "YER", note: "تقويم 2024" } }));
     expect(created.status).toBe(201);
@@ -64,7 +76,31 @@ describe("(DAY1) previous balance — reception adds, admin edits", () => {
     expect(patient.warning).toBeUndefined();
     const { rows } = await db.query<{ amount_minor: string; currency: string; created_by: string }>(
       `SELECT amount_minor::text, currency, created_by FROM patient_opening_balances WHERE patient_id = $1`, [patient.id]);
-    expect(rows).toEqual([{ amount_minor: "75000", currency: "YER", created_by: "secreception" }]);
+    expect(rows).toEqual([{ amount_minor: "75000", currency: "YER", created_by: "secadmin" }]);
+  });
+
+  it("registers the patient once and warns reception until collection is assigned", async () => {
+    const fullName = `مريض جديد بلا تفويض ${Date.now()}`;
+    const opening = { amount: "75000", currency: "YER", note: "رصيد سابق اصطناعي" };
+    const registration = await authedMutation("/api/patients", h.sessions.reception, "POST", JSON.stringify({
+      fullName, gender: "male", confirmDuplicate: true, openingBalance: opening,
+    }));
+    expect(registration.status).toBe(201);
+    const patient = await registration.json() as { id: number; warning?: string };
+    expect(patient.warning).toContain("حُفظ المريض لكن تعذّر حفظ الرصيد السابق");
+    expect((await db.query("SELECT id FROM patients WHERE full_name=$1", [fullName])).rows).toEqual([{ id: patient.id }]);
+    expect((await authedGet(`/api/patients/${patient.id}/ledger`, h.sessions.reception)).status).toBe(403);
+    const balances = () => db.query("SELECT amount_minor::text, currency, created_by FROM patient_opening_balances WHERE patient_id=$1", [patient.id]);
+    expect((await balances()).rows).toEqual([]);
+    expect((await db.query("SELECT action FROM patient_opening_balance_history WHERE patient_id=$1", [patient.id])).rows).toEqual([]);
+    const audit = () => db.query("SELECT action FROM audit_log WHERE entity='patient' AND entity_id=$1 AND action IN ('patient.create','opening_balance.set') ORDER BY id", [String(patient.id)]);
+    expect((await audit()).rows).toEqual([{ action: "patient.create" }]);
+
+    await grantReceptionCollection(h, patient.id);
+    const added = await authedMutation("/api/opening-balances", h.sessions.reception, "POST", JSON.stringify({ patientId: patient.id, ...opening }));
+    expect(added.status).toBe(201);
+    expect((await balances()).rows).toEqual([{ amount_minor: "75000", currency: "YER", created_by: "secreception" }]);
+    expect((await audit()).rows).toEqual([{ action: "patient.create" }, { action: "opening_balance.set" }]);
   });
 
   it("a refused previous balance creates no half patient", async () => {

@@ -123,7 +123,7 @@ describe("exact reception checkout on the built patient workspace", () => {
         expect(reads.every(id => id === firstId)).toBe(true);
         expect(await page.getByRole("region", { name: "الزيارة المحددة للتحصيل" }).innerText()).toContain(`#${openId}`);
         expect(await page.getByRole("region", { name: "زيارة اليوم", exact: true }).count()).toBe(0);
-        expect(await checkout(page).getByRole("link", { name: "🖨️ ملخّص المغادرة" }).getAttribute("href")).toBe(`/print/walkout/${firstId}`);
+        expect(await checkout(page).getByRole("link", { name: "🖨️ ملخّص المغادرة" }).count()).toBe(0);
         for (const [currency, amount] of [["YER", 180000], ["SAR", 5000], ["USD", 2300]] as const) {
           expect(await checkout(page).locator(`[data-testid="checkout-current-balance"][data-currency="${currency}"]`).innerText()).toContain(formatMoney(amount, currency));
         }

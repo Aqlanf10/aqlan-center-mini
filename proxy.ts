@@ -290,9 +290,15 @@ async function restrictedRoleVerdict(request: NextRequest, bearer: string | null
   const access = (cookieToken ? await verifiedSessionAccess(cookieToken) : null)
     ?? (bearer ? await verifiedSessionAccess(bearer) : null);
   const role = access?.role;
+  if (role === "reception" && pathname.startsWith("/api/")) {
+    const route = apiRouteVerdict(pathname, request.method);
+    if (route.kind === "registered" && Array.isArray(route.access) && !route.access.includes(role)) {
+      return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+    }
+  }
   if (!isGatedRole(role) || restrictedRouteAllowed(role, pathname, request.method, access?.financeAccess)) return null;
   if (pathname.startsWith("/api/")) {
-    return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403 });
+    return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
   }
   return NextResponse.redirect(new URL(ROLE_HOME[role], request.url));
 }

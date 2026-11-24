@@ -8,6 +8,7 @@ import {historicalDocumentError} from "@/lib/historical-document-http";
 export const dynamic="force-dynamic";
 export async function POST(request:Request,context:{params:Promise<{id:string}>}){
   const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول من جديد."},{status:401});
+  if (session.role === "reception") return NextResponse.json({ message: "توثيق الاتفاق التاريخي يتطلب صلاحية سريرية أو إدارية." }, { status: 403 });
   if(!["admin","reception"].includes(session.role))return NextResponse.json({message:"معاينة الاتفاق للمدير والاستقبال المخوّل."},{status:403});
   try{const patientId=Number((await context.params).id);if(!Number.isSafeInteger(patientId)||patientId<=0)throw new DebtRepaymentError("invalid","رقم المريض غير صالح.");
     const source=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);if(!source||typeof source!=="object"||Array.isArray(source))throw new DebtRepaymentError("invalid","طلب غير صالح.");

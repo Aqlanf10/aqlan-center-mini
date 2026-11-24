@@ -1,3 +1,5 @@
+import { CLINIC_TIME_ZONE } from "./db";
+import { requireCollectionScope } from "./reception-collection-scope";
 import {debtRequestHash,debtRevisionSourceMatches} from "./debt-source-proof";
 export {debtRequestHash} from "./debt-source-proof";
 import { ensureSchema, getPool, insertAuditRow, type DbClient } from "./db";
@@ -66,6 +68,7 @@ export type DebtRepaymentWrite = { target: DebtTarget; terms: unknown; expectedV
  * the newly posted debt in this transaction; standalone HTTP edits must supply it. */
 export async function writeDebtRepaymentInTransaction(client: DbClient, input: DebtRepaymentWrite) {
   await assertDebtSession(client,input.session);
+  await requireCollectionScope(client, input.session.role, input.target.patientId, input.session.username, CLINIC_TIME_ZONE);
   if (!validDebtTarget(input.target) || !Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 0
     || !Number.isSafeInteger(input.expectedRemainingMinor) || input.expectedRemainingMinor < 0
     || !/^[A-Za-z0-9._:-]{8,128}$/.test(input.idempotencyKey) || input.reason.trim().length < 3 || input.reason.trim().length > 300)

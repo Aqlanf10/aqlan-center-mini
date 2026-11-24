@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedMutation, harness } from "./_server";
+import { grantReceptionCollection, authedMutation, harness } from "./_server";
 
 /**
  * (BILL-1 — قرار المالك R-P0-1: «القسط وحده يفوتر») باب القبض العام حين يُختار فيه هدفًا خطةٌ ممولة
@@ -18,6 +18,7 @@ beforeAll(async () => {
   await db.connect();
   ({ rows: [{ id: patientId }] } = await db.query<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'مريض قسط عبر القبض') RETURNING id`, [`BILLH-${Date.now()}`]));
+  await grantReceptionCollection(h, patientId);
   await db.query(
     `INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
      SELECT 'bill-http', 0, 0, 0 WHERE NOT EXISTS (SELECT 1 FROM cashier_shifts WHERE status = 'open')`);

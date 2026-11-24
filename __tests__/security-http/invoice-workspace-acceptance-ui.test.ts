@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser } from "playwright";
 import { Client } from "pg";
-import { authedMutation, baseUrl, harness } from "./_server";
+import { authedMutation, baseUrl, grantReceptionCollection, harness } from "./_server";
 
 let browser: Browser;
 let h: Awaited<ReturnType<typeof harness>>;
@@ -23,14 +23,20 @@ beforeAll(async () => {
 afterAll(async () => { await browser?.close(); await db?.end(); });
 
 describe("owner acceptance: discoverable prices and repayment choice", () => {
-  it.each(["admin", "reception"] as const)("%s sees authoritative currency prices and explicit missing-price state", async role => {
+  it.each(["admin", "reception"] as const)("%s sees its authorized account tools", async role => {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: "ar-YE" });
     try {
       const [name, ...value] = h.sessions[role].cookie.split("=");
       await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
       const page = await context.newPage();
       const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+      if (role === "reception") await grantReceptionCollection(h, patientId);
       await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });
+      if (role === "reception") {
+        await page.getByRole("button", { name: "تسجيل تحصيل", exact: true }).waitFor();
+        expect(await page.getByTestId("treatment-entry-open").count()).toBe(0);
+        return;
+      }
       await page.getByTestId("treatment-entry-open").click();
       await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
       const catalogue = await context.request.get(`${baseUrl}/api/services`);
@@ -59,9 +65,13 @@ describe("owner acceptance: discoverable prices and repayment choice", () => {
       console.info("INVOICE_WORKSPACE_ACCEPTANCE", JSON.stringify({ role, catalogueSarMinor: prices.priceIn.SAR.minor, afterCurrency, missingValue, repaymentChoices, geometry, pageErrors: errors }));
     } finally { await context.close(); }
   });
-  it.each(["admin", "reception"] as const)("%s saves native prices and rejects stale, disabled and fabricated zero prices", async role => {
+  it.each(["admin", "reception"] as const)("%s enforces billing access before accepting native prices", async role => {
     const body = { patientId, currency: "SAR", items: [{ serviceId: pricedId, price: "123.45", catalogPriceMinor: 12345 }], idempotencyKey: `accept-native-${role}` };
     const first = await authedMutation("/api/invoices",h.sessions[role],"POST",JSON.stringify(body));
+    if (role === "reception") {
+      expect(first.status).toBe(403);
+      return;
+    }
     expect(first.status).toBe(201);
     const saved = await first.json();expect(saved.totalMinor).toBe(12345);expect(saved.baseCurrency).toBe("SAR");
     const repeated = await authedMutation("/api/invoices",h.sessions[role],"POST",JSON.stringify(body));

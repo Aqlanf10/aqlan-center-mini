@@ -40,19 +40,19 @@ afterAll(async () => {
   await db?.end();
 });
 
-async function mutation<T>(who: "reception" | "doctorA", path: string, body: unknown, status: number): Promise<T> {
+async function mutation<T>(who: "admin" | "reception" | "doctorA", path: string, body: unknown, status: number): Promise<T> {
   const response = await authedMutation(path, h.sessions[who], "POST", JSON.stringify(body));
   const text = await response.text();
   expect(response.status, `${path}: ${text}`).toBe(status);
   return JSON.parse(text) as T;
 }
 async function consent(f: Fixture) {
-  await mutation("reception", `/api/plans/${f.planId}/consent`, { note: "موافقة سريرية صريحة للاختبار" }, 201);
+  await mutation("admin", `/api/plans/${f.planId}/consent`, { note: "موافقة سريرية صريحة للاختبار" }, 201);
 }
 async function fixture(label: string, knownProvider: boolean, withConsent: boolean): Promise<Fixture> {
   const { rows: [{ id: patientId }] } = await db.query<{ id: number }>(`INSERT INTO patients
     (patient_number, full_name, primary_doctor_id) VALUES ($1, $2, $3) RETURNING id`, [`ISR-${stamp}-${label}`, `مريض قبول التوقيع ${label}`, doctorId]);
-  const invoice = await mutation<{ id: number; clinical: { planId: number; links: { planItemId: number }[] } }>("reception", "/api/invoices", {
+  const invoice = await mutation<{ id: number; clinical: { planId: number; links: { planItemId: number }[] } }>("admin", "/api/invoices", {
     patientId, currency: "YER", items: [{ serviceId, toothCode: 36, ...(knownProvider ? { doctorId } : {}) }],
   }, 201);
   const itemId = invoice.clinical.links[0].planItemId;

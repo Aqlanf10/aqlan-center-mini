@@ -9,6 +9,7 @@ assertRealPostgresUrl();
 stubPostgresEnv();
 const db = await import("../../lib/db");
 let sequence = 0;
+let collectorId: number;
 let gate: Client;
 let witness: Client;
 async function q<T = Record<string, unknown>>(sql: string, values: unknown[] = []): Promise<T[]> {
@@ -21,6 +22,10 @@ async function rate(currency: "SAR" | "USD", value: string) {
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await db.ensureSchema();
+  const [collector] = await q<{ id: number }>(
+    "INSERT INTO users(username, display_name, password_hash, role) VALUES ('recovery-test', 'Synthetic collector', 'unused', 'reception') RETURNING id",
+  );
+  collectorId = collector.id;
   await rate("SAR", "140"); await rate("USD", "530");
   await db.openShift({ openedBy: "recovery-test", opening: { YER: 0, SAR: 0, USD: 0 } });
   gate = new Client({ connectionString: process.env.DATABASE_URL!, ssl: false });
@@ -32,10 +37,18 @@ afterAll(async () => {
   await witness?.end().catch(() => {}); await db.resetPoolForTesting();
 });
 
+async function grantCollection(patientId: number, patientNumber: string, recipientId: number) {
+  await db.recordAudit({
+    action: "collection.assign", entity: "patient", entityId: patientId, actor: "recovery-admin", actorRole: "admin",
+    details: { collectorId: recipientId, patientNumber },
+  });
+}
+
 async function issued(currency: Currency = "SAR", amountMinor = 7_000) {
   sequence += 1;
   const [{ id: patientId }] = await q<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'Synthetic recovery patient') RETURNING id`, [`RECOVERY-${sequence}`]);
+  await grantCollection(patientId, `RECOVERY-${sequence}`, collectorId);
   const doctor = await db.createParty({ name: `Synthetic recovery doctor ${sequence}`, kind: "doctor", phone: null, commissionPercent: 30, note: null });
   const [{ id: planId }] = await q<{ id: number }>(
     `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, billing_mode, start_date, primary_doctor_id)
@@ -361,6 +374,10 @@ describe("explicit issued-installment recovery on canonical PostgreSQL", () => {
 
   it("conflicts for changed intent/actor and refuses fabricated dual targets", async () => {
     const target = await issued(); await refund(target);
+    const [peer] = await q<{ id: number }>(
+      "INSERT INTO users(username, display_name, password_hash, role) VALUES ('another-actor', 'Synthetic peer collector', 'unused', 'reception') RETURNING id",
+    );
+    await grantCollection(target.patientId, `RECOVERY-${sequence}`, peer.id);
     const request = recovery(target, "recovery-intent-binding", 1_000);
     expect((await db.recordReversedInstallmentRecovery(request)).reason).toBeNull();
     for (const change of [{ amountMinor: 999 }, { invoiceId: target.invoiceId + 999 }, { currency: "USD" as const },

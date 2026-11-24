@@ -24,6 +24,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
+  if (session.role !== "admin" && session.role !== "doctor") {
+    return NextResponse.json({ message: "هذا السجل للطاقم السريري المخوّل." }, { status: 403 });
+  }
   const patientId = await idFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم ملف غير صالح." }, { status: 400 });
 

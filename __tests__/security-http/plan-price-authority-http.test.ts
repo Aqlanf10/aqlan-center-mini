@@ -74,20 +74,18 @@ describe("(FIN-5) invoice-created plan item prices follow the catalog and the di
     const before = await db.query(`SELECT COUNT(*)::int AS n FROM treatment_plans`);
     const beforeInvoices = await db.query(`SELECT COUNT(*)::int AS n FROM invoices`);
     const response = await createTreatment("reception", [crown(1, { priceReason: "مريض قديم" })]);
-    expect(response.status).toBe(400);
-    expect((await response.json() as { message: string }).message)
-      .toContain("يتجاوز الحد المسموح (10٪) — يحتاج موافقة المدير");
+    expect(response.status).toBe(403);
     const after = await db.query(`SELECT COUNT(*)::int AS n FROM treatment_plans`);
     expect(after.rows[0].n).toBe(before.rows[0].n);
     expect((await db.query(`SELECT COUNT(*)::int AS n FROM invoices`)).rows[0].n).toBe(beforeInvoices.rows[0].n);
   });
 
   it("a discount within the limit needs a written reason, then passes and is audited", async () => {
-    const noReason = await createTreatment("reception", [crown(13500)]);
+    const noReason = await createTreatment("admin", [crown(13500)]);
     expect(noReason.status).toBe(400);
     expect((await noReason.json() as { message: string }).message).toContain("اكتب سبب الخصم");
 
-    const response = await createTreatment("reception", [crown(13500, { priceReason: "خصم عائلة" })]);
+    const response = await createTreatment("admin", [crown(13500, { priceReason: "خصم عائلة" })]);
     expect(response.status).toBe(201);
     const { id: invoiceId, clinical: { planId } } = await response.json() as { id: number; clinical: { planId: number } };
     expect(planId).toBeGreaterThan(0);
@@ -99,8 +97,7 @@ describe("(FIN-5) invoice-created plan item prices follow the catalog and the di
 
   it("raising above the catalog is for the admin only, with a reason", async () => {
     const reception = await createTreatment("reception", [crown(20000, { priceReason: "حالة معقدة" })]);
-    expect(reception.status).toBe(400);
-    expect((await reception.json() as { message: string }).message).toContain("رفع السعر للمدير وحده");
+    expect(reception.status).toBe(403);
     const admin = await createTreatment("admin", [crown(20000, { priceReason: "حالة معقدة" })]);
     expect(admin.status).toBe(201);
     const { clinical: { planId } } = await admin.json() as { clinical: { planId: number } };
@@ -108,14 +105,14 @@ describe("(FIN-5) invoice-created plan item prices follow the catalog and the di
   });
 
   it("the catalog price itself passes silently; the service name comes from the catalog, not the request", async () => {
-    const response = await createTreatment("reception", [crown(15000, { serviceName: "اسم مزيف" })]);
+    const response = await createTreatment("admin", [crown(15000, { serviceName: "اسم مزيف" })]);
     expect(response.status).toBe(201);
     const { clinical: { planId } } = await response.json() as { clinical: { planId: number } };
     expect(await storedItems(planId)).toEqual([{ name: `تاج سلطة الخطة ${stamp}`, price: 15000 }]);
   });
 
   it("rejects an unknown catalogue reference without silently creating a financial fallback", async () => {
-    const response = await createTreatment("reception", [{ serviceId: 99999999, serviceName: "بند مالي يدوي", quantity: 1, unitPriceMinor: 1 }]);
+    const response = await createTreatment("admin", [{ serviceId: 99999999, serviceName: "بند مالي يدوي", quantity: 1, unitPriceMinor: 1 }]);
     expect(response.status).toBe(400);
     const { rows: [patient] } = await db.query<{ id: number }>("SELECT id FROM patients WHERE patient_number=$1", [`FIN5-${stamp}-${sequence}`]);
     for (const table of ["invoices", "treatment_plans", "clinical_cases", "payments"]) {
@@ -125,7 +122,7 @@ describe("(FIN-5) invoice-created plan item prices follow the catalog and the di
 
   it("manual descriptions remain financial-only and cannot invent clinical catalog work", async () => {
     for (const serviceId of [undefined]) {
-      const response = await createTreatment("reception", [{ serviceId, serviceName: "بند مالي يدوي", quantity: 1, unitPriceMinor: 1 }]);
+      const response = await createTreatment("admin", [{ serviceId, serviceName: "بند مالي يدوي", quantity: 1, unitPriceMinor: 1 }]);
       expect(response.status).toBe(201);
       const invoice = await response.json() as { id: number; patientId: number; clinical: { planId: null; links: unknown[] } };
       expect(invoice.clinical).toMatchObject({ planId: null, links: [expect.objectContaining({ kind: "financial", planItemId: null, caseId: null })] });
@@ -140,7 +137,7 @@ describe("(FIN-5) invoice-created plan item prices follow the catalog and the di
   });
 
   it("an unpriced catalog service keeps its typed price on the linked clinical item", async () => {
-    const unreasoned = await createTreatment("reception", [{ serviceId: unpricedId, serviceName: "x", quantity: 1, unitPriceMinor: 7000 }]);
+    const unreasoned = await createTreatment("admin", [{ serviceId: unpricedId, serviceName: "x", quantity: 1, unitPriceMinor: 7000 }]);
     expect(unreasoned.status).toBe(400);
     expect((await unreasoned.json() as { message: string }).message).toContain("سبب التسعير اليدوي");
     const { rows: [patient] } = await db.query<{ id: number }>("SELECT id FROM patients WHERE patient_number=$1", [`FIN5-${stamp}-${sequence}`]);
@@ -148,7 +145,7 @@ describe("(FIN-5) invoice-created plan item prices follow the catalog and the di
       expect((await db.query(`SELECT id FROM ${table} WHERE patient_id=$1`, [patient.id])).rows).toEqual([]);
     }
     const reason = "اتفاق صريح لسعر خدمة غير مسعرة بالفاتورة";
-    const unpriced = await createTreatment("reception", [{ serviceId: unpricedId, serviceName: "x", quantity: 1, unitPriceMinor: 7000, priceReason: reason }]);
+    const unpriced = await createTreatment("admin", [{ serviceId: unpricedId, serviceName: "x", quantity: 1, unitPriceMinor: 7000, priceReason: reason }]);
     expect(unpriced.status).toBe(201);
     const { id: invoiceId, clinical: { planId } } = await unpriced.json() as { id: number; clinical: { planId: number } };
     expect(await storedItems(planId)).toEqual([{ name: `خدمة بلا سعر للخطة ${stamp}`, price: 7000 }]);
@@ -179,7 +176,7 @@ describe("(FIN-5) invoice-created plan item prices follow the catalog and the di
       [99999999, 404, "الخدمة غير موجودة في الدليل."],
       [undefined, 400, "اختر الخدمة من الدليل."],
     ] as const) {
-      const rejected = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
+      const rejected = await authedMutation(`/api/plans/${planId}/items`, h.sessions.doctorA, "POST",
         JSON.stringify({ serviceId, description: "بند علاجي مصطنع", quantity: 1, toothCode: 36, price: "1" }));
       expect(rejected.status).toBe(status);
       expect(await rejected.json()).toMatchObject({ message });
@@ -190,22 +187,22 @@ describe("(FIN-5) invoice-created plan item prices follow the catalog and the di
       (SELECT COUNT(*)::int FROM payments) AS payments,
       (SELECT COUNT(*)::int FROM clinical_cases) AS cases`)).rows).toEqual(beforeGuard);
 
-    const noReason = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
+    const noReason = await authedMutation(`/api/plans/${planId}/items`, h.sessions.doctorA, "POST",
       JSON.stringify({ serviceId: crownId, quantity: 1, price: "1" }));
     expect(noReason.status).toBe(400);
     expect((await noReason.json() as { message: string }).message).toContain("اكتب سبب الخصم");
-    const tooLow = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
+    const tooLow = await authedMutation(`/api/plans/${planId}/items`, h.sessions.doctorA, "POST",
       JSON.stringify({ serviceId: crownId, quantity: 1, price: "1", priceReason: "مريض قديم" }));
     expect(tooLow.status).toBe(400);
     expect((await tooLow.json() as { message: string }).message).toContain("يحتاج موافقة المدير");
 
     /* قرار المالك (TD-05): خدمةٌ بلا سعرٍ مقرَّر بالدولار — سعر الاتفاق يُكتب ولا يُقاس
        على سعرٍ محوَّل من اليمني؛ يُقبل ويُعلَّم في التدقيق. */
-    const agreed = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
+    const agreed = await authedMutation(`/api/plans/${planId}/items`, h.sessions.doctorA, "POST",
       JSON.stringify({ serviceId: unpricedInUsd, quantity: 1, price: "1" }));
     expect(agreed.status).toBe(201);
 
-    const ok = await authedMutation(`/api/plans/${planId}/items`, h.sessions.reception, "POST",
+    const ok = await authedMutation(`/api/plans/${planId}/items`, h.sessions.doctorA, "POST",
       JSON.stringify({ serviceId: crownId, quantity: 1, price: "95", priceReason: "خصم متفق" }));
     expect(ok.status).toBe(201);
     const { rows: [audit] } = await db.query<{ details: Record<string, unknown> }>(

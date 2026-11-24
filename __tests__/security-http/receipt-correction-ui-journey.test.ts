@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { chromium, type Browser } from "playwright";
-import { baseUrl, harness } from "./_server";
+import { baseUrl, grantReceptionCollection, harness, TEST_USERS } from "./_server";
 
 /**
  * (RC-2) المالك: «غلطنا بسندات ونشتي نعدّلها — عملنا للمريض مبلغ زيادة».
@@ -27,12 +27,12 @@ function sessionCookie(raw: string): { name: string; value: string } {
   return { name, value: rest.join("=") };
 }
 
-async function receipt(amountMinor: number, receiptNumber: string): Promise<number> {
+async function receipt(amountMinor: number, receiptNumber: string, actor = "reception"): Promise<number> {
   const { rows: [row] } = await db.query<{ id: number }>(
     `INSERT INTO payments (receipt_number, patient_id, invoice_id, shift_id, kind, amount_minor, currency, exchange_rate,
                            base_amount_minor, base_currency, method, created_by)
-     VALUES ($1, $2, $3, $4, 'payment', $5, 'YER', 1, $5, 'YER', 'cash', 'reception') RETURNING id`,
-    [receiptNumber, patientId, invoiceId, shiftId, amountMinor]);
+     VALUES ($1, $2, $3, $4, 'payment', $5, 'YER', 1, $5, 'YER', 'cash', $6) RETURNING id`,
+    [receiptNumber, patientId, invoiceId, shiftId, amountMinor, actor]);
   return row.id;
 }
 
@@ -183,10 +183,17 @@ describe("تصحيح سند قبضٍ بمبلغٍ خطأ", () => {
   }, 120_000);
 
   it("reception sees no correction button", async () => {
-    await receipt(1_000, `RCU-R-C-${stamp()}`);
-    const { context, tab } = await openAccount(h.sessions.reception.cookie);
+    const receiptNumber = `RCU-R-C-${stamp()}`;
+    const id = await receipt(1_000, receiptNumber, TEST_USERS.reception.username);
+    await grantReceptionCollection(h, patientId);
+    const { context, tab } = await page(h.sessions.reception.cookie, `/patients/${patientId}?tab=account`);
     try {
-      expect(await tab.getByRole("region", { name: "الدفعات" }).getByRole("button", { name: "تصحيح السند" }).count()).toBe(0);
+      await tab.getByRole("button", { name: /الحساب/ }).first().click();
+      await tab.getByRole("button", { name: "تسجيل تحصيل" }).waitFor();
+      const ownReceipt = tab.getByRole("link", { name: new RegExp(receiptNumber) });
+      expect(await ownReceipt.getAttribute("href")).toBe(`/print/receipt/${id}`);
+      expect(await tab.getByRole("button", { name: "تصحيح السند" }).count()).toBe(0);
+      expect(await tab.getByText("تقويم — دفعة").count()).toBe(0);
     } finally {
       await context.close();
     }

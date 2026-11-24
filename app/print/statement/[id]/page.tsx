@@ -42,7 +42,7 @@ export default async function StatementPage({ params, searchParams }: {
   // الطبيب لا يرى السندات والفواتير: صفحة الطباعة بابٌ خلفي إلى المال لو تُركت
   // مفتوحة لكل من يملك جلسة.
   const session = await requireSession();
-  if (!session || !canViewMoney(session.role)) notFound();
+  if (!session || session.role === "reception" || !canViewMoney(session.role)) notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);
