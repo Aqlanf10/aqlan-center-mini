@@ -35,7 +35,11 @@ beforeAll(async () => {
 afterAll(async () => { await db.resetPoolForTesting(); });
 
 async function patient() {
-  return (await q<{ id: number }>("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic retire patient') RETURNING id", [key("patient")]))[0].id;
+  const patientNumber = key("patient");
+  const [row] = await q<{ id: number }>("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic retire patient') RETURNING id", [patientNumber]);
+  await db.recordAudit({ action: "collection.assign", entity: "patient", entityId: row.id,
+    actor: "synthetic-admin", actorRole: "admin", details: { collectorId: session.userId, patientNumber } });
+  return row.id;
 }
 async function invoice(patientId: number, totalMinor = 50_000) {
   const [row] = await q<{ id: number }>("INSERT INTO invoices(invoice_number,patient_id,total_minor,discount_minor,base_currency) VALUES($1,$2,$3,0,'YER') RETURNING id", [key("inv"), patientId, totalMinor]);
@@ -149,6 +153,9 @@ describe("collection attempt retirement (0068)", () => {
     const hash = await authLib.hashPassword("synthetic-second-cashier");
     const [other] = await q<{ id: number }>("INSERT INTO users(username,display_name,password_hash,role,is_active) VALUES($1,'Synthetic second',$2,'reception',TRUE) RETURNING id", [key("second"), hash]);
     const [{ username }] = await q<{ username: string }>("SELECT username FROM users WHERE id=$1", [other.id]);
+    const [{ patient_number: patientNumber }] = await q<{ patient_number: string }>("SELECT patient_number FROM patients WHERE id=$1", [p]);
+    await db.recordAudit({ action: "collection.assign", entity: "patient", entityId: p,
+      actor: "synthetic-admin", actorRole: "admin", details: { collectorId: other.id, patientNumber } });
     auth.session = { userId: other.id, username, role: "reception", credentialVersion: authLib.sessionCredentialVersion(hash), expiresAt: Date.now() + 3_600_000 };
     try {
       // Same saved attempt (sent by the first user) presented from the replacing session.
@@ -169,7 +176,14 @@ describe("collection attempt retirement (0068)", () => {
   it("refuses an invalid key, an unauthorized role and any change to a retired key", async () => {
     const p = await patient();
     expect((await retire("x", p)).status).toBe(400);
-    expect((await retire(key("no-patient"), 999999)).status).toBe(400);
+    // Reception cannot inspect the existence of a patient outside its collection scope.
+    expect((await retire(key("no-patient"), 999999)).status).toBe(403);
+    const hash = await authLib.hashPassword("synthetic-retirement-admin");
+    const [admin] = await q<{ id: number }>("INSERT INTO users(username,display_name,password_hash,role) VALUES('retirement-admin','Synthetic admin',$1,'admin') RETURNING id", [hash]);
+    auth.session = { userId: admin.id, username: "retirement-admin", role: "admin", credentialVersion: authLib.sessionCredentialVersion(hash), expiresAt: Date.now() + 3_600_000 };
+    try {
+      expect((await retire(key("missing-patient-admin"), 999999, { originalActor: "retirement-admin" })).status).toBe(400);
+    } finally { auth.session = session; }
     const doctor = { ...session, role: "doctor" as const };
     auth.session = doctor;
     try { expect((await retire(key("doctor"), p)).status).toBe(403); } finally { auth.session = session; }
