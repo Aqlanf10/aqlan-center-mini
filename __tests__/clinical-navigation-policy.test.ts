@@ -7,10 +7,10 @@ import { INITIAL_PLAN_ITEM_DRAFT, planItemDraftChanged } from "../lib/plan-item-
 describe("clinical context registry and exact plan draft guard", () => {
   it("registers only clinical read roles and exposes no writer", () => {
     const path = "/api/patients/11/clinical-context";
-    expect(HTTP_PERMISSIONS["/api/patients/[id]/clinical-context"]).toEqual({ GET: ["admin", "reception", "doctor"] });
-    expect(apiRouteVerdict(path, "GET")).toMatchObject({ kind: "registered", access: ["admin", "reception", "doctor"] });
+    expect(HTTP_PERMISSIONS["/api/patients/[id]/clinical-context"]).toEqual({ GET: ["admin", "doctor"] });
+    expect(apiRouteVerdict(path, "GET")).toMatchObject({ kind: "registered", access: ["admin", "doctor"] });
     expect(apiRouteVerdict(path, "POST").kind).toBe("method-not-allowed");
-    expect(rolesAlwaysDenied(HTTP_PERMISSIONS["/api/patients/[id]/clinical-context"].GET!, ROLES)).toEqual(ROLES.filter((role) => !["admin", "reception", "doctor"].includes(role)));
+    expect(rolesAlwaysDenied(HTTP_PERMISSIONS["/api/patients/[id]/clinical-context"].GET!, ROLES)).toEqual(ROLES.filter((role) => !["admin", "doctor"].includes(role)));
   });
   it.each(["cashier", "accountant"])("keeps financial references behind %s ledger capability at the outer gate", (role) => {
     for (const path of ["/api/patients/11/treatment-financial-context", "/api/patients/11/treatment-financial-context/"]) {

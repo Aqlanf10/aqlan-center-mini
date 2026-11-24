@@ -60,7 +60,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return json(message, status);
     }
     return NextResponse.json(session.role === "reception"
-      ? { id: result.referral.id, status: result.referral.status }
+      ? { id: result.referral.id, status: result.referral.status, workflowState: result.referral.workflowState, appointmentId: result.referral.appointmentId }
       : result.referral);
   } catch {
     return json("تعذّر تحديث الإحالة. أعد المحاولة.", 500);
