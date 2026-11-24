@@ -59,14 +59,15 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
   return transaction(async client=>{
     await assertDebtSession(client,input.session);
     if(input.source.kind!=="new"&&(await revalidateSessionInTransaction(input.session,client))?.role!=="admin")throw new DebtRepaymentError("unauthorized","مطابقة أصل قديم للإدارة فقط.");
+    const owner=(await client.query<{patient_id:number}>("SELECT patient_id FROM treatment_plans WHERE id=$1",[input.planId])).rows[0];
+    if(!owner)throw new DebtRepaymentError("missing","الخطة غير موجودة.");
+    await requireCollectionScope(client, input.session.role, owner.patient_id, input.session.username, CLINIC_TIME_ZONE);
     const replay=async()=>{
       const prior=(await client.query<ApprovedAgreement>("SELECT * FROM approved_agreement_principals WHERE idempotency_key=$1 OR plan_id=$2",[input.idempotencyKey,input.planId])).rows[0];
       if(prior&&prior.request_hash!==hash)throw new DebtRepaymentError("conflict","الاتفاق معتمد أو مفتاح الطلب مستعمل؛ راجع المصدر دون إثبات دين ثانٍ.");
       return prior;
     };
     const prior=await replay();if(prior)return {agreement:prior,replayed:true};
-    const owner=(await client.query<{patient_id:number}>("SELECT patient_id FROM treatment_plans WHERE id=$1",[input.planId])).rows[0];
-    if(!owner)throw new DebtRepaymentError("missing","الخطة غير موجودة.");
     await client.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE",[owner.patient_id]);
     await lockDebtAccountForSchedule(client,owner.patient_id,true);
     const again=await replay();if(again)return {agreement:again,replayed:true};
@@ -264,7 +265,7 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
         throw new DebtRepaymentError("conflict","التزام الخطة ومصادر الفواتير غير متطابقة.");
       const created:{invoiceId:number;paymentId:number;amountMinor:number}[]=[];
       // Advisory review: last check before writing (shift held via lockDebtAccountForSchedule, replay and refusals done).
-      await assertSimilarCollectionReviewed(client,{patientId:a.patient_id,amountMinor:input.amountMinor,currency:input.currency,review:options.similarityReview});
+      await assertSimilarCollectionReviewed(client,{patientId:a.patient_id,amountMinor:input.amountMinor,currency:input.currency,receptionUsername:input.session.role==="reception"?input.session.username:undefined,review:options.similarityReview});
       let unallocated=settlement;
       for(const segment of segments){
         const portion=Math.min(unallocated,segment.remainingMinor);
@@ -304,7 +305,7 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
       return {paymentId:paymentIds[0],paymentIds,collection:snapshot,replayed:false};
     }
     // Advisory review: last check before writing (shift held via lockDebtAccountForSchedule, replay and refusals done).
-    await assertSimilarCollectionReviewed(client,{patientId:a.patient_id,amountMinor:input.amountMinor,currency:input.currency,review:options.similarityReview});
+    await assertSimilarCollectionReviewed(client,{patientId:a.patient_id,amountMinor:input.amountMinor,currency:input.currency,receptionUsername:input.session.role==="reception"?input.session.username:undefined,review:options.similarityReview});
     const result=await writeDebtCollectionReceipt(client,{patientId:a.patient_id,invoiceId:a.invoice_id,openingCurrency:a.opening_currency,
       amountMinor:input.amountMinor,currency:input.currency,exchangeRate:rate,method:input.method,note:input.note,createdBy:input.session.username,idempotencyKey:input.idempotencyKey,requestHash:hash});
     if(result.kind==="reason")throw new DebtRepaymentError("stale",`تعذر التحصيل: ${result.reason}`);

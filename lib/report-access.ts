@@ -59,8 +59,7 @@ const RECEPTION_REPORTS = new Set<string>([
   "appointments",
   "recall",
   "inventory",
-  // كشف مريض واحد جزء من خدمة الحساب والتحصيل اليومية، لا تقرير دخل المركز.
-  "patient-statement",
+  // Individual desk collection is served by the scoped patient account.
   // (Reports R4) تشغيلية بلا دخلٍ للمركز: أداء المواعيد، الكراسي، المتابعة، علاجٌ ينتظر الجدولة.
   "appointment-performance",
   "chair-utilization",

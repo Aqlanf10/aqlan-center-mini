@@ -10640,7 +10640,7 @@ async function runPaymentTransaction(
     // Without an open shift nothing can be written (no_shift below), so no review is asked.
     if (input.kind === "payment" && lockedShiftId !== null) {
       await assertSimilarCollectionReviewed(client, { patientId: input.patientId, amountMinor: input.amountMinor,
-        currency: input.currency, review: prepared.similarityReview });
+        currency: input.currency, receptionUsername: prepared.receiptAudit?.actorRole === "reception" ? input.createdBy : undefined, review: prepared.similarityReview });
     }
 
     /* الإدراج محصور في الوردية المقفولة أعلاه — لا اكتشاف ولا قفل لوردية

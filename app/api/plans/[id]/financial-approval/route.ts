@@ -1,3 +1,4 @@
+import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -24,6 +25,7 @@ export async function POST(request:Request,context:{params:Promise<{id:string}>}
       source:source as AgreementSource,reason:value.reason,idempotencyKey:request.headers.get("idempotency-key")??"",session});
     return NextResponse.json({planId:result.agreement.plan_id,replayed:result.replayed},{status:result.replayed?200:201});
   }catch(error){
+    if(error instanceof CollectionScopeDenied)return NextResponse.json({message:error.message},{status:403});
     const bounded=bodyErrorResponse(error);if(bounded)return bounded;
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
     return NextResponse.json({message:"تعذّر اعتماد الأصل. أعد الطلب نفسه؛ حدّث الخطة للتحقق قبل إنشاء طلب آخر."},{status:500});

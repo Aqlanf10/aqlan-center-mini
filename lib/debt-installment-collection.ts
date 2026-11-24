@@ -65,7 +65,7 @@ export async function collectDebtInstallment(input: {
         if(!Number.isSafeInteger(baseAmount)||!Number.isSafeInteger(settlement)||settlement<=0||settlement>position.remainingMinor||settlement>Math.max(0,account.due))
           throw new DebtRepaymentError("invalid","المبلغ يتجاوز المتبقي على الدين أو المستحق الفعلي على الحساب؛ راجع التسويات.");
         // Advisory review: last check before writing (shift held, replay and all refusals done); a throw rolls back.
-        await assertSimilarCollectionReviewed(client,{patientId:input.patientId,amountMinor:input.amountMinor,currency:input.currency,review:options.similarityReview});
+        await assertSimilarCollectionReviewed(client,{patientId:input.patientId,amountMinor:input.amountMinor,currency:input.currency,receptionUsername:input.session.role==="reception"?input.session.username:undefined,review:options.similarityReview});
         await assertDebtSession(client,input.session);
         const receipt=await writeDebtCollectionReceipt(client,{patientId:input.patientId,invoiceId:target.invoiceId,openingCurrency:target.openingCurrency,
           amountMinor:input.amountMinor,currency:input.currency,exchangeRate:rate,method:input.method,note:input.note,createdBy:input.session.username,idempotencyKey:input.idempotencyKey,requestHash:hash});

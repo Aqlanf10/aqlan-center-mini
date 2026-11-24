@@ -1,4 +1,5 @@
-import { canViewPatientMoney } from "@/lib/patient-access";
+import { readReceptionCollectionLedger } from "@/lib/reception-collection-ledger";
+import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { NextResponse } from "next/server";
 import {
   getSettings, listPatientPlans, patientLedger, patientReceiptRemainders, patientReversedInstallmentRecoveries,
@@ -30,8 +31,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
   }
 
-  if (session.role === "reception" && !await canViewPatientMoney(session, id)) {
-    return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
+  if (session.role === "reception") {
+    try {
+      const collection = await readReceptionCollectionLedger(id, session.username);
+      return NextResponse.json(collection, { headers: { "Cache-Control": "private, no-store" } });
+    } catch (error) {
+      return error instanceof CollectionScopeDenied
+        ? NextResponse.json({ message: error.message }, { status: 403 })
+        : NextResponse.json({ message: "تعذّر تحميل بيانات التحصيل." }, { status: 500 });
+    }
   }
   /* صلاحيات الوكيل المساعد + «المالية المخفية»: مدفوعات مريضٍ أمرٌ مالي يُدار
      بصراحة — الطبيب يراها فقط إن منحه المدير ذلك، ومعها عزل مرضاه. V2 أبقى
@@ -96,12 +104,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // النظرة المفردة القديمة (دلو الأساس) بقيت للتوافق مع من يقرأ حقلًا واحدًا.
     const balance = balances[CLINIC_BASE_CURRENCY];
     // Display metadata only, after patient authorization and the canonical read.
-    const visiblePayments = session.role === "reception" ? payments.filter(row => row.createdBy === session.username) : payments;
-    const receiptProvenance = session.role === "reception" ? {} : await readReceiptProvenance(visiblePayments.map((payment) => payment.id));
+    const receiptProvenance = await readReceiptProvenance(payments.map((payment) => payment.id));
     return NextResponse.json({
       clinicTimeZone: CLINIC_TIME_ZONE,
       // (P1-5ب) opening: الرصيد اليمني للتوافق مع القرّاء القدامى؛ openings: كل العملات.
-      invoices, payments: visiblePayments, opening: openings.find((row) => row.currency === CLINIC_BASE_CURRENCY) ?? null, openings, balance, balances, baseCurrency: CLINIC_BASE_CURRENCY,
+      invoices, payments, opening: openings.find((row) => row.currency === CLINIC_BASE_CURRENCY) ?? null, openings, balance, balances, baseCurrency: CLINIC_BASE_CURRENCY,
       // قصص الخطط: الخطة اتفاق لا دَين، لكن الحساب الذي يصمت عن اتفاقٍ قائم
       // يبدو ملفًّا مفكّكًا — وهذا هو الجسر.
       plans: plans.map(planLedgerSummary),
@@ -112,7 +119,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       legacyBalanceArrangements,
       legacyOpeningPositions,
       installmentRecovery,
-      legacyArrangementAccess: { manage: session.role === "admin" || session.role === "reception" },
+      legacyArrangementAccess: { manage: session.role === "admin" },
     });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل حساب المريض." }, { status: 500 });

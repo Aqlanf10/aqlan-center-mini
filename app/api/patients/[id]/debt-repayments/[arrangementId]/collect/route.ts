@@ -1,3 +1,4 @@
+import { OtherCollectorReviewRequired } from "@/lib/similar-collection";
 import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { isRetiredCollectionKey, retiredCollectionRefusal } from "@/lib/collection-attempts";
 import { parseSimilarCollectionReviewHeader, similarCollectionRefusal, SimilarCollectionReviewRequired, SIMILAR_COLLECTION_REVIEW_HEADER } from "@/lib/similar-collection";
@@ -28,6 +29,7 @@ export async function POST(request:Request,context:{params:Promise<{id:string;ar
   }catch(error){
     const bounded=bodyErrorResponse(error);if(bounded)return bounded;
     if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof OtherCollectorReviewRequired) return NextResponse.json({ message: error.message }, { status: 409 });
     if(error instanceof SimilarCollectionReviewRequired)return NextResponse.json(similarCollectionRefusal(error),{status:409});
     if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
     if(error instanceof DebtRepaymentError)return NextResponse.json({code:error.code,message:error.message},{status:error.code==="unauthorized"?401:error.code==="invalid"?400:409});

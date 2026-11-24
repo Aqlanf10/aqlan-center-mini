@@ -74,7 +74,7 @@ export async function familyViewOf(session: SessionPayload, record: PatientFamil
   if (!seesAll && shown.length === 0) return { ok: false, reason: "forbidden" };
 
   /* غير الطبيب: قاعدة الدور وحدها (لا تتعلق بمريضٍ بعينه)؛ والطبيب: صلاحيته على كل من يظهر له. */
-  const canSeeMoney = session.role === "doctor" ? shown.every((entry) => entry.money) : canViewMoney(session.role);
+  const canSeeMoney = session.role === "reception" ? false : session.role === "doctor" ? shown.every((entry) => entry.money) : canViewMoney(session.role);
   const moneyIds = canSeeMoney ? shown.map((entry) => entry.member.id) : [];
   const balances = moneyIds.length ? await familyMemberBalances(moneyIds) : new Map<number, CurrencyBalance[]>();
 

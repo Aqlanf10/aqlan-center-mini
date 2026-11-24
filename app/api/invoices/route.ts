@@ -36,7 +36,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
   }
   try {
-    return NextResponse.json(await listPatientInvoices(patientId));
+    const invoices = await listPatientInvoices(patientId);
+    return NextResponse.json(session.role === "reception"
+      ? invoices.filter(row => row.status === "open").map(({ id, invoiceNumber, totalMinor, discountMinor, baseCurrency, status }) => ({
+        id, invoiceNumber, totalMinor, discountMinor, baseCurrency, status,
+      })) : invoices);
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الفواتير." }, { status: 500 });
   }

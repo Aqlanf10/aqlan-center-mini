@@ -1,3 +1,4 @@
+import { OtherCollectorReviewRequired } from "@/lib/similar-collection";
 import { canViewPatientMoney } from "@/lib/patient-access";
 import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { isRetiredCollectionKey, retiredCollectionRefusal } from "@/lib/collection-attempts";
@@ -97,6 +98,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ...result.payment, idempotencyKey:recovery.idempotencyKey }, { status: result.replayed ? 200 : 201 });
     } catch (error) {
       if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof OtherCollectorReviewRequired) return NextResponse.json({ message: error.message }, { status: 409 });
     if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
       if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
       return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة بالمفتاح نفسه." }, { status: 500 });
@@ -246,6 +248,7 @@ export async function POST(request: Request) {
       }
     } catch (error) {
       if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof OtherCollectorReviewRequired) return NextResponse.json({ message: error.message }, { status: 409 });
     if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
       if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
       if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
@@ -378,6 +381,7 @@ export async function POST(request: Request) {
       ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) }, { status: replayed ? 200 : 201 });
   } catch (error) {
     if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof OtherCollectorReviewRequired) return NextResponse.json({ message: error.message }, { status: 409 });
     if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
     if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});

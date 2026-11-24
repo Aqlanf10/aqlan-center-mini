@@ -9,7 +9,7 @@ export class CollectionScopeDenied extends Error {
 /** The assignment writer locks the same patient FOR UPDATE before appending its decision. */
 export async function receptionCollectionAllowed(db: Reader, patientId: number, username: string, timeZone: string, lock = false) {
   if (!Number.isSafeInteger(patientId) || patientId < 1 || !username) return false;
-  if (lock) await db.query("SELECT id FROM patients WHERE id=$1 FOR KEY SHARE", [patientId]);
+  if (lock) await db.query("SELECT id FROM patients WHERE id=$1 FOR NO KEY UPDATE", [patientId]);
   const share = lock ? "FOR SHARE" : "";
   const { rows } = await db.query<{ allowed: boolean }>(`SELECT EXISTS (
     SELECT 1 FROM patients p JOIN users u ON u.username=$2 AND u.role='reception' AND u.is_active

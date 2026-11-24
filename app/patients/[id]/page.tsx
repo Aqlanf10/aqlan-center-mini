@@ -21,6 +21,7 @@ import {
 } from "@/lib/patient";
 
 import { toWhatsAppNumber } from "@/lib/reminders";
+import { ReceptionCollectionAccount } from "@/components/patient/ReceptionCollectionAccount";
 import { PatientLedger } from "@/components/PatientLedger";
 import { LegacyHistory } from "@/components/LegacyHistory";
 import { ClinicalVisit } from "@/components/ClinicalVisit";
@@ -1374,6 +1375,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           onChanged={() => void load()}
           onOpenTabletMode={() => setShowTabletMode(true)}
         />
+      ) : tab === "account" && session?.role === "reception" ? (
+        <ReceptionCollectionAccount key={patient.id} patientId={patient.id} patientName={patient.fullName} />
       ) : tab === "account" ? (
         <>
           {admin && <CollectionAssignment key={patient.id} patientId={patient.id} />}
