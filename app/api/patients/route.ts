@@ -81,11 +81,19 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  // Match the HTTP proxy and patient PATCH: restricted finance and assistant
+  // accounts must never create an archive file, even without proxy mediation.
+  if (!["admin", "doctor", "reception"].includes(session.role)) {
+    return NextResponse.json({ message: "إضافة المرضى غير مصرّح لهذا الدور." },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } });
+  }
   /* صلاحيات الوكيل المساعد: الطبيب الذي أغلق المدير عليه «إضافة مريض» لا ينشئ
      ملفات — الاستقبال والإدارة يبقى لهم الحق دائمًا. */
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (!user) return denied();
+    if (!user || user.isActive !== true || user.id !== session.userId
+      || user.username.toLowerCase() !== session.username.toLowerCase()
+      || user.role !== session.role) return denied();
     if (user.permissions && user.permissions.canAddPatient === false) {
       return NextResponse.json(
         { message: "إضافة المرضى مخفية عنك بحسب صلاحياتك." },

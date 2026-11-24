@@ -251,3 +251,28 @@ describe("ordinary receptionist and clinician writes to the same synthetic file"
     expect(mocks.update).toHaveBeenLastCalledWith(patient.id, { birthDate: null });
   });
 });
+
+describe("POST patient creation route boundary", () => {
+  it.each(["assistant", "cashier", "accountant"] as const)("denies direct registration for %s before reading the body", async (role) => {
+    mocks.session.mockResolvedValue({ ...session, role });
+    const req = request("POST");
+    const response = await POST(req);
+    expect(response.status).toBe(403);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(req.bodyUsed).toBe(false);
+    expect(mocks.user).not.toHaveBeenCalled();
+    expectNoWrites();
+  });
+
+  it.each([
+    { id: 11 }, { username: "different-synthetic-doctor" },
+    { role: "reception" }, { isActive: false },
+  ])("rejects changed doctor identity before registration: %j", async (change) => {
+    mocks.user.mockResolvedValue({ ...currentDoctor(), ...change });
+    const req = request("POST");
+    const response = await POST(req);
+    expect(response.status).toBe(401);
+    expect(req.bodyUsed).toBe(false);
+    expectNoWrites();
+  });
+});
