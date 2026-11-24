@@ -1,3 +1,4 @@
+import { canViewPatientMoney } from "@/lib/patient-access";
 import { invoicePricingSettings } from "@/lib/invoice-price-settings-db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -30,6 +31,9 @@ export async function GET(request: Request) {
   const patientId = Number(new URL(request.url).searchParams.get("patientId"));
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+  }
+  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) {
+    return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
   }
   try {
     return NextResponse.json(await listPatientInvoices(patientId));

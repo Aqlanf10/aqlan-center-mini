@@ -1,3 +1,4 @@
+import { canViewPatientMoney } from "@/lib/patient-access";
 import { NextResponse } from "next/server";
 import {
   getSettings, listPatientPlans, patientLedger, patientReceiptRemainders, patientReversedInstallmentRecoveries,
@@ -29,6 +30,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
   }
 
+  if (session.role === "reception" && !await canViewPatientMoney(session, id)) {
+    return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
+  }
   /* صلاحيات الوكيل المساعد + «المالية المخفية»: مدفوعات مريضٍ أمرٌ مالي يُدار
      بصراحة — الطبيب يراها فقط إن منحه المدير ذلك، ومعها عزل مرضاه. V2 أبقى
      الباب مفتوحًا للإدارة والاستقبال كما هو. */
@@ -92,11 +96,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     // النظرة المفردة القديمة (دلو الأساس) بقيت للتوافق مع من يقرأ حقلًا واحدًا.
     const balance = balances[CLINIC_BASE_CURRENCY];
     // Display metadata only, after patient authorization and the canonical read.
-    const receiptProvenance = await readReceiptProvenance(payments.map((payment) => payment.id));
+    const visiblePayments = session.role === "reception" ? payments.filter(row => row.createdBy === session.username) : payments;
+    const receiptProvenance = session.role === "reception" ? {} : await readReceiptProvenance(visiblePayments.map((payment) => payment.id));
     return NextResponse.json({
       clinicTimeZone: CLINIC_TIME_ZONE,
       // (P1-5ب) opening: الرصيد اليمني للتوافق مع القرّاء القدامى؛ openings: كل العملات.
-      invoices, payments, opening: openings.find((row) => row.currency === CLINIC_BASE_CURRENCY) ?? null, openings, balance, balances, baseCurrency: CLINIC_BASE_CURRENCY,
+      invoices, payments: visiblePayments, opening: openings.find((row) => row.currency === CLINIC_BASE_CURRENCY) ?? null, openings, balance, balances, baseCurrency: CLINIC_BASE_CURRENCY,
       // قصص الخطط: الخطة اتفاق لا دَين، لكن الحساب الذي يصمت عن اتفاقٍ قائم
       // يبدو ملفًّا مفكّكًا — وهذا هو الجسر.
       plans: plans.map(planLedgerSummary),

@@ -9,7 +9,7 @@ import {
 } from "@/lib/legacy-balance-arrangements-db";
 import { isLegacyArrangementCadence } from "@/lib/legacy-balance-arrangements";
 import { isCurrency, parseAmount } from "@/lib/money";
-import { canAccessPatient } from "@/lib/patient-access";
+import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
 import { canViewMoney } from "@/lib/roles";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -32,7 +32,7 @@ async function mayView(session: Awaited<ReturnType<typeof requireSession>>, pati
   if (session.role === "doctor") {
     return canAccessPatient(session, patientId, "canViewPatientPayments").catch(() => false);
   }
-  return canViewMoney(session.role);
+  return session.role === "reception" ? canViewPatientMoney(session, patientId) : canViewMoney(session.role);
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -62,6 +62,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
   const patientId = idOf((await params).id);
   if (!patientId) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
 
   let body: unknown;
   try {
@@ -147,6 +148,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   }
   const patientId = idOf((await params).id);
   if (!patientId) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
 
   let body: unknown;
   try {

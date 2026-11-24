@@ -1,3 +1,5 @@
+import { requireCollectionScope } from "./reception-collection-scope";
+import { CLINIC_TIME_ZONE } from "./db";
 /**
  * Server-proven outcome of a collection attempt key (0068). A client that holds a refused
  * or unanswered collection keeps its key; it may drop it only after this proves the key
@@ -52,6 +54,7 @@ export async function retireCollectionAttempt(attempt: CollectionAttemptIdentity
   try {
     await client.query("BEGIN ISOLATION LEVEL READ COMMITTED");
     const current = await revalidateSessionInTransaction(session, client);
+    if (current?.role === "reception") await requireCollectionScope(client, current.role, patientId, current.username, CLINIC_TIME_ZONE);
     if (!current || !canHandleMoney(current.role)) throw new CollectionAttemptError(403, "التحقق من محاولة التحصيل للإدارة والاستقبال والصندوق.");
     // A replaced session never retires another user's uncertain attempt.
     if (current.username !== originalActor) throw new CollectionAttemptError(409, ATTEMPT_OWNER_CHANGED);

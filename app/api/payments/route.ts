@@ -1,3 +1,5 @@
+import { canViewPatientMoney } from "@/lib/patient-access";
+import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { isRetiredCollectionKey, retiredCollectionRefusal } from "@/lib/collection-attempts";
 import { parseSimilarCollectionReviewHeader, similarCollectionRefusal, SimilarCollectionReviewRequired, SIMILAR_COLLECTION_REVIEW_HEADER } from "@/lib/similar-collection";
 import { collectApprovedAgreement } from "@/lib/approved-agreements";
@@ -25,7 +27,7 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canViewMoney(session.role)) {
+  if (session.role === "reception" || !canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const requested = new URL(request.url).searchParams.get("date") ?? "";
@@ -51,6 +53,9 @@ export async function POST(request: Request) {
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
+  if (session.role === "reception" && !await canViewPatientMoney(session, Number(source.patientId))) {
+    return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
+  }
   // A refund reverses a receipt. Only the manager may correct an issued receipt.
   if (source.kind === "refund" && session.role !== "admin") {
     return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
@@ -91,7 +96,8 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ ...result.payment, idempotencyKey:recovery.idempotencyKey }, { status: result.replayed ? 200 : 201 });
     } catch (error) {
-      if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
+      if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
       if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
       return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة بالمفتاح نفسه." }, { status: 500 });
     }
@@ -239,7 +245,8 @@ export async function POST(request: Request) {
         }
       }
     } catch (error) {
-      if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
+      if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
       if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
       if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
       return NextResponse.json({ message: "تعذّر تسجيل القسط. أعد المحاولة." }, { status: 500 });
@@ -370,6 +377,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ...payment, idempotencyKey,
       ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) }, { status: replayed ? 200 : 201 });
   } catch (error) {
+    if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
     if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
     if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});

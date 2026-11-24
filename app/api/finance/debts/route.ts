@@ -11,7 +11,7 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (!canViewMoney(session.role)) {
+  if (session.role === "reception" || !canViewMoney(session.role)) {
     return NextResponse.json({ message: "المديونية للإدارة والاستقبال." }, { status: 403 });
   }
 

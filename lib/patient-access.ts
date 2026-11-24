@@ -1,4 +1,5 @@
-import { doctorOwnsPatient, findUserByUsername, patientHasVisitToday, type DbClient } from "./db";
+import { receptionCollectionAllowed } from "./reception-collection-scope";
+import { CLINIC_TIME_ZONE, ensureSchema, getPool, doctorOwnsPatient, findUserByUsername, patientHasVisitToday, type DbClient } from "./db";
 import type { SessionPayload } from "./auth";
 import type { DoctorPermissions } from "./doctor-permissions";
 import { canViewMoney } from "./roles";
@@ -47,5 +48,9 @@ export async function canAccessPatient(
  */
 export async function canViewPatientMoney(session: SessionPayload, patientId: number): Promise<boolean> {
   if (session.role === "doctor") return canAccessPatient(session, patientId, "canViewPatientPayments");
+  if (session.role === "reception") {
+    await ensureSchema();
+    return receptionCollectionAllowed(getPool(), patientId, session.username, CLINIC_TIME_ZONE);
+  }
   return canViewMoney(session.role);
 }

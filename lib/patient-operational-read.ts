@@ -19,13 +19,13 @@ export async function readOperationalPatient(patientId: number, role: Operationa
   return rows[0] ?? null;
 }
 
-export async function readOperationalWorkflow(patientId: number, role: OperationalRole, today: string) {
+export async function readOperationalWorkflow(patientId: number, role: OperationalRole, today: string, financialAccess = false) {
   const patient = await readOperationalPatient(patientId, role);
   if (!patient) return null;
   const { rows: [visit] } = await getPool().query(`SELECT id, status, chair, arrived_at AS "arrivedAt", NULL::text AS "plannedTitle"
     FROM visits WHERE patient_id=$1 AND signed_at IS NULL AND (arrived_at AT TIME ZONE $2)::date=$3::date
     ORDER BY (status='done'), arrived_at DESC LIMIT 1`, [patientId, CLINIC_TIME_ZONE, today]);
-  const desk = role === "reception";
+  const desk = role === "reception" && financialAccess;
   const debts = desk ? await computeDebtRows([patientId], true) : [];
   const byCurrency = Object.fromEntries(CURRENCIES.map(currency => {
     const debt = debts.find(row => row.currency === currency);

@@ -47,6 +47,7 @@ import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
 import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
 import { PatientContactPanel, PatientFlagChips } from "@/components/PatientContactPanel";
+import { CollectionAssignment } from "@/components/patient/CollectionAssignment";
 import { ReceptionPatientEditor } from "@/components/patient/ReceptionPatientEditor";
 import {
   makeReceptionPatientForm, patientIdentityEditMode, type AdministrativePatientChange,
@@ -1375,6 +1376,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         />
       ) : tab === "account" ? (
         <>
+          {admin && <CollectionAssignment key={patient.id} patientId={patient.id} />}
           <PatientLedger patientId={patient.id} selectionContextKey={JSON.stringify([contextAuthority, location.context ?? null, location.contextError ?? null, clinicalContext.ready, clinicalContext.error ?? null])} onClinicalChange={refreshWorkflow} entryRequestKey={treatmentEntryRequest?.owner === alertOwner ? treatmentEntryRequest.key : 0} onNavigationGuardChange={trackAccountGuard} onEntryRequestConsumed={(key) => {
             setTreatmentEntryRequest(previous => previous?.owner === alertOwner && previous.key === key ? null : previous);
           }} accountDetails={<>

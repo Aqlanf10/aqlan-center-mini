@@ -5,6 +5,7 @@ import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpe
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
 import { counterIdentifierBigintSql } from "./counter-identifier-sql";
+import { requireCollectionScope } from "./reception-collection-scope";
 import { patientNumberBackupSql } from "./patient-number-backup-sql";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "./patient-appointment-history-schema";
 import { assertSimilarCollectionReviewed, type SimilarCollectionReview } from "./similar-collection";
@@ -9657,9 +9658,9 @@ export async function listPatientPayments(patientId: number, client?: DbClient |
   return attachCurrencyReclassifications(client,rows.map(toPayment));
 }
 
-export async function getPayment(id: number): Promise<Payment | null> {
+export async function getPayment(id: number, collector?: string): Promise<Payment | null> {
   await ensureSchema();
-  const { rows } = await getPool().query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.id = $1`, [id]);
+  const { rows } = await getPool().query<PaymentRow>(`${PAYMENT_SELECT} WHERE y.id = $1${collector === undefined ? "" : " AND y.created_by = $2"}`, collector === undefined ? [id] : [id, collector]);
   return rows[0] ? toPayment(rows[0]) : null;
 }
 
@@ -10269,6 +10270,7 @@ async function runPaymentTransaction(
   const tx = (statement: "BEGIN" | "COMMIT" | "ROLLBACK") => own ? client.query(statement) : Promise.resolve();
   try {
     await tx("BEGIN");
+    await requireCollectionScope(client, prepared.receiptAudit?.actorRole, input.patientId, input.createdBy, CLINIC_TIME_ZONE);
 
     /* (TD-05 second owner review — Finding 8) الحارس الكانوني داخل المعاملة
      * نفسها: دفعةٌ جديدة بفاتورةٍ وخطةٍ معًا مرفوضة مهما كان الباب الذي دخل
@@ -10813,6 +10815,7 @@ async function runRecoveryTransaction(
   client: DbClient, input: RecoveryWriteInput, key: string, requestHash: string,
   similarityReview?: SimilarCollectionReview,
 ): Promise<RecoveryOutcome> {
+  await requireCollectionScope(client, input.actorRole, input.patientId, input.createdBy, CLINIC_TIME_ZONE);
   const previous = await recoveryReplay(client, input, key, requestHash);
   if (previous) return previous;
   // Opening addOnly writers lock this patient FOR UPDATE. Acquire the compatible
@@ -21044,6 +21047,7 @@ async function runPlanInstallmentTransaction(
   client: DbClient, input: PlanInstallmentInput,
   prepared: ReturnType<typeof preparePlanInstallment>,
 ): Promise<PlanInstallmentOutcome> {
+  await requireCollectionScope(client, input.actorRole, input.patientId, input.createdBy, CLINIC_TIME_ZONE);
   const { idempotencyKey, baseAmount, requestHash } = prepared;
   // Resolve old successes before new recovery eligibility or acquiring provenance locks.
   if (idempotencyKey !== null) {

@@ -1,3 +1,4 @@
+import { requireCollectionScope } from "./reception-collection-scope";
 import {assertSimilarCollectionReviewed,type SimilarCollectionReview} from "./similar-collection";
 import {readInvoiceSettlementPosition} from "./invoice-settlement-position";
 import {clinicDateString} from "./schedule";
@@ -193,6 +194,10 @@ export async function collectApprovedAgreement(input:{planId:number;amountMinor:
   const hash=debtRequestHash({purpose:"approved-agreement-collection-v1",...input,session:{id:input.session.userId,username:input.session.username}});
   const receipt=await transaction(async client=>{
     await assertCollectionSession(client,input.session);
+    if (input.session.role === "reception") {
+      const { rows: [target] } = await client.query("SELECT patient_id FROM treatment_plans WHERE id=$1 FOR SHARE", [input.planId]);
+      await requireCollectionScope(client, input.session.role, target?.patient_id, input.session.username, CLINIC_TIME_ZONE);
+    }
     const replay=async()=>{const p=(await client.query<{id:number;idempotency_request_hash:string}>("SELECT id,idempotency_request_hash FROM payments WHERE idempotency_key=$1",[input.idempotencyKey])).rows[0];
       if(p&&p.idempotency_request_hash!==hash)throw new DebtRepaymentError("conflict","مفتاح التحصيل مستعمل بطلب مختلف.");return p;};
     const groupReplay=async()=>{

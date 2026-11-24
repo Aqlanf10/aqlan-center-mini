@@ -1,3 +1,4 @@
+import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -20,6 +21,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ state }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const bounded = bodyErrorResponse(error); if (bounded) return bounded;
+    if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
     if (error instanceof CollectionAttemptError) return NextResponse.json({ message: error.message }, { status: error.status });
     return NextResponse.json({ message: "تعذّر التحقق من المحاولة الآن؛ بقيت محفوظة. أعد المحاولة." }, { status: 500 });
   }

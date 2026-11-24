@@ -1,3 +1,5 @@
+import { requireCollectionScope } from "./reception-collection-scope";
+import { CLINIC_TIME_ZONE } from "./db";
 import { ensureSchema, getPool, getPayment, getSettingsInTransaction, insertAuditRow, writeDebtCollectionReceipt } from "./db";
 import type { SessionPayload } from "./auth";
 import { CLINIC_BASE_CURRENCY, isCurrency, settlePaymentMinor, toBaseAmount, type Currency } from "./money";
@@ -19,6 +21,7 @@ export async function collectDebtInstallment(input: {
   let paymentId=0;let replayed=false;
   try{
     await client.query("BEGIN");await assertDebtSession(client,input.session);
+    await requireCollectionScope(client, input.session.role, input.patientId, input.session.username, CLINIC_TIME_ZONE);
     const replay=async()=>{
       const {rows:[prior]}=await client.query<{id:number;patient_id:number;created_by:string;idempotency_request_hash:string}>("SELECT id,patient_id,created_by,idempotency_request_hash FROM payments WHERE idempotency_key=$1",[input.idempotencyKey]);
       if(!prior)return null;

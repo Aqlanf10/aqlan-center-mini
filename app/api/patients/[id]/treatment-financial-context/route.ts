@@ -1,3 +1,4 @@
+import { canViewPatientMoney } from "@/lib/patient-access";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { financeAccessFor } from "@/lib/finance-permissions";
@@ -17,6 +18,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const patientId = Number((await context.params).id);
   if (!Number.isSafeInteger(patientId) || patientId <= 0) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) {
+    return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
+  }
   try {
     const result = await listTreatmentFinancialReferences(patientId);
     if (!result) return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });

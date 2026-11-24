@@ -1,3 +1,4 @@
+import { canViewPatientMoney } from "@/lib/patient-access";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -12,12 +13,14 @@ const denial=(status:number)=>NextResponse.json({message:status===401?"سجّل 
 export async function GET(_request:Request,context:Context){
   const session=await requireSession();if(!session)return denial(401);if(!["admin","reception"].includes(session.role))return denial(403);
   const patientId=Number((await context.params).id);if(!Number.isSafeInteger(patientId)||patientId<=0)return NextResponse.json({message:"رقم المريض غير صالح."},{status:400});
+  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) return denial(403);
   try{return NextResponse.json(await debtRepaymentWorkspace(patientId,clinicDateString(new Date(),CLINIC_TIME_ZONE)),{headers:{"Cache-Control":"no-store"}});}
   catch{return NextResponse.json({message:"تعذّر قراءة ترتيب السداد؛ حدّث الحساب."},{status:500});}
 }
 export async function POST(request:Request,context:Context){
   const session=await requireSession();if(!session)return denial(401);if(!["admin","reception"].includes(session.role))return denial(403);
   const patientId=Number((await context.params).id);
+  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) return denial(403);
   try{
     const body=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);
     if(!body||typeof body!=="object"||Array.isArray(body))throw new DebtRepaymentError("invalid","طلب غير صالح.");

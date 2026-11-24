@@ -4,7 +4,7 @@ import { CLINIC_TIME_ZONE, getSettings, patientWorkflow } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
-import { canAccessPatient } from "@/lib/patient-access";
+import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
 import { HTTP_PERMISSIONS } from "@/lib/http-permissions";
 import { projectPlannedVisitRebooking } from "@/lib/planned-visit-projection";
 
@@ -42,7 +42,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
     if (session.role === "reception" || session.role === "assistant") {
-      const workspace = await readOperationalWorkflow(patientId, session.role, today);
+      const financialAccess = session.role === "reception" && await canViewPatientMoney(session, patientId);
+      const workspace = await readOperationalWorkflow(patientId, session.role, today, financialAccess);
       return NextResponse.json(workspace ?? { message: "الملف غير متاح." },
         { status: workspace ? 200 : 404, headers: { "Cache-Control": "private, no-store" } });
     }
