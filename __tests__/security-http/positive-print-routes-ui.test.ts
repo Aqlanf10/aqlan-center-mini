@@ -4,7 +4,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { Client } from "pg";
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { authedGet, baseUrl, harness, type Session } from "./_server";
+import { authedGet, authedMutation, baseUrl, harness, type Session } from "./_server";
 import { fictionalPrintBrand as brand, installFictionalPrintBrand } from "./_positive-print-branding";
 import { friendlyDateLong } from "../../lib/reminders";
 
@@ -315,6 +315,54 @@ describe("positive persisted print routes on the built app", () => {
       expect(text).not.toMatch(/Application error|server error occurred|This page couldn.t load/);
       expect(unexpected).toEqual([]);
       expect(errors).toEqual([]);
+    } finally { await context.close(); }
+  });
+
+  it("prints and finds the exact archive number issued by real reception registration", async () => {
+    // The shared HTTP harness has other synthetic patients; never reset its
+    // sequence or assume this fixture receives the very first number.
+    const fullName = `SyntheticArchiveCard ${marker}`;
+    const session = h.sessions.reception;
+    const created = await authedMutation("/api/patients", session, "POST",
+      JSON.stringify({ fullName, gender: "unknown", confirmDuplicate: true }));
+    expect(created.status).toBe(201);
+    const patient = await created.json() as { id: number; patientNumber: string; fullName: string };
+    expect(patient.fullName).toBe(fullName);
+    expect(patient.patientNumber).toMatch(/^P-[0-9]{5,19}$/);
+    expect(BigInt(patient.patientNumber.slice(2)) >= 7000n).toBe(true);
+    const stored = await db.query("SELECT patient_number FROM patients WHERE id=$1", [patient.id]);
+    expect(stored.rows).toEqual([{ patient_number: patient.patientNumber }]);
+
+    const found = await authedGet(`/api/patients?q=${encodeURIComponent(patient.patientNumber)}`, session);
+    expect(found.status).toBe(200);
+    expect(await found.json()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: patient.id, patientNumber: patient.patientNumber }),
+    ]));
+
+    const { context, unexpected } = await createSyntheticPrintContext(session);
+    try {
+      const page = await context.newPage();
+      const path = `/print/patient-card/${patient.id}`;
+      const response = await page.goto(baseUrl + path, { waitUntil: "load" });
+      expect(response?.status()).toBe(200);
+      await page.evaluate(() => document.fonts.ready);
+      await expectFictionalPrintIdentity(page);
+      const number = page.locator(".patient-card-sheet .amount-box[dir='ltr']");
+      expect((await number.innerText()).trim()).toBe(patient.patientNumber);
+      const pdf = await page.pdf({ format: "A6", printBackground: true, preferCSSPageSize: true, displayHeaderFooter: false });
+      const printed = execFileSync("pdftotext", ["-layout", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" });
+      expectFictionalPdfIdentity(printed);
+      expect(compact(printed)).toContain(patient.patientNumber);
+      const papers = await pdfGeometry(page, pdf);
+      expect(papers).toHaveLength(1);
+      expectPaperBounds(papers, "A6");
+
+      const reprint = await page.reload({ waitUntil: "load" });
+      expect(reprint?.status()).toBe(200);
+      expect((await number.innerText()).trim()).toBe(patient.patientNumber);
+      expect(unexpected).toEqual([]);
+      expect((await db.query("SELECT patient_number FROM patients WHERE id=$1", [patient.id])).rows)
+        .toEqual(stored.rows);
     } finally { await context.close(); }
   });
 
