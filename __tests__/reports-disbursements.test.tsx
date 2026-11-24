@@ -25,10 +25,13 @@ const { default: ReportsPage } = await import("../app/reports/page");
 const { ReportView } = await import("../components/reports/ReportView");
 const { FilterBar } = await import("../components/reports/shared");
 const { normalizeSavedReportQuery } = await import("../lib/saved-reports");
+const { buildReport, parseFilters } = await import("../lib/reports");
+const { loadClinicExpenseRangeReport } = await import("../lib/daily-clinic-expense-report");
 
 const q = (sql: string, params: unknown[] = []) => getPool().query(sql, params);
 const SELECTED_DAY = "2027-01-01";
 const NEXT_DAY = "2027-01-02";
+const LEAP_YEAR_END = "2028-12-31";
 const syntheticPayee = "مؤجر الاختبار الاصطناعي";
 const syntheticCategory = "إيجار اختبار اصطناعي";
 const dateInside = "2026-12-31T21:00:00Z";
@@ -70,6 +73,9 @@ beforeAll(async () => {
   await expense("SYN-EXP-OTHER", 2000, "USD", { payee: syntheticPayee, category: "synthetic_other" });
   await expense("SYN-EXP-MISSING", 600, "YER", { note: syntheticPayee });
   await expense("SYN-EXP-PREV", 99999, "YER", { payee: syntheticPayee, at: "2026-12-31T20:59:59Z" });
+  await expense("SYN-RENT-LEAP", 800, "USD", { payee: syntheticPayee, at: "2028-02-28T21:00:00Z" });
+  await expense("SYN-RENT-END", 705, "SAR", { payee: syntheticPayee, at: "2028-12-31T20:59:59Z" });
+  await expense("SYN-RENT-AFTER", 90000, "YER", { payee: syntheticPayee, at: "2028-12-31T21:00:00Z" });
   const payout = await expense("SYN-EXP-PAYOUT", 5000, "YER", { party: supplier, payee: "اسم المورد القديم" });
   const payable = (await q("INSERT INTO payables(party_id,category,description,amount_minor,currency,base_amount_minor) VALUES ($1,'synthetic_other','Synthetic account',3000,'YER',3000) RETURNING id", [supplier])).rows[0].id;
   await q("INSERT INTO expense_payable_allocations(expense_id,payable_id,paid_minor,payable_currency,payable_exchange_rate,settled_minor) VALUES ($1,$2,3000,'YER',1,3000)", [payout, payable]);
@@ -150,6 +156,61 @@ describe("disbursement reports use recorded, non-duplicated native movements", (
     expect((await result({ ...params, expenseRecipient: "a".repeat(64) })).rows).toEqual([]);
   });
 
+  it("returns an inclusive 731-day rent window across a leap day and clinic midnight in screen, print and CSV", async () => {
+    const twoYears = standardParams("expense-payees", { to: LEAP_YEAR_END });
+    const choices = await result(twoYears);
+    const payee = choices.expenseFilterOptions?.payees.find(option => option.label.includes(syntheticPayee));
+    const rent = choices.expenseFilterOptions?.categories.find(option => option.label === syntheticCategory);
+    expect(payee?.value).toMatch(/^[a-f0-9]{64}$/);
+    expect(rent?.value).toMatch(/^[a-f0-9]{64}$/);
+    const params = { ...twoYears, expenseRecipient: payee!.value, expenseCategory: rent!.value };
+    const saved = normalizeSavedReportQuery("expense-payees", new URLSearchParams(params).toString());
+    expect(Object.fromEntries(new URLSearchParams(saved.queryString))).toEqual(params);
+    const filtered = await result(params);
+    expect([filtered.from, filtered.to]).toEqual([SELECTED_DAY, LEAP_YEAR_END]);
+    expect(filtered.rows?.map(row => [row.reference, row.day, row.amount, row.currency])).toEqual([
+      ["SYN-RENT-END", LEAP_YEAR_END, 705, "SAR"],
+      ["SYN-RENT-LEAP", "2028-02-29", 800, "USD"],
+      ["SYN-EXP-UNDO", NEXT_DAY, -2000, "YER"],
+      ["SYN-EXP-SAR", SELECTED_DAY, 12345, "SAR"],
+      ["SYN-EXP-YER", SELECTED_DAY, 10000, "YER"],
+    ]);
+    expect(checkCards(filtered)).toMatchObject({ "net-YER": 8000, "net-SAR": 13050, "net-USD": 800 });
+    for (const output of [screen(filtered), await official(params), reportCsv(filtered.columns!, filtered.rows!, filtered.baseCurrency)]) {
+      for (const row of filtered.rows!) expect(output).toContain(row.reference);
+      for (const ref of ["SYN-EXP-PREV", "SYN-RENT-AFTER", "SYN-EXP-OTHER", "SYN-EXP-MISSING", "SYN-EXP-PAYOUT"]) {
+        expect(output).not.toContain(ref);
+      }
+    }
+  });
+
+  it("rejects 732 expense days and 367 outflow days before report reads, while preserving day 366 for outflow", async () => {
+    const outflow = standardParams("daily-outflow", { to: "2028-01-01" });
+    expect((await result(outflow)).to).toBe("2028-01-01");
+    const before = parseFilters(new URLSearchParams(outflow));
+    const pool = getPool();
+    const reads = vi.spyOn(pool, "query");
+    const connections = vi.spyOn(pool, "connect");
+    try {
+      for (const [report, to, count] of [
+        ["expense-payees", "2029-01-01", "٧٣١"],
+        ["daily-outflow", "2028-01-02", "٣٦٦"],
+      ]) {
+        const params = standardParams(report, { to });
+        const denied = await api(params);
+        expect(denied.status).toBe(400);
+        expect((await denied.json()).message).toContain(count);
+        await expect(official(params)).rejects.toThrow("NEXT_HTTP_ERROR_FALLBACK;404");
+        await expect(buildReport(report, { ...before, to })).rejects.toThrow(count);
+      }
+      expect(reads).not.toHaveBeenCalled();
+      expect(connections).not.toHaveBeenCalled();
+    } finally {
+      reads.mockRestore();
+      connections.mockRestore();
+    }
+  });
+
   it("separates single vouchers, audited refunds, receipt corrections and internal transfers without a mixed total", async () => {
     const params = standardParams("daily-outflow", { to: SELECTED_DAY });
     const report = await result(params);
@@ -187,7 +248,7 @@ describe("disbursement reports use recorded, non-duplicated native movements", (
       } finally { session.role = "admin"; }
     }
     const invalid: Record<string, string>[] = [
-      { from: "2027-02-30" }, { from: "2026-01-01" }, { currency: "unknown" }, { expenseRecipient: syntheticPayee },
+      { from: "2027-02-30" }, { from: "2027-01-03" }, { currency: "unknown" }, { expenseRecipient: syntheticPayee },
     ];
     for (const extra of invalid) {
       const params = standardParams("expense-payees", extra);
@@ -197,4 +258,45 @@ describe("disbursement reports use recorded, non-duplicated native movements", (
       await expect(official(params)).rejects.toThrow("NEXT_HTTP_ERROR_FALLBACK;404");
     }
   });
+
+  if (postgresUrl) it("queries the two-year voucher window once through an index range, not unrelated history", async () => {
+    const addFixtures = (prefix: string, start: string, count: number) => q(
+      `INSERT INTO expenses(voucher_number,shift_id,category,payee_text,amount_minor,currency,exchange_rate,base_amount_minor,base_currency,created_at)
+       SELECT $1::text || n, (SELECT MIN(id) FROM cashier_shifts), 'synthetic_rent', 'Synthetic query workload',
+              10, 'YER', 1, 10, 'YER', $2::timestamptz + n * INTERVAL '4 hours'
+         FROM generate_series(1, $3::int) n`,
+      [prefix, start, count],
+    );
+    await addFixtures("SYN-HISTORY-", "2000-01-01T00:00:00Z", 40_000);
+    await addFixtures("SYN-WINDOW-", "2027-01-03T00:00:00Z", 3_650);
+    await q("ANALYZE expenses");
+
+    const query = { timeZone: "Asia/Aden", from: SELECTED_DAY, to: LEAP_YEAR_END };
+    const statements: { sql: string; values: unknown[] }[] = [];
+    await loadClinicExpenseRangeReport(query, {
+      async query(sql, values) { statements.push({ sql, values }); return { rows: [] }; },
+    });
+    expect(statements).toHaveLength(1);
+    expect(statements[0].values).toEqual(["Asia/Aden", SELECTED_DAY, LEAP_YEAR_END]);
+
+    type Plan = {
+      "Index Name"?: string; "Index Cond"?: string; "Actual Rows": number;
+      "Actual Loops": number; "Relation Name"?: string; Alias?: string; "Node Type": string; Plans?: Plan[];
+    };
+    const explain = await getPool().query<{ "QUERY PLAN": { Plan: Plan }[] }>(
+      "EXPLAIN (ANALYZE, FORMAT JSON) " + statements[0].sql, statements[0].values,
+    );
+    const root = explain.rows[0]["QUERY PLAN"][0].Plan;
+    const flatten = (plan: Plan): Plan[] => [plan, ...(plan.Plans ?? []).flatMap(flatten)];
+    const nodes = flatten(root);
+    const dateIndex = nodes.find(node => node["Index Name"] === "expenses_created_idx");
+    expect(dateIndex?.["Index Cond"]).toMatch(/created_at >= .*created_at </);
+    expect(dateIndex?.["Actual Loops"]).toBe(1);
+    expect(nodes.some(node => node["Node Type"] === "Seq Scan" && node["Relation Name"] === "expenses" && node.Alias === "e")).toBe(false);
+
+    const report = await result(standardParams("expense-payees", { to: LEAP_YEAR_END }));
+    expect(report.rows?.length).toBe(root["Actual Rows"]);
+    expect(report.rows?.filter(row => String(row.reference).startsWith("SYN-WINDOW-"))).toHaveLength(3_650);
+    expect(report.rows?.some(row => String(row.reference).startsWith("SYN-HISTORY-"))).toBe(false);
+  }, 30_000);
 });
