@@ -21,7 +21,6 @@ vi.stubEnv("RAILWAY_PROJECT_ID", "");
 vi.stubEnv("CLINIC_TIME_ZONE", "Asia/Aden");
 const { ensureSchema, getPool, resetPoolForTesting } = await import("../lib/db");
 const { GET } = await import("../app/api/reports/route");
-const { buildReport, parseFilters } = await import("../lib/reports");
 const { default: PrintPage } = await import("../app/print/report/page");
 const { default: ReportsPage } = await import("../app/reports/page");
 const { ReportView } = await import("../components/reports/ReportView");
