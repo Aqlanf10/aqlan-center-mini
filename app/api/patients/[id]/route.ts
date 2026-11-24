@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readOperationalPatient } from "@/lib/patient-operational-read";
 import { patientAppointmentsResponse } from "@/lib/patient-appointments-response";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -76,6 +77,15 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   // Bounded appointments projection deliberately retains its own authorization.
+  const projections = new URL(_request.url).searchParams.getAll("projection");
+  if (projections.length === 1 && projections[0] === "workspace") {
+    if (session.role !== "reception" && session.role !== "assistant") {
+      return NextResponse.json({ message: "هذا العرض مخصص للتشغيل اليومي." }, { status: 403 });
+    }
+    const patient = await readOperationalPatient(id, session.role);
+    return NextResponse.json(patient ? { patient, visits: [], appointments: [] } : { message: "الملف غير متاح." },
+      { status: patient ? 200 : 404, headers: { "Cache-Control": "private, no-store" } });
+  }
   if (projectionRequested) {
     return patientAppointmentsResponse(_request, session, rawId);
   }

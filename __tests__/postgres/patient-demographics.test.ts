@@ -60,3 +60,19 @@ describe("patient demographics", () => {
     expect(created).toMatchObject({ birthDate: null, guardianName: null, guardianPhone: null, nationalId: null });
   });
 });
+
+
+it("selects desk demographics without clinical fields and scopes assistant reads to the clinic day", async () => {
+  const { readOperationalPatient, readOperationalWorkflow } = await import("../../lib/patient-operational-read");
+  const { CLINIC_TIME_ZONE } = await import("../../lib/db");
+  const { clinicDateString } = await import("../../lib/schedule");
+  const patient = await createPatient({ fullName: "Synthetic operational patient", gender: "unknown", phone: null,
+    altPhone: null, birthYear: null, address: null, medicalAlert: "SYNTHETIC PRIVATE ALERT", note: "SYNTHETIC CLINICAL NOTE" });
+  const desk = await readOperationalPatient(patient.id, "reception");
+  expect(desk).toMatchObject({ id: patient.id, patientNumber: patient.patientNumber, fullName: patient.fullName });
+  for (const key of ["medicalAlert", "note", "flags", "photoDocumentId"]) expect(desk).not.toHaveProperty(key);
+  expect(await readOperationalPatient(patient.id, "assistant")).toBeNull();
+  const workflow = await readOperationalWorkflow(patient.id, "reception", clinicDateString(new Date(), CLINIC_TIME_ZONE));
+  expect(workflow?.patient.id).toBe(patient.id);
+  expect(JSON.stringify(workflow)).not.toContain("SYNTHETIC PRIVATE ALERT");
+});

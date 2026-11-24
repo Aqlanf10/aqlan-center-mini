@@ -135,6 +135,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const router = useRouter();
   const session = useSession();
   const admin = isAdmin(session?.role);
+  const operational = session?.role === "assistant" || session?.role === "reception";
   const identityEditMode = patientIdentityEditMode(session);
   const canViewContact = session?.role === "doctor" || admin || session?.role === "reception";
   // (TD-05) الأساس دستوري من الكود.
@@ -356,7 +357,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     setLoading(true);
     try {
       const [patientRes, workflowRes] = await Promise.all([
-        workflowOnly ? Promise.resolve(null) : read(`/api/patients/${id}`),
+        workflowOnly ? Promise.resolve(null) : read(`/api/patients/${id}${operational ? "?projection=workspace" : ""}`),
         read(`/api/patients/${id}/workflow`),
       ]);
 
@@ -420,7 +421,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     } finally {
       if (current()) setLoading(false);
     }
-  }, [id, alertOwner]);
+  }, [id, alertOwner, operational]);
 
   const applyAdministrativeChange = (change: AdministrativePatientChange) => {
     if (!alertOwner.active || acceptedFileOwner.current !== alertOwner) return false;
@@ -1380,7 +1381,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             <p className="mb-2 text-xs text-slate-500">القيمة المخططة وتقدم العمل منفصلان عن الدَّين. الفاتورة المعتمدة تدخل رصيد الحساب مرة واحدة فقط؛ لا تجمع هذه الأرقام مع المستحق.</p>
         {/* Account details: separate obligations and clinical work, never added to ledger totals. */}
         {/* Each agreement is a source-level reference already included in the ledger. */}
-        {accountHeader && summary?.financial
+        {!operational && accountHeader && summary?.financial
           ? (summary.financial.byCurrency
               ? (Object.entries(summary.financial.byCurrency) as [Currency, PatientWorkflowFinancialBucket][])
                 .filter(([, bucket]) => hasPatientFinancialActivity(bucket))

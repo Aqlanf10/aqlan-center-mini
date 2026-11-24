@@ -290,7 +290,7 @@ function PatientDocumentsForPatient({
             <select value={kind} onChange={(event) => setKind(event.target.value as DocumentKind)}
               aria-label="نوع المستند"
               className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs">
-              {KINDS.map((value) => (
+              {KINDS.filter(value => !receptionUploadOnly || value === "xray" || value === "report").map((value) => (
                 <option key={value} value={value}>{KIND_LABEL[value]}</option>
               ))}
             </select>
@@ -357,7 +357,7 @@ function PatientDocumentsForPatient({
           </label>
           {/* كاميرا الجوال من داخل الملف: العنصر المخفي بـ`capture` يفتح الكاميرا
               مباشرة، والصورة تدخل مسار الرفع نفسه — لا مجلّد جوالٍ يضيع. */}
-          <input ref={cameraInput} type="file" id="document-camera" aria-label="كاميرا التصوير"
+          {!receptionUploadOnly && <><input ref={cameraInput} type="file" id="document-camera" aria-label="كاميرا التصوير"
             accept="image/*" capture="environment" disabled={busy}
             onChange={(event) => {
               const cameraFile = event.target.files?.[0];
@@ -369,7 +369,7 @@ function PatientDocumentsForPatient({
           <button type="button" disabled={busy} onClick={() => cameraInput.current?.click()}
             className="rounded-lg bg-navy-800 px-3 py-1.5 text-xs font-extrabold text-white">
             📷 التقاط صورة الآن
-          </button>
+          </button></>}
           <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
             {picked?.name ?? "لم يُختَر ملف بعد — صورة أو PDF"}
           </span>

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { readOperationalWorkflow } from "@/lib/patient-operational-read";
 import { CLINIC_TIME_ZONE, getSettings, patientWorkflow } from "@/lib/db";
 import { clinicDateString } from "@/lib/schedule";
 import { canHandleMoney } from "@/lib/roles";
@@ -40,6 +41,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    if (session.role === "reception" || session.role === "assistant") {
+      const workspace = await readOperationalWorkflow(patientId, session.role, today);
+      return NextResponse.json(workspace ?? { message: "الملف غير متاح." },
+        { status: workspace ? 200 : 404, headers: { "Cache-Control": "private, no-store" } });
+    }
     const summary = await patientWorkflow(patientId, today);
     if (!summary.patient) {
       return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
@@ -55,22 +61,6 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     const doctorSeesMoney =
       session.role === "doctor" && settings["workflow.doctor_financial_view"] === "true";
     const maySeeFinancial = canHandleMoney(session.role) || doctorSeesMoney;
-
-    /* (P0-F) المساعد السريري: رأس الملف بلا خطط ولا أسعار ولا مواعيد ولا زيارات مخطّطة —
-       يرى المريض وتنبيهاته وزيارته الجارية فقط. */
-    if (session.role === "assistant") {
-      return NextResponse.json({
-        ...summary,
-        ...caseProjection,
-        today,
-        timeZone: CLINIC_TIME_ZONE,
-        nextAppointment: null,
-        plannedVisits: [],
-        activePlans: [],
-        financial: null,
-        canSeeFinancial: false,
-      });
-    }
 
     return NextResponse.json({
       ...summary,

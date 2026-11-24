@@ -474,7 +474,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     }, ORTHO_PARENT_READ_TIMEOUT_MS));
     const read = async (kind: "clinical" | "contact") => {
       try {
-        const response = await fetch(kind === "clinical" ? `/api/ortho?patientId=${patientId}` : `/api/patients/${patientId}`,
+        const response = await fetch(kind === "clinical" ? `/api/ortho?patientId=${patientId}` : `/api/patients/${patientId}${session?.role === "reception" || session?.role === "assistant" ? "?projection=workspace" : ""}`,
           { cache: "no-store", signal: controller.signal });
         if (!current()) return;
         // Both endpoints guard this patient/session; denial is authoritative at headers.

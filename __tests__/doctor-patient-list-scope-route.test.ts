@@ -190,7 +190,7 @@ describe.each(listingModes)("GET patient %s doctor scope", (mode) => {
     expectScope(mode, 7);
   });
 
-  it.each(["admin", "reception"])("preserves the existing %s listing response", async (role) => {
+  it.each(["admin"])("preserves the existing %s listing response", async (role) => {
     mocks.session.mockResolvedValue({ ...session, role });
     const response = await GET(request(mode));
     expect(response.status).toBe(200);
@@ -201,7 +201,7 @@ describe.each(listingModes)("GET patient %s doctor scope", (mode) => {
     });
   });
 
-  it.each(["cashier", "accountant"])("preserves the %s identity-only financial projection", async (role) => {
+  it.each(["reception", "cashier", "accountant"])("returns identity only for %s", async (role) => {
     mocks.session.mockResolvedValue({ ...session, role });
     const response = await GET(request(mode));
     expect(response.status).toBe(200);

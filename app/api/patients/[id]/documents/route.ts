@@ -107,6 +107,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const rawKind = form.get("kind");
   const kind = isDocumentKind(rawKind) ? rawKind : "other";
+  if (session.role === "reception" && kind !== "xray" && kind !== "report") {
+    return NextResponse.json({ message: "يمكن رفع أشعة أو تقرير خارجي فقط." }, { status: 403 });
+  }
   const rawTitle = typeof form.get("title") === "string" ? String(form.get("title")).trim() : "";
   const title = (rawTitle || file.name || "مستند").slice(0, 120);
   const rawNote = typeof form.get("note") === "string" ? String(form.get("note")).trim() : "";
