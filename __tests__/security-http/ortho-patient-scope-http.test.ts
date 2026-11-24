@@ -123,21 +123,13 @@ describe("ortho list patient and image isolation over real HTTP", () => {
     });
   });
 
-  it("allows reception operational case context but denies clinical images and document bytes", async () => {
-    const body = await listAs(h.sessions.reception);
-    expect(body.cases.map((row) => row.id)).toEqual(expect.arrayContaining([caseA, caseB]));
-    const entry = body.cases.find((row) => row.id === caseB)!;
-    expect(entry.photosVisible).toBe(false);
-    expect(entry.adjustments[0].photos).toEqual([]);
-    expect(JSON.stringify(body)).not.toContain("Synthetic image B");
-
-    const response = await authedGet(`/api/ortho/${caseB}`, h.sessions.reception);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      photosVisible: false, adjustments: [expect.objectContaining({ photos: [] })],
-    });
-    expect((await authedGet(`/api/patients/${patientB}/documents`, h.sessions.reception)).status).toBe(403);
-    expect((await authedGet(`/api/documents/${photoB}`, h.sessions.reception)).status).toBe(403);
+  it("serves desk demographics separately from clinical cases and documents", async () => {
+    for (const path of ["/api/ortho", `/api/ortho/${caseB}`, `/api/patients/${patientB}/documents`, `/api/documents/${photoB}`]) {
+      expect((await authedGet(path, h.sessions.reception)).status).toBe(403);
+    }
+    const desk = await authedGet(`/api/patients/${patientB}?projection=workspace`, h.sessions.reception);
+    expect(desk.status).toBe(200);
+    expect(JSON.stringify(await desk.json())).not.toContain(privateB);
   });
 
   it("preserves the explicit all-patient grant even without a linked doctor party", async () => {
