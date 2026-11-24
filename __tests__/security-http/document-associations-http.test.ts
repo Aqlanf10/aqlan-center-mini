@@ -116,7 +116,18 @@ describe("document association boundary over real authenticated HTTP", () => {
     expect(download.headers.get("cache-control")).toContain("no-store");
     expect(download.headers.get("x-content-type-options")).toBe("nosniff");
     expect(Buffer.from(await download.arrayBuffer())).toEqual(png);
-    expect((await authedGet(`/api/documents/${document.id}`, h.sessions.doctorB)).status).toBe(403);
+    // Both inline preview and attachment download must fail without cacheable
+    // clinical data when the requester is not authorized to read the document.
+    for (const session of [h.sessions.doctorB, h.sessions.reception]) {
+      for (const suffix of ["", "?download=1"]) {
+        const denied = await authedGet(`/api/documents/${document.id}${suffix}`, session);
+        expect(denied.status).toBe(403);
+        expect(denied.headers.get("cache-control")).toContain("private");
+        expect(denied.headers.get("cache-control")).toContain("no-store");
+        expect(denied.headers.get("content-disposition")).toBeNull();
+        expect(await denied.json()).not.toHaveProperty("storageKey");
+      }
+    }
 
     // Clinical document metadata is sensitive even without the binary payload.
     const listPath = `/api/patients/${ownPatient}/documents`;
@@ -132,6 +143,36 @@ describe("document association boundary over real authenticated HTTP", () => {
       expect(forbidden.headers.get("cache-control")).toContain("no-store");
       expect(await forbidden.json()).not.toHaveProperty("documents");
     }
+  });
+
+  it("allows upload-only reception to save a synthetic external xray without returning its metadata", async () => {
+    const externalTitle = `SYNTHETIC external xray ${stamp}`;
+    const form = new FormData();
+    form.set("file", new Blob([new Uint8Array(png)], { type: "image/png" }), "synthetic-xray.png");
+    form.set("kind", "xray");
+    form.set("title", externalTitle);
+    const saved = await fetch(`${baseUrl}/api/patients/${ownPatient}/documents`, {
+      method: "POST",
+      headers: { Cookie: h.sessions.reception.cookie, Origin: baseUrl, "Sec-Fetch-Site": "same-origin" },
+      body: form,
+      redirect: "manual",
+    });
+    expect(saved.status).toBe(201);
+    expect(saved.headers.get("cache-control")).toContain("private");
+    expect(saved.headers.get("cache-control")).toContain("no-store");
+    expect(await saved.json()).toEqual({ uploaded: true });
+    const rows = (await db.query<{ id: number }>(
+      "SELECT id FROM patient_documents WHERE patient_id=$1 AND title=$2 AND kind='xray'",
+      [ownPatient, externalTitle],
+    )).rows;
+    expect(rows).toHaveLength(1);
+    const path = `/api/documents/${rows[0].id}`;
+    const allowed = await authedGet(path, h.sessions.doctorA);
+    expect(allowed.status).toBe(200);
+    expect(Buffer.from(await allowed.arrayBuffer())).toEqual(png);
+    const denied = await authedGet(path, h.sessions.reception);
+    expect(denied.status).toBe(403);
+    expect(denied.headers.get("cache-control")).toContain("no-store");
   });
 
   it("rejects foreign, missing, unlinked and mismatched references without revealing their identity or inserting rows", async () => {
