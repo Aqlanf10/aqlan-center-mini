@@ -34,7 +34,7 @@ beforeAll(async () => {
   const partyB = doctors.find((row) => row.username === "secdoctorb")!.party_id;
   const addPatient = async (label: string, doctor: number) => (await db.query<{ id: number }>(
     `INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ($1, $2, $3) RETURNING id`,
-    [`OSP-${label}-${stamp}`, label === "B" ? privateB : `Ortho scope patient ${label}`, doctor],
+    [`OSP-${label}-${stamp}`, `Ortho scope patient ${label}`, doctor],
   )).rows[0].id;
   patientA = await addPatient("A", partyA); patientB = await addPatient("B", partyB);
   const addCase = async (patient: number, note: string) => (await db.query<{ id: number }>(
@@ -83,6 +83,7 @@ describe("ortho list patient and image isolation over real HTTP", () => {
     const a = await listAs(h.sessions.doctorA);
     expect(a.cases.map((row) => row.id)).toContain(caseA);
     expect(a.cases.map((row) => row.id)).not.toContain(caseB);
+    expect(JSON.stringify(a)).not.toContain("Ortho scope patient B");
     expect(JSON.stringify(a)).not.toContain(privateB);
     expect(a.cases.find((row) => row.id === caseA)).toMatchObject({
       photosVisible: true, adjustments: [expect.objectContaining({ photos: [expect.objectContaining({ id: photoA })] })],
@@ -123,21 +124,15 @@ describe("ortho list patient and image isolation over real HTTP", () => {
     });
   });
 
-  it("allows reception operational case context but denies clinical images and document bytes", async () => {
-    const body = await listAs(h.sessions.reception);
-    expect(body.cases.map((row) => row.id)).toEqual(expect.arrayContaining([caseA, caseB]));
-    const entry = body.cases.find((row) => row.id === caseB)!;
-    expect(entry.photosVisible).toBe(false);
-    expect(entry.adjustments[0].photos).toEqual([]);
-    expect(JSON.stringify(body)).not.toContain("Synthetic image B");
-
-    const response = await authedGet(`/api/ortho/${caseB}`, h.sessions.reception);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      photosVisible: false, adjustments: [expect.objectContaining({ photos: [] })],
-    });
-    expect((await authedGet(`/api/patients/${patientB}/documents`, h.sessions.reception)).status).toBe(403);
-    expect((await authedGet(`/api/documents/${photoB}`, h.sessions.reception)).status).toBe(403);
+  it("serves desk demographics separately from clinical cases and documents", async () => {
+    for (const path of ["/api/ortho", `/api/ortho/${caseB}`, `/api/patients/${patientB}/documents`, `/api/documents/${photoB}`]) {
+      expect((await authedGet(path, h.sessions.reception)).status).toBe(403);
+    }
+    const desk = await authedGet(`/api/patients/${patientB}?projection=workspace`, h.sessions.reception);
+    expect(desk.status).toBe(200);
+    const workspace = await desk.json();
+    expect(workspace.patient).toMatchObject({ id: patientB, fullName: "Ortho scope patient B" });
+    expect(JSON.stringify(workspace)).not.toContain(privateB);
   });
 
   it("preserves the explicit all-patient grant even without a linked doctor party", async () => {
