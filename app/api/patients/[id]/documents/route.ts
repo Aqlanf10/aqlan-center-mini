@@ -29,8 +29,10 @@ export const dynamic = "force-dynamic";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+const privateNoStore = { "Cache-Control": "private, no-store" };
+
 const denied = () =>
-  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: privateNoStore });
 
 const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
   const { id } = await context.params;
@@ -42,12 +44,12 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
-  if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
+  if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400, headers: privateNoStore });
 
   /* صلاحيات الوكيل المساعد + عزل V2: الطبيب بلا صلاحية الأشعة ممنوع، ومن يملكها
      لا يرى إلا أشعة مرضاه — الفحص في الخادم لا في الشاشة. */
   if (!(await canAccessPatient(session, patientId, "canViewXrays"))) {
-    return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403 });
+    return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403, headers: privateNoStore });
   }
 
   try {
@@ -57,9 +59,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       // الشاشة تحتاج أن تعرف قبل أن يختار المستخدم ملفًّا — لا بعد أن يرفعه فيفشل.
       storageReady: storage.ready,
       storageMessage: storage.ready ? null : storage.message,
-    });
+    }, { headers: privateNoStore });
   } catch {
-    return NextResponse.json({ message: "تعذّر تحميل المستندات." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر تحميل المستندات." }, { status: 500, headers: privateNoStore });
   }
 }
 
