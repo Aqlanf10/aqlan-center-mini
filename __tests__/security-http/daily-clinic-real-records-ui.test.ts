@@ -58,7 +58,7 @@ beforeAll(async () => {
     [`DCR-${stamp}`, doctorId]));
   await db.query(`INSERT INTO visits (patient_name, patient_id, doctor_id) VALUES ('مراجع تقرير يومي اصطناعي', $1, $2)`, [patientId, doctorId]);
 
-  const invoice = await authedMutation("/api/invoices", h.sessions.reception, "POST", JSON.stringify({
+  const invoice = await authedMutation("/api/invoices", h.sessions.admin, "POST", JSON.stringify({
     patientId, currency: "YER", items: [{ serviceId: rct, doctorId, toothCode: 36, quantity: 1 }],
   }));
   expect(invoice.status).toBe(201);
@@ -69,7 +69,7 @@ beforeAll(async () => {
   }), { "Idempotency-Key": `daily-real-${stamp}-${String(body.amount)}` });
   expect((await pay({ amount: "50000", invoiceId, openingCurrency: null })).status).toBeLessThan(300);
 
-  const legacy = await authedMutation(`/api/patients/${patientId}/legacy-treatments`, h.sessions.reception, "POST", JSON.stringify({
+  const legacy = await authedMutation(`/api/patients/${patientId}/legacy-treatments`, h.sessions.admin, "POST", JSON.stringify({
     serviceId: legacyRct, toothCode: 46, currency: "YER", agreedAmount: "300000", previouslyPaidAmount: "120000",
     historicalAsOf: "2026-09-30", idempotencyKey: `legacy:daily-real-${stamp}`,
   }));

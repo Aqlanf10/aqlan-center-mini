@@ -46,33 +46,21 @@ const create = (session: typeof h.sessions.admin, body: Record<string, unknown>)
 const message = async (response: Response) => ((await response.json()) as { message: string }).message;
 
 describe("(FIN-4) manual invoice discounts follow billing.max_discount_percent", () => {
-  it("reception: an invoice discount needs a reason and stays within the limit", async () => {
-    const items = [{ serviceId }];
-    const noReason = await create(h.sessions.reception, { items, discount: "20000" });
-    expect(noReason.status).toBe(400);
-    expect(await message(noReason)).toBe("اكتب سبب الخصم على الفاتورة.");
-
-    const overLimit = await create(h.sessions.reception, { items, discount: "5000", discountReason: "قريب الطبيب" });
-    expect(overLimit.status).toBe(400);
-    expect(await message(overLimit)).toBe("الخصم على الفاتورة 25٪ يتجاوز الحد المسموح (10٪) — يحتاج موافقة المدير.");
-
-    const within = await create(h.sessions.reception, { items, discount: "2000", discountReason: "مريض قديم" });
-    expect(within.status).toBe(201);
+  it("refuses a reception invoice at the original price and at either discount level", async () => {
+    const before = (await db.query("SELECT count(*) AS n FROM invoices WHERE patient_id=$1", [patientId])).rows;
+    for (const discount of ["0", "2000", "5000"]) {
+      const response = await create(h.sessions.reception, { items: [{ serviceId }], discount, discountReason: "اختبار صلاحية" });
+      expect(response.status).toBe(403);
+    }
+    expect((await db.query("SELECT count(*) AS n FROM invoices WHERE patient_id=$1", [patientId])).rows).toEqual(before);
   });
 
-  it("reception: a catalog service typed lower needs a reason and stays within the limit", async () => {
-    const lower = (price: string, priceReason?: string) =>
-      create(h.sessions.reception, { items: [{ serviceId, price, ...(priceReason ? { priceReason } : {}) }] });
-    const noReason = await lower("15000");
-    expect(noReason.status).toBe(400);
-    expect(await message(noReason)).toContain("اكتب سبب الخصم");
-    const overLimit = await lower("15000", "طلب المريض");
-    expect(overLimit.status).toBe(400);
-    expect(await message(overLimit)).toContain("يحتاج موافقة المدير");
-    expect((await lower("19000", "طلب المريض")).status).toBe(201);
-    const higher = await lower("25000", "زيادة");
-    expect(higher.status).toBe(400);
-    expect(await message(higher)).toContain("للمدير وحده");
+  it("an administrator must explain a lower catalogue price and can save a documented discount", async () => {
+    const lower = (priceReason?: string) => create(h.sessions.admin, { items: [{ serviceId, price: "18000", priceReason }] });
+    const denied = await lower();
+    expect(denied.status).toBe(400);
+    expect(await message(denied)).toContain("سبب");
+    expect((await lower("خصم عائلة")).status).toBe(201);
   });
 
   it("the admin may exceed the limit, with a reason — recorded in the invoice audit", async () => {
@@ -87,8 +75,8 @@ describe("(FIN-4) manual invoice discounts follow billing.max_discount_percent",
     expect(audit.details).toMatchObject({ سبب_الخصم: "حالة إنسانية", نسبة_الخصم: 100 });
   });
 
-  it("unchanged: catalog price with no discount, and a free-text line at any price", async () => {
-    expect((await create(h.sessions.reception, { items: [{ serviceId }] })).status).toBe(201);
-    expect((await create(h.sessions.reception, { items: [{ description: "بند يدوي", price: "3500" }] })).status).toBe(201);
+  it("catalog price with no discount, and a free-text line at any price", async () => {
+    expect((await create(h.sessions.admin, { items: [{ serviceId }] })).status).toBe(201);
+    expect((await create(h.sessions.admin, { items: [{ description: "بند يدوي", price: "3500" }] })).status).toBe(201);
   });
 });

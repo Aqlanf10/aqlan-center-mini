@@ -23,7 +23,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   try {
     const result = await rebookPlannedVisit(intent, session);
     if (!result.ok) return NextResponse.json({ message: result.message, ...(result.conflict ? { conflict: result.conflict } : {}) }, { status: result.status });
-    return NextResponse.json({ appointmentId: result.appointmentId, title: result.title, replayed: result.replayed },
+    return NextResponse.json({ appointmentId: result.appointmentId, title: session.role === "reception" ? `جلسة رقم ${Number(id)}` : result.title, replayed: result.replayed },
       { status: result.replayed ? 200 : 201, headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر تأكيد إعادة الحجز. أعد المحاولة نفسها للتحقق دون إنشاء موعد مكرر." }, { status: 500 });

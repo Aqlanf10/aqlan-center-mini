@@ -4,6 +4,10 @@ const calls = vi.hoisted(() => ({
   session: vi.fn(), settings: vi.fn(), plan: vi.fn(), payment: vi.fn(),
   ordinary: vi.fn(), installment: vi.fn(), recovery: vi.fn(), audit: vi.fn(), approved: vi.fn(),
 }));
+vi.mock("@/lib/patient-access", () => ({
+  canViewPatientMoney: async (session: { username: string }, patientId: number) =>
+    session.username === "synthetic-collector" && patientId === 1,
+}));
 vi.mock("@/lib/session", () => ({ requireSession: calls.session }));
 vi.mock("@/lib/approved-agreements", () => ({ collectApprovedAgreement: calls.approved }));
 vi.mock("@/lib/db", () => ({

@@ -1,3 +1,6 @@
+import { OtherCollectorReviewRequired } from "@/lib/similar-collection";
+import { canViewPatientMoney } from "@/lib/patient-access";
+import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { isRetiredCollectionKey, retiredCollectionRefusal } from "@/lib/collection-attempts";
 import { parseSimilarCollectionReviewHeader, similarCollectionRefusal, SimilarCollectionReviewRequired, SIMILAR_COLLECTION_REVIEW_HEADER } from "@/lib/similar-collection";
 import { collectApprovedAgreement } from "@/lib/approved-agreements";
@@ -25,7 +28,7 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canViewMoney(session.role)) {
+  if (session.role === "reception" || !canViewMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const requested = new URL(request.url).searchParams.get("date") ?? "";
@@ -68,6 +71,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ reason: "invalid_recovery_request", message: "طلب إعادة تحصيل القسط غير صالح. اختر الفاتورة الأصلية ومبلغًا ومفتاح إعادة صالحين دون أهداف أو أسعار صرف إضافية." }, { status: 400 });
   }
   if (recovery.kind === "recovery") {
+    if (session.role === "reception" && !await canViewPatientMoney(session, recovery.intent.patientId)) {
+      return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
+    }
     try {
       const result = await recordReversedInstallmentRecovery({
         ...recovery.intent, idempotencyKey: recovery.idempotencyKey,
@@ -91,7 +97,9 @@ export async function POST(request: Request) {
       }
       return NextResponse.json({ ...result.payment, idempotencyKey:recovery.idempotencyKey }, { status: result.replayed ? 200 : 201 });
     } catch (error) {
-      if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
+      if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof OtherCollectorReviewRequired) return NextResponse.json({ message: error.message }, { status: 409 });
+    if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
       if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
       return NextResponse.json({ message: "تعذّر تسجيل الدفعة. أعد المحاولة بالمفتاح نفسه." }, { status: 500 });
     }
@@ -162,6 +170,10 @@ export async function POST(request: Request) {
       { message: "مفتاح الإعادة (Idempotency-Key) غير صالح: ٨–١٢٨ محرفًا من حروف وأرقام و . _ : -" },
       { status: 400 },
     );
+  }
+
+  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) {
+    return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
   }
 
   const reversalOfRaw = Number(source.reversalOfId);
@@ -239,7 +251,9 @@ export async function POST(request: Request) {
         }
       }
     } catch (error) {
-      if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
+      if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof OtherCollectorReviewRequired) return NextResponse.json({ message: error.message }, { status: 409 });
+    if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
       if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
       if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});
       return NextResponse.json({ message: "تعذّر تسجيل القسط. أعد المحاولة." }, { status: 500 });
@@ -370,6 +384,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ...payment, idempotencyKey,
       ...(acknowledgmentEvidence ? { acknowledgmentEvidence } : {}) }, { status: replayed ? 200 : 201 });
   } catch (error) {
+    if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
+    if (error instanceof OtherCollectorReviewRequired) return NextResponse.json({ message: error.message }, { status: 409 });
     if (error instanceof SimilarCollectionReviewRequired) return NextResponse.json(similarCollectionRefusal(error), { status: 409 });
     if (isRetiredCollectionKey(error)) return NextResponse.json(retiredCollectionRefusal(), { status: 409 });
     if(error instanceof DebtRepaymentError)return NextResponse.json({message:error.message,code:error.code},{status:error.code==="unauthorized"?403:error.code==="invalid"?400:409});

@@ -41,11 +41,11 @@ beforeAll(async () => {
 afterAll(async () => { await db?.end(); });
 
 describe("CASE-MODEL-1 — permissions and messages", () => {
-  it("reception reads the cases but cannot write one (Arabic 403)", async () => {
-    expect((await authedGet(`/api/patients/${patientId}/cases`, h.sessions.reception)).status).toBe(200);
+  it("reception cannot read or write a clinical case", async () => {
+    expect((await authedGet(`/api/patients/${patientId}/cases`, h.sessions.reception)).status).toBe(403);
     const response = await post("reception", `/api/patients/${patientId}/cases`, { specialty: "endodontics", title: "عصب" });
     expect(response.status).toBe(403);
-    expect(await messageOf(response)).toContain("يكتبها الطبيب");
+    expect(await messageOf(response)).toMatch(/[؀-ۿ]/);
   });
 
   it("cashier and accountant are outside the clinical routes altogether", async () => {
@@ -82,7 +82,7 @@ describe("CASE-MODEL-1 — permissions and messages", () => {
     expect(cycle.status).toBe(409);
     expect(await messageOf(cycle)).toContain("دورة");
 
-    const view = await (await authedGet(`/api/patients/${patientId}/cases`, h.sessions.reception)).json() as {
+    const view = await (await authedGet(`/api/patients/${patientId}/cases`, h.sessions.doctorA)).json() as {
       cases: { id: number | null; title: string }[]; dependencies: { itemId: number; met: boolean }[];
     };
     expect(view.cases.map((one) => one.title)).toContain("علاج عصب — ٢١");

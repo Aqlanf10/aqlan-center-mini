@@ -15,7 +15,7 @@ stubPostgresEnv();
 
 const {
   getPool, resetPoolForTesting, ensureSchema, openShift, recordPlanInstallment, createPlanV2,
-  updatePlanItem, removePlanItem,
+  updatePlanItem, removePlanItem, recordAudit,
 } = await import("../../lib/db");
 
 let patientId: number;
@@ -28,6 +28,11 @@ beforeAll(async () => {
     `INSERT INTO patients (patient_number, full_name) VALUES ('TD06-1', 'مريض تدقيق') RETURNING id`,
   );
   patientId = patient.id;
+  const { rows: [collector] } = await getPool().query<{ id: number }>(
+    "INSERT INTO users(username,display_name,password_hash,role) VALUES('td06-collector','Synthetic collector','unused','reception') RETURNING id",
+  );
+  await recordAudit({ action: "collection.assign", entity: "patient", entityId: patientId,
+    actor: "synthetic-admin", actorRole: "admin", details: { collectorId: collector.id, patientNumber: "TD06-1" } });
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
 
@@ -51,7 +56,7 @@ describe("TD-06: plan installment collection writes its audit row in the receipt
     const collect = () => recordPlanInstallment({
       planId: plan.planId, patientId, installmentNumber: 1, planTitle: "تقويم بأقساط",
       amountMinor: 3_000_000, currency: "YER", baseCurrency: "YER", exchangeRate: 1,
-      method: "cash", note: null, createdBy: "reception1", actorRole: "reception", idempotencyKey: "td06-installment-1",
+      method: "cash", note: null, createdBy: "td06-collector", actorRole: "reception", idempotencyKey: "td06-installment-1",
     });
     const first = await collect();
     if ("reason" in first) throw new Error(first.reason);
@@ -61,7 +66,7 @@ describe("TD-06: plan installment collection writes its audit row in the receipt
 
     const rows = await auditRows("payment.create", first.paymentId);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ actor: "reception1", actor_role: "reception" });
+    expect(rows[0]).toMatchObject({ actor: "td06-collector", actor_role: "reception" });
     expect(rows[0].details).toMatchObject({ الخطة: plan.planId, قسط: 1, فاتورة_القسط: first.invoiceId, المبلغ: 3_000_000, العملة: "YER" });
   });
 });

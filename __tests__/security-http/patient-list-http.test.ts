@@ -21,7 +21,7 @@ type Row = { fullName: string; medicalAlert?: string | null; balances?: unknown[
 
 describe("(PAT-1) /api/patients", () => {
   it("filters on the server over all patients and reports the filtered total", async () => {
-    const response = await authedGet("/api/patients?filter=alert&sort=name", h.sessions.reception);
+    const response = await authedGet("/api/patients?filter=alert&sort=name", h.sessions.admin);
     expect(response.status).toBe(200);
     const page = await response.json() as { rows: Row[]; total: number; filter: string; sort: string };
     expect(page).toMatchObject({ filter: "alert", sort: "name" });
@@ -37,10 +37,16 @@ describe("(PAT-1) /api/patients", () => {
     expect(rows.map((row) => row.fullName)).toContain(`إبراهيم الأهدل ${stamp}`);
   });
 
-  it("finance roles keep the identity-only projection even with filters", async () => {
-    const page = await (await authedGet("/api/patients?filter=debt&sort=name", h.sessions.accountant)).json() as { rows: Row[] };
-    for (const row of page.rows) {
-      expect(Object.keys(row).sort()).toEqual(["fullName", "id", "patientNumber", "phone"]);
+  it("keeps administrative lists limited and denies filters that disclose medical or financial membership", async () => {
+    for (const session of [h.sessions.accountant, h.sessions.cashier, h.sessions.reception]) {
+      for (const filter of ["debt", "alert", "ortho"]) {
+        expect((await authedGet(`/api/patients?filter=${filter}&sort=name`, session)).status).toBe(403);
+      }
+      const response = await authedGet("/api/patients?sort=name", session);
+      expect(response.status).toBe(200);
+      const page = await response.json() as { rows: Row[] };
+      expect(page.rows.length).toBeGreaterThan(0);
+      for (const row of page.rows) expect(Object.keys(row).sort()).toEqual(["fullName", "id", "patientNumber", "phone"]);
     }
   });
 });

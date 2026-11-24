@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GENDER_LABEL, ageText, type Gender } from "@/lib/patient";
+import { useSession } from "@/components/SessionProvider";
 import { PATIENT_LIST_FILTERS, PATIENT_LIST_SORTS, type PatientListFilter, type PatientListSort } from "@/lib/patient-browse";
 import { formatMoney, type Currency } from "@/lib/money";
 import { MATCH_LABEL, type DuplicateMatch } from "@/lib/duplicates";
@@ -40,6 +41,8 @@ interface PatientSummary {
 interface PageResult { rows: PatientSummary[]; total: number; page: number; pageSize: number }
 
 export default function PatientsPage() {
+  const session = useSession();
+  const clinicalFilters = session?.role === "admin" || session?.role === "doctor";
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<PatientSummary[]>([]);
   /* (PAT-1) المرشّح والترتيب على الخادم — يعملان على كل المرضى لا على الصفحة المعروضة. */
@@ -136,7 +139,7 @@ export default function PatientsPage() {
       {/* (PAT-1) مرشّحات القائمة — على كل المرضى — والترتيب. تظهر في التصفّح؛ البحث يتجاوزها. */}
       {!query.trim() ? (
         <div className="mb-4 flex flex-wrap items-center gap-1.5">
-          {(Object.entries(PATIENT_LIST_FILTERS) as [PatientListFilter, string][]).map(([key, label]) => (
+          {(Object.entries(PATIENT_LIST_FILTERS) as [PatientListFilter, string][]).filter(([key]) => clinicalFilters || !["alert", "ortho", "debt"].includes(key)).map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -161,7 +164,7 @@ export default function PatientsPage() {
               <option key={key} value={key}>ترتيب: {label}</option>
             ))}
           </select>
-          {flagList.length > 0 ? (
+          {clinicalFilters && flagList.length > 0 ? (
             <select
               value={flag}
               onChange={(event) => { setFlag(event.target.value); setPage(0); }}

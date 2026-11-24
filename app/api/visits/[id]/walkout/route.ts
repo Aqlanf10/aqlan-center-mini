@@ -43,7 +43,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       && clinicDateString(new Date(walkout.signedAt), CLINIC_TIME_ZONE) === today;
     const handoff = canReadReceptionHandoff(session.role) && walkout.signedAt
       ? await readReceptionHandoff(id, walkout) : null;
-    return NextResponse.json({ ...walkout, summary, dueRecommendation, signedToday,
+    const deskView = session.role === "reception" ? {
+      visitId: walkout.visitId, patientId: walkout.patientId, patientNumber: walkout.patientNumber, patientName: walkout.patientName,
+      arrivedAt: walkout.arrivedAt, signedAt: walkout.signedAt, invoice: walkout.invoice, balances: walkout.balances,
+      deferred: walkout.deferred, nextAppointment: walkout.nextAppointment, lines: [], orthoAdjustment: null,
+      payments: [], treatmentDone: null, nextPlan: null, doctorName: null, checkout: walkout.checkout,
+    } : walkout;
+    return NextResponse.json({ ...deskView, summary, dueRecommendation, signedToday,
       ...(handoff ? { receptionHandoff: { status: handoff.status, handledReason: handoff.handledReason } } : {}),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {

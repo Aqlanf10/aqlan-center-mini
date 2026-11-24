@@ -11,7 +11,7 @@ const auth = vi.hoisted(() => ({ session: { username: 'ci', role: 'admin', userI
         financeAccess?: { collectPayments: boolean };
     } | null }));
 vi.mock('@/lib/session', () => ({ requireSession: async () => auth.session }));
-const { getPool, ensureSchema, resetPoolForTesting, correctInvoice, recordPayment, getOpenShift, correctPayment, invalidateSettingsCache } = await import('../../lib/db');
+const { getPool, ensureSchema, resetPoolForTesting, recordAudit, correctInvoice, recordPayment, getOpenShift, correctPayment, invalidateSettingsCache } = await import('../../lib/db');
 const { POST } = await import('../../app/api/payments/route');
 const { answeringSimilarReview } = await import('./_similar-review');
 // FX/audit replay is this suite's subject; equal amounts for one synthetic patient answer the advisory review as the operator would.
@@ -72,7 +72,12 @@ it('audit insertion failure rolls back the receipt and drawer; retry can then cr
 });
 it('normal receipt audit has the stored values and session role, without changing the existing v1 fingerprint', async () => {
     const f = await fixture();
-    auth.session = { username: 'ci', role: 'reception', userId: 1 };
+    const { rows: [collector] } = await getPool().query<{ id: number }>(
+        "INSERT INTO users(username,display_name,password_hash,role) VALUES('ci','Synthetic collector','unused','reception') RETURNING id",
+    );
+    await recordAudit({ action: 'collection.assign', entity: 'patient', entityId: patientId,
+        actor: 'synthetic-admin', actorRole: 'admin', details: { collectorId: collector.id, patientNumber: 'CI-AUDIT' } });
+    auth.session = { username: 'ci', role: 'reception', userId: collector.id };
     const response = await reviewedPOST(request(f)); expect(response.status).toBe(201);
     const receipt = await response.json();
     expect(await auditRows(receipt.id)).toEqual([{ actor: 'ci', actor_role: 'reception', details: {
@@ -85,7 +90,8 @@ it('normal receipt audit has the stored values and session role, without changin
     expect((await getPool().query('SELECT idempotency_request_hash FROM payments WHERE id=$1', [receipt.id])).rows[0].idempotency_request_hash).toBe(expectedHash);
     // Role attribution is not financial intent: a currently authorized role change
     // still replays the saved success, retaining its original creation attribution.
-    auth.session = { username: 'ci', role: 'admin', userId: 1 };
+    await getPool().query("UPDATE users SET role='admin' WHERE id=$1", [collector.id]);
+    auth.session = { username: 'ci', role: 'admin', userId: collector.id };
     expect((await reviewedPOST(request(f))).status).toBe(200);
     expect(await auditRows(receipt.id)).toHaveLength(1);
     expect((await auditRows(receipt.id))[0].actor_role).toBe('reception');

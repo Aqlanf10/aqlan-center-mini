@@ -38,8 +38,8 @@ afterAll(async () => {
 });
 
 describe("كشف حساب جهة — الطباعة", () => {
-  it("الإدارة والاستقبال والمحاسب يطبعون الكشف بالاسم والتوقيع ولكل عملة سطرها", async () => {
-    for (const session of [h.sessions.admin, h.sessions.reception, h.sessions.accountant]) {
+  it("الإدارة والمحاسب يطبعان الكشف بالاسم والتوقيع ولكل عملة سطرها", async () => {
+    for (const session of [h.sessions.admin, h.sessions.accountant]) {
       const response = await get(`/print/party/${supplierId}`, session.cookie);
       expect(response.status).toBe(200);
       const html = await response.text();
@@ -50,6 +50,14 @@ describe("كشف حساب جهة — الطباعة", () => {
       expect(html).toContain("عن العيادة");
       expect(html).toContain("ريال سعودي");
     }
+  });
+
+  it("يمنع عرض كشف المورد للاستقبال قبل إظهار اسمه أو حركاته", async () => {
+    const response = await get(`/print/party/${supplierId}`, h.sessions.reception.cookie);
+    expect(response.status).toBe(404);
+    const html = await response.text();
+    expect(html).not.toContain("مورد الكشف المطبوع");
+    expect(html).not.toContain("فاتورة مواد سبتمبر");
   });
 
   it("الطبيب بلا صلاحية مال لا يرى الورقة، والكاشير خارج حدوده يُعاد إلى الصندوق", async () => {
@@ -76,7 +84,7 @@ describe("كشف حساب جهة — الواجهة البرمجية", () => {
   });
 
   it("الإجمالي لكل عملة بعملتها", async () => {
-    const response = await get(`/api/payables?partyId=${supplierId}`, h.sessions.reception.cookie);
+    const response = await get(`/api/payables?partyId=${supplierId}`, h.sessions.admin.cookie);
     const payload = await response.json() as { totals: { currency: string; owedMinor: number; remainingMinor: number }[] };
     expect(payload.totals.map((row) => [row.currency, row.owedMinor, row.remainingMinor])).toEqual([
       ["YER", 80_000, 80_000],

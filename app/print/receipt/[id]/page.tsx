@@ -1,3 +1,4 @@
+import { canViewPatientMoney } from "@/lib/patient-access";
 import { notFound } from "next/navigation";
 import { CLINIC_TIME_ZONE, getPayment, getSettingsSafe, printCount } from "@/lib/db";
 import { CURRENCY_LABEL, formatMoney, CLINIC_BASE_CURRENCY } from "@/lib/money";
@@ -32,10 +33,11 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
-  const [payment, settings] = await Promise.all([getPayment(id), getSettingsSafe()]);
-  const printed = await printCount("receipt", id);
-  if (!payment) notFound();
-  const provenance = (await readReceiptProvenance([payment.id]))[payment.id];
+  const desk = session.role === "reception";
+  const payment = await (desk ? getPayment(id, session.username) : getPayment(id));
+  if (!payment || (desk && !await canViewPatientMoney(session, payment.patientId))) notFound();
+  const [settings, printed] = await Promise.all([getSettingsSafe(), printCount("receipt", id)]);
+  const provenance = desk ? undefined : (await readReceiptProvenance([payment.id]))[payment.id];
 
   // (TD-05) الأساس دستوري من الكود.
   const base = CLINIC_BASE_CURRENCY;
@@ -98,7 +100,7 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
           </>
         ) : null}
 
-        <ReceiptProvenance paymentId={payment.id} currency={payment.currency} provenance={provenance} compact />
+        {!desk && <ReceiptProvenance paymentId={payment.id} currency={payment.currency} provenance={provenance} compact />}
 
         {payment.note ? (
           <>

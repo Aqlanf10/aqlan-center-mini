@@ -62,7 +62,9 @@ describe("REF-2 — arrival, no-show and «عملي السريري» over HTTP",
     await db.query(`UPDATE appointments SET scheduled_date = (NOW() AT TIME ZONE 'Asia/Aden')::date - 1
       WHERE id = $1`, [appointmentId]);
     expect((await patch("reception", `/api/appointments/${appointmentId}`, { action: "no_show" })).status).toBe(200);
-    const list = await authedGet(`/api/patients/${patientId}/referrals`, h.sessions.reception);
+    const path = `/api/patients/${patientId}/referrals`;
+    expect((await authedGet(path, h.sessions.reception)).status).toBe(403);
+    const list = await authedGet(path, h.sessions.doctorA);
     const referral = (await list.json() as { id: number; workflowState: string; missedAppointment: string | null }[])
       .find((one) => one.id === referralId);
     expect(referral).toMatchObject({ workflowState: "accepted", missedAppointment: "no_show" });

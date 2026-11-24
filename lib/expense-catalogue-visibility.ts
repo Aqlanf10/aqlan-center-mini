@@ -6,13 +6,14 @@ import type { Currency } from "@/lib/money";
 
 export type ExpenseCatalogueAccess = "denied" | "catalogue" | "full";
 
-/** Preserve daily-money roles; apply the existing doctor/report denials. */
+/** Expense budgets are management data; reception gets catalogue labels only. */
 export function expenseCatalogueAccess(
   role: string | null | undefined,
   permissions?: DoctorPermissions | null,
   financeAccess?: Partial<FinanceAccess>,
 ): ExpenseCatalogueAccess {
-  if (role === "admin" || role === "reception" || role === "cashier") return "full";
+  if (role === "admin" || role === "cashier") return "full";
+  if (role === "reception") return "catalogue";
   if (role === "doctor") return canDoctorViewExpenses(permissions, role) ? "full" : "catalogue";
   if (role === "accountant") return financeAccessFor(role, financeAccess).viewReports ? "full" : "catalogue";
   return "denied";

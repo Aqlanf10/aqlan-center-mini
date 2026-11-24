@@ -10,8 +10,14 @@ import { runAuditJson, preserveRawAudit } from "./dependency-security/audit-proc
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 export async function fetchOfficialJson(url, fetchImpl = fetch) {
-  const response = await fetchImpl(url, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Cache-Control": "no-cache", "User-Agent": "aqlan-scoped-braces-verifier" }, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(30_000) });
-  invariant(response.ok && response.url === url, `official lookup failed: ${url}`);
+  const headers = { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+    "Cache-Control": "no-cache", "User-Agent": "aqlan-scoped-braces-verifier" };
+  const endpoint = new URL(url);
+  if (endpoint.origin === "https://api.github.com" && /^\/advisories(?:\/|$)/.test(endpoint.pathname) && process.env.AQLAN_ADVISORY_READ_TOKEN) {
+    headers.Authorization = `Bearer ${process.env.AQLAN_ADVISORY_READ_TOKEN}`;
+  }
+  const response = await fetchImpl(url, { headers, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(30_000) });
+  invariant(response.ok && response.url === url, `official lookup failed (HTTP ${response.status}): ${url}`);
   invariant(!/rel="next"/.test(response.headers.get("link") ?? ""), "official advisory result pagination unexpected");
   invariant(/json/.test(response.headers.get("content-type") ?? ""), "official endpoint returned non-JSON");
   const length = response.headers.get("content-length");

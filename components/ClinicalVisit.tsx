@@ -421,7 +421,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
     const stillCurrent = () => !controller.signal.aborted && patientContextOwner.active && currentOwner();
     void (async () => {
       try {
-        const response = await fetch(`/api/patients/${patientId}`, { cache: "no-store", signal: controller.signal });
+        const response = await fetch(`/api/patients/${patientId}${session?.role === "assistant" ? "?projection=workspace" : ""}`, { cache: "no-store", signal: controller.signal });
         if (!stillCurrent()) return;
         if (!response.ok) throw new Error("Patient context unavailable");
         const payload: unknown = await response.json();
@@ -440,7 +440,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
       }
     })();
     return () => { controller.abort(); };
-  }, [contextPatientId, ownsVisit, rxOpen, patientContextOwner, currentOwner]);
+  }, [contextPatientId, ownsVisit, rxOpen, patientContextOwner, currentOwner, session?.role]);
 
   const load = useCallback(async (requiredStatus?: Visit["status"], orthodonticDraft = false,
     submitted?: { body: Record<string, unknown>; snapshot: typeof draftSnapshot.current }) => {

@@ -41,7 +41,7 @@ beforeEach(() => {
 
 describe("existing statement print with an explicit cutoff", () => {
   it("keeps its existing role gate before any report or patient reads", async () => {
-    for (const role of ["doctor", "assistant", null]) {
+    for (const role of ["reception", "doctor", "assistant", null]) {
       mocks.session.mockResolvedValue(role ? { role, username: "synthetic", permissions: { canViewPatientPayments: true } } : null);
       await expect(run({ to: "2026-09-30" })).rejects.toThrow();
     }
@@ -50,7 +50,7 @@ describe("existing statement print with an explicit cutoff", () => {
     expect(mocks.getPatient).not.toHaveBeenCalled();
   });
 
-  it.each(["admin", "reception", "cashier", "accountant"])("preserves existing %s access to one patient and uses the canonical report", async (role) => {
+  it.each(["admin", "cashier", "accountant"])("preserves existing %s access to one patient and uses the canonical report", async (role) => {
     mocks.session.mockResolvedValue({ role, username: "synthetic", userId: 1 });
     const html = renderToStaticMarkup(await run({ from: "2026-09-01", to: "2026-09-30", patientId: "17", currency: "SAR", doctorId: "92" }));
     expect(mocks.buildReport).toHaveBeenCalledWith("patient-statement", expect.objectContaining({ patientId: 17,

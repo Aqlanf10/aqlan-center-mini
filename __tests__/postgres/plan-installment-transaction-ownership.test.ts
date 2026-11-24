@@ -19,11 +19,16 @@ const oldPoolMax = process.env.DB_POOL_MAX;
 let witness: Client | undefined;
 let serial = 0;
 
+let collectorId: number;
 beforeAll(async () => {
   process.env.DB_POOL_MAX = "1";
   await db.resetPoolForTesting(); // No borrowed lease exists yet.
   await dropPublicSchema(target.testUrl.toString());
   await db.ensureSchema();
+  const { rows: [collector] } = await db.getPool().query<{ id: number }>(
+    "INSERT INTO users(username,display_name,password_hash,role) VALUES('installment-owner-test','Synthetic collector','unused','reception') RETURNING id",
+  );
+  collectorId = collector.id;
   expect((db.getPool() as unknown as { options: { max: number } }).options.max).toBe(1);
   await db.openShift({ openedBy: "installment-owner-test", opening: { YER: 0, SAR: 0, USD: 0 } });
   witness = new Client({ connectionString: target.testUrl.toString(), ssl: false });
@@ -52,6 +57,8 @@ async function fixture(): Promise<Input> {
     `INSERT INTO patients (patient_number, full_name) VALUES ($1, 'Synthetic installment owner') RETURNING id`,
     [`INSTALLMENT-OWNER-${serial}`],
   );
+  await db.recordAudit({ action: "collection.assign", entity: "patient", entityId: patient.id,
+    actor: "synthetic-admin", actorRole: "admin", details: { collectorId, patientNumber: `INSTALLMENT-OWNER-${serial}` } });
   const { rows: [plan] } = await pool.query<{ id: number }>(
     `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, billing_mode, note)
      VALUES ($1, 'Synthetic owner agreement', 300000, 'YER', 'active', 'installments', 'baseline') RETURNING id`,

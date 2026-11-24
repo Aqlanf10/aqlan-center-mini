@@ -72,7 +72,7 @@ describe("native compact print regression witnesses", () => {
       await page.evaluate(async () => { await document.fonts.ready; await Promise.all([...document.images].map(image => image.decode().catch(() => undefined))); });
       await page.emulateMedia({ media: "print" });
       await page.screenshot({ path: resolve(output, `${kind}-compact.png`), fullPage: true });
-      const pdf = await page.pdf({ path: resolve(output, `${kind}-compact.pdf`), format: ["receipt", "patient-card"].includes(kind) ? "A6" : prescription ? "A5" : "A4", printBackground: true, displayHeaderFooter: false });
+      const pdf = await page.pdf({ path: resolve(output, `${kind}-compact.pdf`), ...(kind === "patient-card" ? { preferCSSPageSize: true } : { format: kind === "receipt" ? "A6" as const : prescription ? "A5" as const : "A4" as const }), printBackground: true, displayHeaderFooter: false });
       const xml = execFileSync("pdftotext", ["-bbox-layout", "-enc", "UTF-8", "-", "-"], { input: pdf, encoding: "utf8" });
       const pages = await page.evaluate(raw => {
         const doc = new DOMParser().parseFromString(raw, "application/xml");

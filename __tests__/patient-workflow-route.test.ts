@@ -2,8 +2,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const boundary = vi.hoisted(() => ({
-  requireSession: vi.fn(), canAccessPatient: vi.fn(), patientWorkflow: vi.fn(), getSettings: vi.fn(),
+  operational: vi.fn(), requireSession: vi.fn(), canAccessPatient: vi.fn(), patientWorkflow: vi.fn(), getSettings: vi.fn(),
 }));
+vi.mock("@/lib/patient-operational-read", () => ({ readOperationalWorkflow: boundary.operational }));
 vi.mock("@/lib/session", () => ({ requireSession: boundary.requireSession }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: boundary.canAccessPatient }));
 vi.mock("@/lib/db", () => ({
@@ -35,6 +36,9 @@ beforeEach(() => {
   vi.resetAllMocks();
   boundary.requireSession.mockResolvedValue({ username: "synthetic-admin", role: "admin" });
   boundary.canAccessPatient.mockResolvedValue(true);
+  boundary.operational.mockImplementation(async (patientId, role) => ({ patient: { id: patientId }, openVisit: summary.openVisit,
+    assessmentCases: [], legacyCases: [], activePlans: [], plannedVisits: [], nextAppointment: null,
+    financial: role === "assistant" ? null : { balanceMinor: 900 }, canSeeFinancial: role === "reception" }));
   boundary.patientWorkflow.mockResolvedValue(summary);
   boundary.getSettings.mockResolvedValue({ "workflow.doctor_financial_view": "false" });
 });
@@ -53,7 +57,7 @@ describe("workflow GET case projection authorization", () => {
     expect(visit.rebookReferralReceiverId).toBe(71);
   });
 
-  it.each(["admin", "reception", "doctor"])("allows owned case projections for %s", async (role) => {
+  it.each(["admin", "doctor"])("allows owned case projections for %s", async (role) => {
     const session = { username: `synthetic-${role}`, role };
     boundary.requireSession.mockResolvedValue(session);
     const response = await GET(request(), context());
@@ -74,7 +78,8 @@ describe("workflow GET case projection authorization", () => {
     const body = await response.json();
     expect(body.assessmentCases).toEqual([]);
     expect(body.legacyCases).toEqual([]);
-    expect(body.patient).toEqual(summary.patient);
+    expect(body.patient).toEqual({ id: 7 });
+    expect(boundary.patientWorkflow).not.toHaveBeenCalled();
     expect(body.openVisit).toEqual(summary.openVisit);
     expect(body.activePlans).toEqual([]);
     expect(body.plannedVisits).toEqual([]);

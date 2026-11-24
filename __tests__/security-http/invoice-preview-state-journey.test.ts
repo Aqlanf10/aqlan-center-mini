@@ -53,7 +53,7 @@ async function openInvoice(width = 1280, native = false) {
   // Route-mocked failure injection needs controlled transport: a service worker can serve requests outside page.route
   // (Playwright network docs), so this context blocks it, as the other route-mocked browser fixtures do.
   const context = await browser.newContext({ viewport: { width, height: native ? 844 : 1100 }, locale: "ar-YE", serviceWorkers: "block" });
-  const [name, ...value] = h.sessions.reception.cookie.split("=");
+  const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
   const network: { url: string; method: string; status: number; fromServiceWorker: boolean }[] = [];
@@ -271,7 +271,7 @@ describe("final native template command recovery", () => {
           for await (const chunk of request) chunks.push(Buffer.from(chunk));
           const exact = Buffer.concat(chunks).toString("utf8");
           expect(exact).toBe(commands[0]);
-          const saved = await authedMutation("/api/invoices", h.sessions.reception, "POST", exact);
+          const saved = await authedMutation("/api/invoices", h.sessions.admin, "POST", exact);
           expect(saved.status).toBe(201);
           const body = await saved.text(); committed = true;
           response.statusCode = 201;

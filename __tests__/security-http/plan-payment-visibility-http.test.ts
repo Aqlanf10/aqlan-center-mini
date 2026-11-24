@@ -154,7 +154,12 @@ describe("plan receipt visibility over actual authenticated HTTP", () => {
 
   it("keeps provider and finance-only clinical boundaries", async () => {
     for (const path of [genericPath(), patientPath()]) expect((await authedGet(path, h.sessions.doctorB)).status).toBe(403);
-    for (const who of ["admin", "reception", "cashier", "accountant"] as const) {
+    for (const path of [genericPath(), patientPath()]) {
+      const desk = await authedGet(path, h.sessions.reception);
+      expect(desk.status).toBe(403);
+      expect(await desk.text()).not.toContain(title);
+    }
+    for (const who of ["admin", "cashier", "accountant"] as const) {
       const body = await response(genericPath(), h.sessions[who]);
       expect(body).toMatchObject({ canSeeFinancial: true, plans: [{ paidMinor: 16000 }] });
       if (who === "cashier" || who === "accountant") {

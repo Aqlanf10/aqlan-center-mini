@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedGet, authedMutation, harness } from "./_server";
+import { authedGet, authedMutation, grantReceptionCollection, harness } from "./_server";
 
 let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
@@ -31,7 +31,7 @@ beforeAll(async () => {
 afterAll(async () => { await db?.end(); });
 
 describe("P0-C legacy balance arrangement HTTP", () => {
-  it("reception creates collection metadata only; no invoice or payment appears", async () => {
+  it("admin creates collection metadata only; no invoice or payment appears", async () => {
     const before = await db.query<{ invoices: string; payments: string }>(
       `SELECT (SELECT count(*)::text FROM invoices WHERE patient_id = $1) AS invoices,
               (SELECT count(*)::text FROM payments WHERE patient_id = $1) AS payments`,
@@ -40,7 +40,7 @@ describe("P0-C legacy balance arrangement HTTP", () => {
 
     const response = await authedMutation(
       `/api/patients/${patientId}/legacy-balance-arrangement`,
-      h.sessions.reception,
+      h.sessions.admin,
       "POST",
       JSON.stringify({ currency: "YER", cadence: "per_visit", installmentAmount: "30000", note: "مع كل عودة" }),
     );
@@ -91,6 +91,7 @@ describe("P0-C legacy balance arrangement HTTP", () => {
   });
 
   it("the normal opening-balance payment route reduces the old receivable and updates the suggestion", async () => {
+    await grantReceptionCollection(h, patientId);
     const paid = await authedMutation(
       "/api/payments",
       h.sessions.reception,
@@ -108,7 +109,7 @@ describe("P0-C legacy balance arrangement HTTP", () => {
 
     const response = await authedGet(
       `/api/patients/${patientId}/legacy-balance-arrangement`,
-      h.sessions.reception,
+      h.sessions.admin,
     );
     expect(response.status).toBe(200);
     const payload = await response.json() as {
@@ -126,7 +127,12 @@ describe("P0-C legacy balance arrangement HTTP", () => {
       suggestedMinor: 30000,
     });
 
-    const ledger = await authedGet(`/api/patients/${patientId}/ledger`, h.sessions.reception);
+    const deskLedger = await authedGet(`/api/patients/${patientId}/ledger`, h.sessions.reception);
+    expect(deskLedger.status).toBe(200);
+    const desk = await deskLedger.json();
+    expect(desk.openings).toContainEqual({ currency: "YER", dueMinor: 320000 });
+    expect(desk).not.toHaveProperty("legacyBalanceArrangements");
+    const ledger = await authedGet(`/api/patients/${patientId}/ledger`, h.sessions.admin);
     expect(ledger.status).toBe(200);
     const book = await ledger.json() as {
       legacyBalanceArrangements: Array<{ progress: { arrangementRemainingMinor: number } }>;

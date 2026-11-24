@@ -220,3 +220,10 @@ export async function confirmingSimilarCollection(send: (headers: Record<string,
   if (body?.reason !== "similar_collection_review_required" || !Array.isArray(body.receipts)) return first;
   return send({ "x-collection-similarity-review": body.receipts.length ? `ids:${body.receipts.map((receipt) => receipt.id).join(",")}` : "none" });
 }
+
+/** A specific synthetic receptionist may collect for this patient without a visit today. */
+export async function grantReceptionCollection(h: Harness, patientId: number) {
+  const response = await authedMutation(`/api/patients/${patientId}/collection-assignment`, h.sessions.admin, "POST",
+    JSON.stringify({ action: "grant", username: TEST_USERS.reception.username }));
+  if (response.status !== 200) throw new Error(`Synthetic collection assignment failed: HTTP ${response.status}`);
+}

@@ -35,7 +35,7 @@ async function openInvoice(width: number) {
     `INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ($1, $2, $3) RETURNING id`,
     [`IML-${stamp}-${++serial}`, "مريض بند يدوي اصطناعي", doctorPartyId]);
   const context = await browser.newContext({ viewport: { width, height: 1100 }, locale: "ar-YE", serviceWorkers: "block" });
-  const [name, ...value] = h.sessions.reception.cookie.split("=");
+  const [name, ...value] = h.sessions.admin.cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
   await page.goto(`${baseUrl}/patients/${id}?tab=account`, { waitUntil: "domcontentloaded" });

@@ -35,10 +35,10 @@ afterAll(async () => {
   }
 });
 async function patient() { return (await db.query("INSERT INTO patients(patient_number,full_name,phone) VALUES($1,'Synthetic invoice contract patient','777123456') RETURNING id", [`QUOTE-CONTRACT-${Date.now()}-${++serial}`])).rows[0].id as number; }
-async function open(role: "admin" | "reception", historical = false) {
-  const patientId = await patient(); const width = role === "admin" ? 1280 : 390;
+async function open(width: number, historical = false) {
+  const patientId = await patient();
   const context = await browser.newContext({ viewport: { width, height: 1000 }, locale: "ar-YE", serviceWorkers: "block" });
-  const [name, ...value] = h.sessions[role].cookie.split("="); await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+  const [name, ...value] = h.sessions.admin.cookie.split("="); await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage(); await page.goto(`${baseUrl}/patients/${patientId}?tab=account`, { waitUntil: "domcontentloaded" });
   await page.getByTestId("treatment-entry-open").click(); await page.getByRole("button", { name: historical ? "علاج بدأ قبل النظام" : "علاج جديد", exact: true }).click();
   const row = page.getByTestId("invoice-row-0"); await row.getByLabel("الخدمة", { exact: true }).selectOption(String(converted));
@@ -53,8 +53,8 @@ async function facts(patientId: number) {
     (SELECT count(*)::int FROM plan_items i JOIN treatment_plans p ON p.id=i.plan_id WHERE p.patient_id=$1) AS items`, [patientId])).rows[0];
 }
 describe("invoice converted source, manual reasons and saved contract", () => {
-  it.each(["admin","reception"] as const)("%s gets a clear positive manual-price path for a rounded-zero conversion and cannot save free accidentally",async role=>{
-    const {patientId,context,page,row,width}=await open(role);
+  it.each([1280, 390])("at %i px billing gets a clear positive manual-price path for a rounded-zero conversion and cannot save free accidentally",async width=>{
+    const {patientId,context,page,row}=await open(width);
     try{
       await page.getByLabel("عملة الفاتورة",{exact:true}).selectOption("SAR");
       await row.getByLabel("الخدمة",{exact:true}).selectOption(String(roundedZero));
@@ -63,12 +63,12 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       expect(await page.getByTestId("invoice-input-problem-0").innerText()).toContain("نتيجة التحويل بعد التقريب صفر");
       expect(await page.getByTestId("invoice-price-source-0").innerText()).not.toContain("سعر محوّل مقترح");
       await row.getByLabel("سبب تغيير السعر",{exact:true}).waitFor();
-      const catalog=await (await authedGet("/api/services",h.sessions[role])).json();
+      const catalog=await (await authedGet("/api/services",h.sessions.admin)).json();
       const quote=catalog.find((service:{id:number})=>service.id===roundedZero).invoiceQuotes.SAR;
-      const refused=await authedMutation("/api/invoices",h.sessions[role],"POST",JSON.stringify({patientId,currency:"SAR",items:[{serviceId:roundedZero,price:"0",catalogPriceMinor:null,priceQuote:quote}],idempotencyKey:`zero-rounded-refuse-${patientId}`}));
+      const refused=await authedMutation("/api/invoices",h.sessions.admin,"POST",JSON.stringify({patientId,currency:"SAR",items:[{serviceId:roundedZero,price:"0",catalogPriceMinor:null,priceQuote:quote}],idempotencyKey:`zero-rounded-refuse-${patientId}`}));
       expect(refused.status).toBe(400);expect((await refused.json()).message).toContain("نتيجة التحويل بعد التقريب صفر");
       expect(await facts(patientId)).toEqual({invoices:0,payments:0,plans:0,cases:0,schedules:0,items:0});
-      await page.screenshot({path:`.settings-ui-artifacts/invoice-rounded-zero-${role}-${width}.png`,fullPage:true});
+      await page.screenshot({path:`.settings-ui-artifacts/invoice-rounded-zero-admin-${width}.png`,fullPage:true});
       await price.fill("7.25");expect(await save.isDisabled()).toBe(true);
       await row.getByLabel("سبب تغيير السعر",{exact:true}).fill("Synthetic positive price after rounded zero");
       await expect.poll(()=>save.isEnabled()).toBe(true);await save.click();
@@ -77,8 +77,8 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       expect(await facts(patientId)).toEqual({invoices:1,payments:0,plans:0,cases:0,schedules:1,items:0});
     }finally{await context.close();}
   });
-  it.each(["admin","reception"] as const)("%s reviews and saves a converted template with its exact source and one canonical work item",async role=>{
-    const {patientId,context,page,row,width}=await open(role);
+  it.each([1280, 390])("at %i px billing reviews and saves a converted template with its exact source and one canonical work item",async width=>{
+    const {patientId,context,page,row}=await open(width);
     try{
       await row.getByLabel("الخدمة",{exact:true}).selectOption("");await row.getByLabel("وصف البند",{exact:true}).fill("");
       await page.getByLabel("عملة الفاتورة",{exact:true}).selectOption("SAR");
@@ -90,7 +90,7 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       expect(await source.innerText()).toContain("محوّل مقترح");
       await page.getByRole("checkbox",{name:"راجعت بنود القالب ومبلغه وجدول جلساته",exact:true}).check();
       const save=page.getByRole("button",{name:"احفظ الفاتورة",exact:true});await expect.poll(()=>save.isEnabled()).toBe(true);
-      await page.screenshot({path:`.settings-ui-artifacts/invoice-template-converted-${role}-${width}.png`,fullPage:true});
+      await page.screenshot({path:`.settings-ui-artifacts/invoice-template-converted-admin-${width}.png`,fullPage:true});
       await save.evaluate((button:HTMLButtonElement)=>{button.click();button.click();});
       await page.getByRole("region",{name:"فاتورة جديدة",exact:true}).waitFor({state:"detached"});
       expect(await facts(patientId)).toEqual({invoices:1,payments:0,plans:1,cases:1,schedules:1,items:1});
@@ -98,17 +98,17 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       expect(audit.invoicePriceSnapshots[0]).toMatchObject({agreedPriceSource:"converted",quote:{rate:440,minor:500,source:"converted"}});
     }finally{await context.close();}
   });
-  it.each(["admin", "reception"] as const)("%s sees native/converted currency sources, saves once and prints the actual saved schedule", async role => {
-    const { patientId, context, page, row, width, editor } = await open(role);
+  it.each([1280, 390])("at %i px billing sees native/converted currency sources, saves once and prints the actual saved schedule", async width => {
+    const { patientId, context, page, row, editor } = await open(width);
     try {
       const currency = page.getByLabel("عملة الفاتورة", { exact: true }); const price = row.getByLabel("السعر", { exact: true });
       expect((await price.inputValue()).replaceAll(",", "")).toBe("2200");
-      await page.screenshot({path:`.settings-ui-artifacts/invoice-quote-YER-${role}-${width}.png`,fullPage:true});
+      await page.screenshot({path:`.settings-ui-artifacts/invoice-quote-YER-admin-${width}.png`,fullPage:true});
       await currency.selectOption("USD"); expect(await price.inputValue()).toBe("1.00");
-      await page.screenshot({path:`.settings-ui-artifacts/invoice-quote-USD-${role}-${width}.png`,fullPage:true});
+      await page.screenshot({path:`.settings-ui-artifacts/invoice-quote-USD-admin-${width}.png`,fullPage:true});
       await currency.selectOption("SAR"); expect(await price.inputValue()).toBe("5.00");
       expect(await page.getByTestId("invoice-price-source-0").innerText()).toContain("440");
-      await page.screenshot({path:`.settings-ui-artifacts/invoice-quote-SAR-${role}-${width}.png`,fullPage:true});
+      await page.screenshot({path:`.settings-ui-artifacts/invoice-quote-SAR-admin-${width}.png`,fullPage:true});
       await row.getByLabel("الخدمة", { exact: true }).selectOption(String(native)); expect((await price.inputValue()).replaceAll(",", "")).toBe("1500.00");
       await row.getByLabel("الخدمة", { exact: true }).selectOption(String(converted));
       await row.getByLabel("نطاق العلاج", { exact: true }).selectOption("both"); await page.getByTestId("invoice-provider-0").selectOption(String(doctor));
@@ -130,12 +130,12 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       expect(await page.getByRole("button", { name: "احفظ الفاتورة", exact: true }).count()).toBe(1);
       expect(await page.getByTestId("invoice-financial-summary").getByText("المبلغ المتبقي", { exact: true }).count()).toBe(0);
       await expect.poll(() => save.isEnabled()).toBe(true);
-      await page.screenshot({ path: `.settings-ui-artifacts/invoice-quoted-${role}-${width}.png`, fullPage: true });
+      await page.screenshot({ path: `.settings-ui-artifacts/invoice-quoted-admin-${width}.png`, fullPage: true });
       const bodies: string[] = []; page.on("request", request => { if (new URL(request.url()).pathname === "/api/invoices" && request.method() === "POST") bodies.push(request.postData()!); });
       await save.evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
       await page.getByRole("region", { name: "فاتورة جديدة", exact: true }).waitFor({ state: "detached" });
       expect(bodies).toHaveLength(1); expect(await facts(patientId)).toEqual({ invoices: 1, payments: 0, plans: 1, cases: 1, schedules: 1, items: 1 });
-      const repeated = await authedMutation("/api/invoices", h.sessions[role], "POST", bodies[0]); expect(repeated.status).toBe(200); expect((await repeated.json()).replayed).toBe(true);
+      const repeated = await authedMutation("/api/invoices", h.sessions.admin, "POST", bodies[0]); expect(repeated.status).toBe(200); expect((await repeated.json()).replayed).toBe(true);
       const ledgerResponse=await context.request.get(`${baseUrl}/api/patients/${patientId}/ledger`);expect(ledgerResponse.status()).toBe(200);
       const ledger=await ledgerResponse.json();expect(ledger.balances.SAR).toMatchObject({billedMinor:150000,collectedMinor:0,dueMinor:150000});
       expect(ledger.balances.YER.dueMinor).toBe(0);expect(ledger.balances.USD.dueMinor).toBe(0);
@@ -149,7 +149,7 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       expect(await statementInvoice.locator("tbody tr").filter({hasText:"صافي الفاتورة بعد الخصم"}).innerText()).toContain("1,500.00");
       expect(await statement.locator(".line").filter({hasText:"إجمالي المفوتر"}).innerText()).toContain("1,500.00");
       expect(await statement.locator(".line").filter({hasText:"صافي المحصّل بعد الاستردادات وعكس السندات"}).innerText()).toContain("0.00");
-      await statement.emulateMedia({media:"print"});await statement.screenshot({path:`.settings-ui-artifacts/invoice-statement-${role}-${width}.png`,fullPage:true});await statement.close();
+      await statement.emulateMedia({media:"print"});await statement.screenshot({path:`.settings-ui-artifacts/invoice-statement-admin-${width}.png`,fullPage:true});await statement.close();
       const audit = (await db.query("SELECT details FROM audit_log WHERE action='invoice.create' AND details->>'المريض'=$1", [String(patientId)])).rows[0].details;
       expect(audit.invoicePriceSnapshots[0]).toMatchObject({ quote: { source: "converted", rate: 440, rounding: "nearest-major-unit", minor: 500 }, agreedPriceSource:"manual", requestedMinor: 150000, reason: "Synthetic explicit manual agreement" });
       await page.reload({ waitUntil: "domcontentloaded" });
@@ -162,8 +162,8 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       expect(await contract.locator("tbody tr").count()).toBe(4); expect(text).toContain("490.00"); expect(text).toContain("1,010.00");
       expect(await contract.getByText("قسط 1",{exact:true}).count()).toBe(1);
       await contract.emulateMedia({ media: "print" });
-      await contract.screenshot({ path: `.settings-ui-artifacts/invoice-contract-${role}-${width}.png`, fullPage: true });
-      await contract.pdf({ path: `.settings-ui-artifacts/invoice-contract-${role}.pdf`, format: "A4", printBackground: true });
+      await contract.screenshot({ path: `.settings-ui-artifacts/invoice-contract-admin-${width}.png`, fullPage: true });
+      await contract.pdf({ path: `.settings-ui-artifacts/invoice-contract-admin-${width}.pdf`, format: "A4", printBackground: true });
       expect(await facts(patientId)).toEqual({ invoices: 1, payments: 0, plans: 1, cases: 1, schedules: 1, items: 1 });
       const href = await print.getAttribute("href");
       const invalid = await context.request.get(`${baseUrl}${href!.replace("version=1", "version=2")}`); expect(invalid.status()).toBe(404);
@@ -177,30 +177,38 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       }
     } finally { await context.close(); }
   });
-  it.each(["admin", "reception"] as const)("%s validates stale FX even when rounded quote stays5, preserves native guards, and refuses missing manual reasons", async role => {
-    const patientId = await patient(); const catalogue = await (await authedGet("/api/services", h.sessions[role])).json();
+  it("keeps clinical previews and invoice writes outside reception collection scope", async () => {
+    const patientId = await patient();
+    const body = JSON.stringify({ patientId, currency: "SAR", items: [{ serviceId: native, doctorId: doctor, scope: "both", price: "1500" }] });
+    for (const path of ["/api/invoices/clinical-preview", "/api/invoices"]) {
+      expect((await authedMutation(path, h.sessions.reception, "POST", body)).status).toBe(403);
+    }
+    expect(await facts(patientId)).toEqual({ invoices: 0, payments: 0, plans: 0, cases: 0, schedules: 0, items: 0 });
+  });
+  it("validates stale FX even when rounded quote stays5, preserves native guards, and refuses missing manual reasons", async () => {
+    const patientId = await patient(); const catalogue = await (await authedGet("/api/services", h.sessions.admin)).json();
     const item = { serviceId: converted, doctorId: doctor, scope: "both", price: "5", catalogPriceMinor: null, priceQuote: catalogue.find((s: { id: number }) => s.id === converted).invoiceQuotes.SAR };
-    const body = { patientId, currency: "SAR", items: [item], idempotencyKey: `quote-stale-${role}-${patientId}` };
+    const body = { patientId, currency: "SAR", items: [item], idempotencyKey: `quote-stale-admin-${patientId}` };
     try {
       await db.query("UPDATE settings SET value='441' WHERE key='finance.rate.SAR'");
       for (const path of ["/api/invoices/clinical-preview", "/api/invoices"]) {
-        const stale = await authedMutation(path, h.sessions[role], "POST", JSON.stringify(body)); expect(stale.status).toBe(409); expect((await stale.json()).code).toBe("INVOICE_PRICE_STALE");
-        expect((await authedMutation(path, h.sessions[role], "POST", JSON.stringify({ ...body, items: [{ ...item, priceQuote: undefined, price: "1500" }] }))).status).toBe(400);
+        const stale = await authedMutation(path, h.sessions.admin, "POST", JSON.stringify(body)); expect(stale.status).toBe(409); expect((await stale.json()).code).toBe("INVOICE_PRICE_STALE");
+        expect((await authedMutation(path, h.sessions.admin, "POST", JSON.stringify({ ...body, items: [{ ...item, priceQuote: undefined, price: "1500" }] }))).status).toBe(400);
       }
       expect(await facts(patientId)).toEqual({ invoices: 0, payments: 0, plans: 0, cases: 0, schedules: 0, items: 0 });
     } finally { await db.query("UPDATE settings SET value='440' WHERE key='finance.rate.SAR'"); }
     const nativeItem = { serviceId: native, doctorId: doctor, scope: "both", catalogPriceMinor: 150000, price: "1600", priceReason: "Synthetic higher native price" };
-    const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions[role], "POST", JSON.stringify({ ...body, items: [nativeItem] })); expect(preview.status).toBe(role === "admin" ? 200 : 400);
-    const zeroResponse = await authedMutation("/api/invoices", h.sessions[role], "POST", JSON.stringify({ patientId, currency: "SAR", items: [{ serviceId: zero, price: "0", catalogPriceMinor: 0 }], idempotencyKey: `quote-zero-${role}-${patientId}` })); expect(zeroResponse.status).toBe(201); expect((await zeroResponse.json()).totalMinor).toBe(0);
-    const offered = await authedMutation("/api/invoices",h.sessions[role],"POST",JSON.stringify(body)); expect(offered.status).toBe(201);
+    const preview = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify({ ...body, items: [nativeItem] })); expect(preview.status).toBe(200);
+    const zeroResponse = await authedMutation("/api/invoices", h.sessions.admin, "POST", JSON.stringify({ patientId, currency: "SAR", items: [{ serviceId: zero, price: "0", catalogPriceMinor: 0 }], idempotencyKey: `quote-zero-admin-${patientId}` })); expect(zeroResponse.status).toBe(201); expect((await zeroResponse.json()).totalMinor).toBe(0);
+    const offered = await authedMutation("/api/invoices",h.sessions.admin,"POST",JSON.stringify(body)); expect(offered.status).toBe(201);
     const offeredInvoice=await offered.json(); expect(offeredInvoice.totalMinor).toBe(500);
     const snapshot=(await db.query("SELECT details FROM audit_log WHERE action='invoice.create' AND entity_id=$1",[String(offeredInvoice.id)])).rows[0].details.invoicePriceSnapshots[0];
     expect(snapshot.agreedPriceSource).toBe("converted");expect(snapshot.quoteHash).toMatch(/^[a-f0-9]{64}$/);
-    try{await db.query("UPDATE settings SET value='441' WHERE key='finance.rate.SAR'");const replay=await authedMutation("/api/invoices",h.sessions[role],"POST",JSON.stringify(body));expect(replay.status).toBe(200);expect(await replay.json()).toMatchObject({id:offeredInvoice.id,totalMinor:500,replayed:true});}
+    try{await db.query("UPDATE settings SET value='441' WHERE key='finance.rate.SAR'");const replay=await authedMutation("/api/invoices",h.sessions.admin,"POST",JSON.stringify(body));expect(replay.status).toBe(200);expect(await replay.json()).toMatchObject({id:offeredInvoice.id,totalMinor:500,replayed:true});}
     finally{await db.query("UPDATE settings SET value='440' WHERE key='finance.rate.SAR'");}
   });
-  it.each(["admin", "reception"] as const)("%s prints historical opening installments without creating a new invoice, plan or receipt", async role => {
-    const { patientId, context, page, row, width, editor } = await open(role, true);
+  it.each([1280, 390])("at %i px billing prints historical opening installments without creating a new invoice, plan or receipt", async width => {
+    const { patientId, context, page, row, editor } = await open(width, true);
     try {
       await page.getByLabel("عملة الاتفاق", { exact: true }).selectOption("SAR");
       await row.getByLabel("السعر", { exact: true }).fill("1500");
@@ -219,7 +227,7 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       page.on("request", request => { if (new URL(request.url()).pathname === path && request.method() === "POST") commands.push(request.postData()!); });
       await save.evaluate((button: HTMLButtonElement) => { button.click(); button.click(); });
       await page.getByRole("region", { name: "اتفاق تاريخي متعدد البنود", exact: true }).waitFor({ state: "detached" });
-      expect(commands).toHaveLength(1); expect((await authedMutation(path, h.sessions[role], "POST", commands[0])).status).toBe(200);
+      expect(commands).toHaveLength(1); expect((await authedMutation(path, h.sessions.admin, "POST", commands[0])).status).toBe(200);
       const before = await facts(patientId); expect(before).toEqual({ invoices: 0, payments: 0, plans: 1, cases: 1, schedules: 1, items: 1 });
       expect((await db.query("SELECT amount_minor::text FROM patient_opening_balances WHERE patient_id=$1", [patientId])).rows[0].amount_minor).toBe("100000");
       const print = page.getByRole("link", { name: "طباعة عقد التقسيط", exact: true }); await print.waitFor();
@@ -228,8 +236,8 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       expect(text).toContain("الرصيد السابق SAR"); expect(text).toContain("1,000.00"); expect(text).toContain("490.00"); expect(text).toContain("510.00");
       expect(await contract.locator("tbody tr").count()).toBe(16); expect(text).toContain("التوقيع والاسم الثلاثي");
       await contract.emulateMedia({ media: "print" });
-      await contract.screenshot({ path: `.settings-ui-artifacts/historical-contract-${role}-${width}.png`, fullPage: true });
-      await contract.pdf({ path: `.settings-ui-artifacts/historical-contract-${role}.pdf`, format: "A4", printBackground: true });
+      await contract.screenshot({ path: `.settings-ui-artifacts/historical-contract-admin-${width}.png`, fullPage: true });
+      await contract.pdf({ path: `.settings-ui-artifacts/historical-contract-admin-${width}.pdf`, format: "A4", printBackground: true });
       expect(await facts(patientId)).toEqual(before);
     } finally { await context.close(); }
   });

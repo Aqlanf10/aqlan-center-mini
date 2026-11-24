@@ -73,6 +73,8 @@ table.items td.num, table.items th.num { text-align: left; white-space: nowrap; 
   /* هوامش المستند فقط. عنوان الصفحة ورابطها وتاريخها من خيار «الرؤوس والتذييلات»
      في نافذة طباعة المتصفّح؛ هذا الهامش لا يعطّل ذلك الخيار. */
   @page { margin: 8mm; }
+  @page patient-card { size: 105mm 148mm; margin: 8mm; }
+  .patient-card-sheet { page: patient-card; }
 }
 
 /* شعار الترويسة: صغيرٌ عمدًا — السند ربع ورقة، والشعار الكبير يأكل مساحة البيانات. */

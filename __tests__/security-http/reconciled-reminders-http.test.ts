@@ -8,8 +8,9 @@ beforeAll(async()=>{
  await db.query("INSERT INTO cashier_shifts(opened_by) SELECT 'secadmin' WHERE NOT EXISTS(SELECT 1 FROM cashier_shifts WHERE status='open')");
 },180000);
 afterAll(async()=>{await db?.end();});
-async function fixture(){
+async function fixture(authorized = true){
  const patientId=(await db.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic reconciliation browser') RETURNING id",[`REC-UI-${Date.now()}-${++serial}`])).rows[0].id as number;
+ if (authorized) await db.query("INSERT INTO appointments(patient_id,scheduled_date,scheduled_time) VALUES($1,(now() AT TIME ZONE 'Asia/Aden')::date,'09:00')", [patientId]);
  const doctorId=(await db.query("INSERT INTO parties(name,kind,commission_percent) VALUES('Synthetic reconciliation provider','doctor',30) RETURNING id")).rows[0].id as number;
  await db.query("INSERT INTO doctor_commission_history(party_id,percent,config,effective_from,source,reason,recorded_by) VALUES($1,30,NULL,'2020-01-01','baseline','Synthetic policy','secadmin')",[doctorId]);
  const planId=(await db.query("INSERT INTO treatment_plans(patient_id,title,total_minor,base_currency,start_date,billing_mode,primary_doctor_id,total_from_items,consent_at,consent_by) VALUES($1,'Synthetic classic reconciliation',180000,'SAR','2026-10-01','installments',$2,false,now(),'secadmin') RETURNING id",[patientId,doctorId])).rows[0].id as number;
@@ -40,7 +41,9 @@ it('records a reconciled individual reminder and no financial mutation through r
 it('deduplicates bulk reminders and leaves missing installment untouched',async()=>{
  const a=await fixture(),b=await fixture(),ids=[a.planId,b.planId];
  const before=await snapshot(ids);expect((await post({planId:a.planId,installmentNumber:99})).status).toBe(404);expect(await snapshot(ids)).toEqual(before);
- const res=await post({planIds:[b.planId,a.planId,a.planId,2147483647]});expect(res.status).toBe(200);expect(await res.json()).toMatchObject({updatedCount:2});
+ expect((await post({planIds:[b.planId,a.planId,2147483647]})).status).toBe(403);
+ expect(await snapshot(ids)).toEqual(before);
+ const res=await post({planIds:[b.planId,a.planId,a.planId]});expect(res.status).toBe(200);expect(await res.json()).toMatchObject({updatedCount:2});
  const after=await snapshot(ids);expect(after.audits).toHaveLength(2);expect(after.installments.filter(row=>row.number===2).every(row=>row.last_reminder_at===null)).toBe(true);
 });
 it('returns500 with no partial batch writes when mandatory audit fails on the second plan',async()=>{
@@ -58,4 +61,13 @@ it('rejects malformed or oversized identifiers before writes',async()=>{
   expect((await post(body)).status).toBe(400);
  }
  expect(await snapshot([f.planId])).toEqual(before);
+});
+
+it("rejects a combined authorized and unassigned reminder without recording either", async () => {
+  const allowed = await fixture();
+  const other = await fixture(false);
+  const ids = [allowed.planId, other.planId];
+  const before = await snapshot(ids);
+  expect((await post({ planIds: ids })).status).toBe(403);
+  expect(await snapshot(ids)).toEqual(before);
 });

@@ -87,14 +87,14 @@ describe.each(["cookie", "bearer"] as const)("party print authorization using si
     expectNoReads();
   });
 
-  it.each(["cashier", "doctor", "assistant"])("denies %s before reading the party or statement", async (role) => {
+  it.each(["reception", "cashier", "doctor", "assistant"])("denies %s before reading the party or statement", async (role) => {
     signIn(role, transport, true);
     await expect(print()).rejects.toThrow("NEXT_HTTP_ERROR_FALLBACK;404");
     expectNoReads();
   });
 
   it.each([
-    ["admin", undefined], ["reception", undefined], ["accountant", true], ["accountant", undefined],
+    ["admin", undefined], ["accountant", true], ["accountant", undefined],
   ] as const)("preserves authorized %s access (supplier flag %s)", async (role, viewSuppliers) => {
     const headers = signIn(role, transport, viewSuppliers);
     const response = await proxy(new NextRequest(`https://clinic.test${path}`, { headers }));

@@ -109,10 +109,18 @@ async function noReplacement(f: Fixture) {
 async function projection(f: Fixture, session: Session, canRebook: boolean) {
   for (const endpoint of ["workflow", "plans"]) {
     const response = await authedGet(`/api/patients/${f.patient}/${endpoint}`, session);
+    if (session === h.sessions.reception && endpoint === "plans") {
+      expect(response.status).toBe(403);
+      continue;
+    }
     expect(response.status).toBe(200);
     const payload = await response.json() as { plannedVisits: { id: number; appointmentStatus: string; canRebook: boolean; rebookGeneration: string }[] };
     const visit = payload.plannedVisits.find(visit => visit.id === f.planned)!;
     expect(visit).toMatchObject({ canRebook });
+    if (session === h.sessions.reception) {
+      expect(visit).toMatchObject({ title: `جلسة رقم ${f.planned}`, planTitle: null, note: null });
+      expect(JSON.stringify(payload)).not.toContain("جلسة اصطناعية");
+    }
     expect(visit.rebookGeneration).toMatch(/^[a-f0-9]{32}$/);
     expect(JSON.stringify(payload)).not.toContain("rebookHasReferral");
     expect(JSON.stringify(payload)).not.toContain("rebookReferralReceiverId");
@@ -126,6 +134,20 @@ async function denied(response: Response, expectedStatus: number) {
 }
 
 describe("explicit planned-session rebooking through the built app and proxy", () => {
+  it("exposes today's signed visit reference for checkout without its clinical text", async () => {
+    const f = await fixture();
+    const { rows: [signed] } = await db.query(
+      `INSERT INTO visits (patient_id, patient_name, status, arrived_at, signed_at, signed_by, diagnosis, treatment_done, next_plan)
+       VALUES ($1,'Synthetic signed visit','done',now(),now(),'synthetic','Private diagnosis','Private procedure','Private next plan') RETURNING id`,
+      [f.patient],
+    );
+    const response = await authedGet(`/api/patients/${f.patient}/workflow`, h.sessions.reception);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.lastVisit).toEqual({ id: signed.id, date: body.today, proceduresSummary: null, treatmentDone: null, nextPlan: null });
+    expect(JSON.stringify(body)).not.toContain("Private");
+  });
+
   it.each([
     { who: "admin", status: "cancelled" },
     { who: "reception", status: "no_show" },
@@ -139,7 +161,7 @@ describe("explicit planned-session rebooking through the built app and proxy", (
     expect(response.status).toBe(201);
     expect(response.headers.get("cache-control")).toContain("no-store");
     const result = await response.json() as { appointmentId: number; title: string; replayed: boolean };
-    expect(result).toMatchObject({ title: "جلسة اصطناعية", replayed: false });
+    expect(result).toMatchObject({ title: who === "reception" ? `جلسة رقم ${f.planned}` : "جلسة اصطناعية", replayed: false });
     expect(Number.isSafeInteger(result.appointmentId)).toBe(true);
     expect(await history(f)).toEqual(before);
     expect(await untouchedFingerprint()).toEqual(untouched);

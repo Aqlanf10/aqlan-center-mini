@@ -1,3 +1,5 @@
+import { canViewPatientMoney } from "@/lib/patient-access";
+import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -93,6 +95,10 @@ export async function POST(request: Request) {
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
   }
+  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) {
+    return NextResponse.json({ message: "لا يوجد تفويض مالي لهذا المريض." }, { status: 403 });
+  }
+
 
   // (P1-5ب) الرصيد الافتتاحي بعملته — قرار المالك: السعودي يبقى سعوديًا. الغائبة = الأساس.
   const currency = source.currency === undefined || source.currency === null || source.currency === ""
@@ -155,6 +161,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(balance, { status: 201 });
   } catch (error) {
+    if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
     if (error instanceof OpeningBalanceExists) return NextResponse.json({ message: error.message }, { status: 403 });
     if (error instanceof OpeningBalanceChanged) return NextResponse.json({ message: error.message }, { status: 409 });
     if (error instanceof OpeningCorrectionRefused) return NextResponse.json({ message: error.message, code: error.code }, { status: 409 });

@@ -83,7 +83,7 @@ async function open(who: "doctorA" | "reception"): Promise<{ context: BrowserCon
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
   await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=endo`, { waitUntil: "domcontentloaded" });
-  await page.getByTestId("patient-endo").waitFor();
+  await page.getByTestId(who === "reception" ? "patient-workspace" : "patient-endo").waitFor();
   return { context, page };
 }
 
@@ -249,6 +249,8 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     await page.getByTestId("endo-form").waitFor({ state: "detached" });
     expect(await page.getByTestId("endo-strip-status").innerText()).toContain("ترميم دائم");
 
+    expect(await page.getByTestId("patient-endo").innerText()).not.toMatch(/ريال|YER|SAR|USD/);
+
     // completion is refused while a record is unsigned (Arabic message from the server)
     await expand(page, "endo-completion");
     await page.getByTestId("endo-complete").click();
@@ -317,13 +319,15 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     }
   });
 
-  it("reception reads the record but has no write controls; and no money appears anywhere", async () => {
+  it("keeps completed endodontic records out of the reception workspace", async () => {
     const { context, page } = await open("reception");
-    expect(await page.getByTestId("endo-strip").innerText()).toContain("مكتمل");
+    const response = await context.request.get(`${baseUrl}/api/patients/${patientId}/endo`);
+    expect(response.status()).toBe(403);
+    expect(Object.keys(await response.json())).toEqual(["message"]);
+    expect(await page.getByTestId("endo-strip").count()).toBe(0);
     expect(await page.getByTestId("endo-new").count()).toBe(0);
     expect(await page.getByTestId("endo-record").count()).toBe(0);
     expect(await page.getByTestId("endo-complete").count()).toBe(0);
-    expect(await page.getByTestId("patient-endo").innerText()).not.toMatch(/ريال|YER|SAR|USD/);
     await context.close();
   });
 

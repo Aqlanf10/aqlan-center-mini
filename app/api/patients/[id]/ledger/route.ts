@@ -1,3 +1,5 @@
+import { readReceptionCollectionLedger } from "@/lib/reception-collection-ledger";
+import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { NextResponse } from "next/server";
 import {
   getSettings, listPatientPlans, patientLedger, patientReceiptRemainders, patientReversedInstallmentRecoveries,
@@ -29,6 +31,16 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
   }
 
+  if (session.role === "reception") {
+    try {
+      const collection = await readReceptionCollectionLedger(id, session.username);
+      return NextResponse.json(collection, { headers: { "Cache-Control": "private, no-store" } });
+    } catch (error) {
+      return error instanceof CollectionScopeDenied
+        ? NextResponse.json({ message: error.message }, { status: 403 })
+        : NextResponse.json({ message: "تعذّر تحميل بيانات التحصيل." }, { status: 500 });
+    }
+  }
   /* صلاحيات الوكيل المساعد + «المالية المخفية»: مدفوعات مريضٍ أمرٌ مالي يُدار
      بصراحة — الطبيب يراها فقط إن منحه المدير ذلك، ومعها عزل مرضاه. V2 أبقى
      الباب مفتوحًا للإدارة والاستقبال كما هو. */
@@ -107,7 +119,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       legacyBalanceArrangements,
       legacyOpeningPositions,
       installmentRecovery,
-      legacyArrangementAccess: { manage: session.role === "admin" || session.role === "reception" },
+      legacyArrangementAccess: { manage: session.role === "admin" },
     });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل حساب المريض." }, { status: 500 });
