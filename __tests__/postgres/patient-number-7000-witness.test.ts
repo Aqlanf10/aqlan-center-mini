@@ -210,7 +210,9 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
     expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
   });
   it('concurrent CSV import and ordinary registration share the archive counter, not the external number', async () => {
-    const csv='الاسم,الهاتف,رقم الملف\nSYNTHETIC CONCURRENT IMPORT,,900000';
+    // Distinct synthetic names: the old fixture shared all three name tokens
+    // with ordinary registration, triggering the intended possible-duplicate filter.
+    const csv='الاسم,الهاتف,رقم الملف\nSYNTHETIC CSV ARCHIVE ALPHA,,900000';
     const [imported,ordinary]=await Promise.all([
       db.commitPatientImport({rows:parseCsv(csv),fileSha256:createHash('sha256').update(csv).digest('hex'),fileName:'synthetic-concurrent-numbering.csv',today:'2026-11-19',includePossibleDuplicates:false,actor:'synthetic-admin',actorRole:'admin'}),
       db.createPatient(input('CONCURRENT WITH IMPORT')),
