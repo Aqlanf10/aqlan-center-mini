@@ -9,9 +9,9 @@ import { authedMutation, harness } from "./_server";
 let h: Awaited<ReturnType<typeof harness>>;
 const date = "2026-08-12";
 
-async function book(time: string, durationMinutes = 30) {
+async function book(time: string, durationMinutes = 30, nearbyAppointmentConfirmation?: string) {
   return authedMutation("/api/appointments", h.sessions.reception, "POST", JSON.stringify({
-    patientId: h.seeded.patientAId, date, time, durationMinutes, appointmentType: "consultation",
+    patientId: h.seeded.patientAId, date, time, durationMinutes, appointmentType: "consultation", nearbyAppointmentConfirmation,
   }));
 }
 
@@ -32,7 +32,11 @@ describe("P2-3 — same-patient overlap guard", () => {
     expect((await book("10:30")).status).toBe(409);
   });
 
-  it("back-to-back is allowed", async () => {
-    expect((await book("11:00")).status).toBe(201);
+  it("allows back-to-back visits after confirming the nearby appointment", async () => {
+    const pending = await book("11:00");
+    expect(pending.status).toBe(409);
+    const warning = await pending.json();
+    expect(warning).toMatchObject({ kind: "nearby_patient_appointments", confirmationToken: expect.any(String) });
+    expect((await book("11:00", 30, warning.confirmationToken)).status).toBe(201);
   });
 });

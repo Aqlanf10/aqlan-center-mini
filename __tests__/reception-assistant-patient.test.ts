@@ -11,6 +11,12 @@ describe("reception assistant patient projection", () => {
     expect(result.matches).toEqual([row]);
     expect(result.text).not.toMatch(/3700|clinical note/);
   });
+  it("reads an explicit six-digit patient id within the same operational scope", async () => {
+    const row = { id: 100023, fullName: "Synthetic", patientNumber: "SYN-42", phone: null };
+    readers.readOperationalPatient.mockResolvedValue(row);
+    expect((await receptionPatientLookup(row.id)).matches).toEqual([row]);
+    expect(readers.readOperationalPatient).toHaveBeenCalledWith(row.id, "reception");
+  });
   it("does not substitute another patient for a missing explicit file", async () => {
     readers.readOperationalPatient.mockResolvedValue(null);
     readers.searchPatients.mockClear();

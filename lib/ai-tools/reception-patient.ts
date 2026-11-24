@@ -5,8 +5,10 @@ import { readOperationalPatient } from "../patient-operational-read";
  * collection and receipt reprinting go through their scoped interactive routes. */
 export async function receptionPatientLookup(identifier: string | number) {
   const term = String(identifier);
-  const id = typeof identifier === "number" ? identifier : /^\d+$/.test(term) ? Number(term) : 0;
-  const direct = id > 0 && id < 100000 ? await readOperationalPatient(id, "reception") : null;
+  const explicitId = typeof identifier === "number";
+  const id = explicitId ? identifier : /^\d+$/.test(term) ? Number(term) : 0;
+  const isPatientId = Number.isSafeInteger(id) && id > 0 && id <= 2147483647;
+  const direct = isPatientId && (explicitId || id < 100000) ? await readOperationalPatient(id, "reception") : null;
   const rows = direct ? [direct] : typeof identifier === "number" ? [] : await searchPatients(term, 8);
   const matches = rows.map(({ id, fullName, patientNumber, phone }) => ({ id, fullName, patientNumber, phone }));
   const text = matches.length
