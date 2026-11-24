@@ -54,9 +54,6 @@ export async function POST(request: Request) {
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
-  if (session.role === "reception" && !await canViewPatientMoney(session, Number(source.patientId))) {
-    return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
-  }
   // A refund reverses a receipt. Only the manager may correct an issued receipt.
   if (source.kind === "refund" && session.role !== "admin") {
     return NextResponse.json({ message: "تصحيح سند القبض أو ردّه يتطلب صلاحية المدير." }, { status: 403 });
@@ -170,6 +167,10 @@ export async function POST(request: Request) {
       { message: "مفتاح الإعادة (Idempotency-Key) غير صالح: ٨–١٢٨ محرفًا من حروف وأرقام و . _ : -" },
       { status: 400 },
     );
+  }
+
+  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) {
+    return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
   }
 
   const reversalOfRaw = Number(source.reversalOfId);

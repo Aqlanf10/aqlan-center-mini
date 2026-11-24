@@ -33,6 +33,9 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
  */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
+  if (session?.role === "reception") {
+    return NextResponse.json({ message: "استخدم حساب التحصيل المخصص للمريض." }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+  }
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }

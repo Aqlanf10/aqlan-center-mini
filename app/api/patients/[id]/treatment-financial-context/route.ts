@@ -1,4 +1,3 @@
-import { canViewPatientMoney } from "@/lib/patient-access";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
 import { financeAccessFor } from "@/lib/finance-permissions";
@@ -10,6 +9,9 @@ export const dynamic = "force-dynamic";
 /** Same visibility boundary as patient invoices; a clinical deep link grants no financial permission. */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
+  if (session?.role === "reception") {
+    return NextResponse.json({ message: "استخدم حساب التحصيل المخصص للمريض." }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+  }
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   if (!canViewMoney(session.role)) return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   if ((session.role === "cashier" || session.role === "accountant")
@@ -18,9 +20,6 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const patientId = Number((await context.params).id);
   if (!Number.isSafeInteger(patientId) || patientId <= 0) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
-  if (session.role === "reception" && !await canViewPatientMoney(session, patientId)) {
-    return NextResponse.json({ message: "لا يوجد تفويض تحصيل لهذا المريض." }, { status: 403 });
-  }
   try {
     const result = await listTreatmentFinancialReferences(patientId);
     if (!result) return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });

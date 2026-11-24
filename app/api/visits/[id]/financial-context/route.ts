@@ -11,6 +11,9 @@ export const dynamic = "force-dynamic";
 /** Same patient/date gates as clinical GET; this read grants no command permissions. */
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
+  if (session?.role === "reception") {
+    return NextResponse.json({ message: "استخدم حساب التحصيل المخصص للمريض." }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+  }
   if (!session) return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401 });
   const id = Number((await context.params).id);
   if (!Number.isSafeInteger(id) || id <= 0) return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });

@@ -1,3 +1,4 @@
+import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { canViewPatientMoney } from "@/lib/patient-access";
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
@@ -36,6 +37,7 @@ export async function POST(request:Request,context:Context){
       reason:source.reason,idempotencyKey:source.idempotencyKey,cancel:source.cancel as boolean|undefined,session});
     return NextResponse.json(result,{status:result.replayed?200:201});
   }catch(error){
+    if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
     const bounded=bodyErrorResponse(error);if(bounded)return bounded;
     if(error instanceof DebtRepaymentError)return NextResponse.json({code:error.code,message:error.message},{status:error.code==="unauthorized"?401:error.code==="invalid"?400:409});
     return NextResponse.json({message:"تعذّر حفظ الترتيب؛ أعد الطلب نفسه بالمفتاح نفسه."},{status:500});
