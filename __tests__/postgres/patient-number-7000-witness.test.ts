@@ -230,6 +230,21 @@ describe('new-only patient numbering: numeric 7000 is displayed P-07000', () => 
     expect(Number(next.patientNumber.slice(2))).toBeLessThan(900000);
     expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
   });
+  it('a fresh database pool preserves the issued high-water and historical archive identifiers', async () => {
+    // Unlike restart() alone, this closes the old application pool and reconnects.
+    // It is not a physical backup restore or a full process restart.
+    const issued=await db.createPatient(input('BEFORE POOL RECONNECT'));
+    expect(issued.patientNumber).toBe('P-07000');
+    const before=(await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0];
+    expect(before).toEqual({last_value:'7000',is_called:true});
+    await db.resetPoolForTesting();
+    await restart();
+    expect((await q('SELECT last_value::text,is_called FROM patient_number_seq')).rows[0]).toEqual(before);
+    expect((await db.getPatient(issued.id))?.patientNumber).toBe(issued.patientNumber);
+    expect((await db.searchPatients(issued.patientNumber)).map(p=>p.patientNumber)).toContain(issued.patientNumber);
+    expect((await db.createPatient(input('AFTER POOL RECONNECT'))).patientNumber).toBe('P-07001');
+    expect((await q("SELECT patient_number FROM patients WHERE full_name='SYNTHETIC HISTORICAL FILE'")).rows[0].patient_number).toBe('P-00042');
+  });
   it('equal and occupied unconsumed number is marked consumed, not allocated again', async () => {
     await q("INSERT INTO patients(patient_number,full_name) VALUES('P-07000','SYNTHETIC OCCUPIED TARGET')");
     await q("SELECT setval('patient_number_seq',7000,false)");await restart();
