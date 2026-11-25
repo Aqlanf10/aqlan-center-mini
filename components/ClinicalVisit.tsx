@@ -26,7 +26,7 @@ import { canViewMoney, isAdmin } from "@/lib/roles";
 import { Icon } from "./Icon";
 import { ELASTIC_LABEL, PHASE_LABEL, type ElasticClass, type OrthoPhase } from "@/lib/ortho";
 import { VisitPhraseField as Field } from "./VisitPhraseField";
-import { VisitPlanRequirements } from "./VisitPlanRequirements";
+import { VisitPlanRequirements, VisitPlanRequirementsNote } from "./VisitPlanRequirements";
 import { VisitMaterials } from "./VisitMaterials";
 import { ServiceSelect } from "./ServiceSelect";
 import { hasUnresolvedClinicalFinance, hasVerifiedClinicalCoverage, visitSignatureBlock } from "./invoice-clinical-readiness";
@@ -1437,6 +1437,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
             لا إجراءات مسجلة اليوم. يمكن توثيق الفحص والملاحظات؛ الاستحقاق والتوقيع يخضعان للتحقق في المراجعة.
           </p>
         ) : null}
+        {!signed && (plannedToday.length > 0 || drafts.some((draft) => draft.planItemId !== null))
+          ? <VisitPlanRequirementsNote /> : null}
         <ul className="space-y-2" aria-label="بنود عمل الزيارة">
             {drafts.map((draft, index) => {
               const service = services.find((row) => row.id === draft.serviceId);

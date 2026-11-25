@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { VisitPhraseField } from "../components/VisitPhraseField";
-import { VisitPlanRequirements } from "../components/VisitPlanRequirements";
+import { VisitPlanRequirements, VisitPlanRequirementsNote } from "../components/VisitPlanRequirements";
 
 describe("visit phrase field uses one clinician-owned narrative", () => {
   it("starts with blank clinical text and never chooses a configured normal finding", () => {
@@ -39,6 +39,31 @@ describe("plan requirement display is not clinical authority", () => {
     expect(html).toContain("يمكن توثيق العمل كمسودة؛ يحتاج مراجعة مالية قبل التوقيع");
     expect(html).toContain("غير مسجلة");
     expect(html).not.toMatch(/<button|<input|<select/);
+  });
+  it("keeps compact reasons separate and puts exact prerequisites in closed native details", () => {
+    const consentOnly = { planItemId: 1, status: "planned", origin: "invoice",
+      clinicalConsentRecorded: false, financialReviewRequired: false };
+    const html = renderToStaticMarkup(<>
+      <VisitPlanRequirementsNote />
+      <VisitPlanRequirements item={consentOnly} />
+      <VisitPlanRequirements item={{ ...consentOnly, planItemId: 2 }} />
+      <VisitPlanRequirements item={{ ...consentOnly, planItemId: 3,
+        financialReviewRequired: true, unmetRequirements: ["انتظار تقييم البند #18"] }} />
+      <VisitPlanRequirements item={{ planItemId: 4, status: "pending", origin: "invoice" }} />
+    </>);
+    const summaries = [...html.matchAll(/<summary[^>]*>(.*?)<\/summary>/g)].map(match => match[1]);
+    expect(summaries).toHaveLength(4);
+    expect(summaries[0]).toContain("الموافقة غير مسجلة");
+    expect(summaries[1]).toBe(summaries[0]);
+    expect(summaries[2]).toContain("مراجعة مالية");
+    expect(summaries[2]).toContain("الموافقة غير مسجلة");
+    expect(summaries[2]).toContain("متطلبات اعتماد");
+    expect(summaries[2]).not.toContain("انتظار تقييم البند #18");
+    expect(summaries[3]).toContain("المالية غير متحققة");
+    expect(summaries[3]).toContain("الموافقة غير معلومة");
+    expect(html).toContain("انتظار تقييم البند #18");
+    expect(html).not.toMatch(/<details[^>]*\sopen[=\s>]/);
+    expect(html.match(/يتحقق الخادم مجددًا عند التوقيع/g)).toHaveLength(1);
   });
   it("distinguishes missing evidence from verified empty or cleared requirements", () => {
     expect(renderToStaticMarkup(<VisitPlanRequirements />)).toContain("غير متاحة في قراءة الزيارة الحالية");

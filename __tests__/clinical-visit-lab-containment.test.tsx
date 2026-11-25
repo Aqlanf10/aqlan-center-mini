@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClinicalVisit } from "../components/ClinicalVisit";
+import { VisitPlanRequirementsNote } from "../components/VisitPlanRequirements";
 
 // UI-containment regressions on a fixed, already-linked synthetic visit. No routes,
 // database/bootstrap modules, credentials, browser, or actual network are used.
@@ -368,6 +369,29 @@ describe("new lab display requires the loaded visit to match the current prop", 
     expect(hasTest("clinical-lab-sign-guidance")).toBe(false); expect(writes()).toHaveLength(0);
     assertPassiveLabUi();
   });
+});
+
+it("keeps the full plan list, a single explanation, and the linked draft ID", async () => {
+  const planned = { serviceId: crown.id, planTitle: "Synthetic plan", serviceName: crown.name,
+    toothCode: 16, billingRule: "per_session", sessionCount: 2, doneSessions: 0, unitPriceMinor: 100,
+    quantity: 1, status: "planned", planCurrency: "YER" };
+  stored.outstanding = [
+    { ...planned, planItemId: 96001, origin: "invoice", financialReviewRequired: false, clinicalConsentRecorded: false },
+    { ...planned, planItemId: 96002, origin: "invoice", financialReviewRequired: false, clinicalConsentRecorded: false },
+    { ...planned, planItemId: 96003, unmetRequirements: ["Synthetic prerequisite"] },
+  ];
+  const notes = () => elements(procedureSection()).filter((node) => node.type === VisitPlanRequirementsNote);
+  await mount();
+  for (const id of [96001, 96002, 96003]) expect(hasTest(`planned-item-${id}`)).toBe(true);
+  expect(notes()).toHaveLength(1);
+  await invoke(button("+ نفّذ اليوم")); await flush();
+  expect(notes()).toHaveLength(1);
+  expect(hasTest("planned-item-96002")).toBe(true);
+  expect(hasTest("planned-item-96003")).toBe(true);
+  expect(writes()).toHaveLength(0);
+  await invoke(button("احفظ بلا توقيع")); await flush();
+  expect(writes()).toHaveLength(1);
+  expect(JSON.parse(String(writes()[0][1].body)).procedures).toEqual([expect.objectContaining({ planItemId: 96001 })]);
 });
 
 describe("ordinary explicit clinical save and sign keep published contracts", () => {
