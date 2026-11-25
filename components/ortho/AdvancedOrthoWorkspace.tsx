@@ -25,6 +25,7 @@ import {
 } from "./OrthoDiagnosisPlanRetentionTabs";
 import { OrthoScientificAnalysisTab } from "./OrthoScientificAnalysisTab";
 import { OrthoReportsPresentationTab } from "./OrthoReportsPresentationTab";
+import { AqlanAiAssistantDrawer } from "./AqlanAiAssistantDrawer";
 import { useSession } from "@/components/SessionProvider";
 
 export interface AdvancedOrthoWorkspaceProps {
@@ -284,7 +285,7 @@ export function AdvancedOrthoWorkspace({
               </button>
             ) : null}
 
-            {perms.can("ai.use") && perms.canSection("ai_assistant") && renderAiDrawer ? (
+            {perms.can("ai.use") && perms.canSection("ai_assistant") ? (
               <button
                 type="button"
                 onClick={() => setAiDrawerOpen(true)}
@@ -469,15 +470,23 @@ export function AdvancedOrthoWorkspace({
         )
       )}
 
-      {/* Package 6: AQLAN AI Assistant Side Drawer */}
-      {renderAiDrawer
-        ? renderAiDrawer({
+      {/* Package 6: AQLAN AI Assistant — عقلان المساعد الذكي Side Drawer */}
+      {perms.can("ai.use") && perms.canSection("ai_assistant") ? (
+        renderAiDrawer ? (
+          renderAiDrawer({
             open: aiDrawerOpen,
             onClose: () => setAiDrawerOpen(false),
             record,
             patientId,
           })
-        : null}
+        ) : (
+          <AqlanAiAssistantDrawer
+            open={aiDrawerOpen}
+            onClose={() => setAiDrawerOpen(false)}
+            patientId={patientId}
+          />
+        )
+      ) : null}
     </div>
   );
 }
