@@ -8,7 +8,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { ClinicalVisit } from "../ClinicalVisit";
 import { CollectPaymentModal } from "../CollectPaymentModal";
 import { CheckoutExtras, isCheckoutWalkout } from "./CheckoutExtras";
-import { hasWalkoutFinancials, workflowBalanceRows, type FinancialReadState } from "@/lib/walkout-financial-read";
+import { hasWalkoutFinancials, isHistoricalWalkoutReference, workflowBalanceRows, type FinancialReadState } from "@/lib/walkout-financial-read";
 import { walkoutNeedsReview, PREVIOUS_BALANCE_LABEL, PREVIOUS_BALANCE_NOTE } from "@/lib/walkout-presentation";
 import type { CheckoutCurrencyLine } from "@/lib/checkout-summary";
 import { readCheckoutDueRecommendation, type CheckoutDueRecommendation } from "@/lib/checkout-due-recommendation";
@@ -97,6 +97,7 @@ function OwnedTodayVisitTab({
 
   const [financialRead, setFinancialRead] = useState<FinancialReadState>("loading");
   const [financialRevision, setFinancialRevision] = useState(0);
+  const [failedOptionalCheckoutId, setFailedOptionalCheckoutId] = useState<number | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const mounted = useRef(true);
   const checkoutVisitRef = useRef<number | null>(requestedCheckoutVisitId);
@@ -113,8 +114,22 @@ function OwnedTodayVisitTab({
     setCurrentBalances(null);
     setPreviousBalances(null);
     setFinancialRead("loading");
+    setFailedOptionalCheckoutId(null);
     setFinancialRevision((revision) => revision + 1);
     if (!canCollect) return;
+    const optionalCheckout = restore && visitId !== null && requestedCheckoutVisitId === null
+      && checkoutVisitRef.current === null;
+    let triedPatientBalance = false;
+    const refreshPatientBalance = async (activeVisitId?: number) => {
+      triedPatientBalance = true;
+      const workflow = await fetch(`/api/patients/${patientId}/workflow`, { cache: "no-store", signal: request.signal });
+      if (!workflow.ok) throw new Error("Financial read failed");
+      const latest: unknown = await workflow.json();
+      if (!current()) return false;
+      setCurrentBalances(workflowBalanceRows(latest, patientId, activeVisitId));
+      setFinancialRead("verified");
+      return true;
+    };
     try {
       const response = await fetch(visitId === null
         ? `/api/patients/${patientId}/workflow` : `/api/visits/${visitId}/walkout`,
@@ -125,6 +140,10 @@ function OwnedTodayVisitTab({
       if (visitId === null) {
         setCurrentBalances(workflowBalanceRows(payload, patientId));
       } else {
+        if (restore && requestedCheckoutVisitId === null && isHistoricalWalkoutReference(payload, patientId, visitId)) {
+          await refreshPatientBalance();
+          return;
+        }
         if (!isCheckoutWalkout(payload, visitId) || !hasWalkoutFinancials(payload, patientId, visitId)) {
           throw new Error("Unverified walkout");
         }
@@ -132,12 +151,7 @@ function OwnedTodayVisitTab({
           const restored = payload as typeof payload & { signedToday?: boolean };
           if (restored.signedToday !== true || (activeVisitRef.current !== null
             && activeVisitRef.current.arrivedAt >= payload.arrivedAt)) {
-            const workflow = await fetch(`/api/patients/${patientId}/workflow`, { cache: "no-store", signal: request.signal });
-            if (!workflow.ok) throw new Error("Financial read failed");
-            const latest: unknown = await workflow.json();
-            if (!current()) return;
-            setCurrentBalances(workflowBalanceRows(latest, patientId));
-            setFinancialRead("verified");
+            await refreshPatientBalance();
             return;
           }
           restoredVisitRef.current = visitId;
@@ -170,6 +184,18 @@ function OwnedTodayVisitTab({
       }
       setFinancialRead("verified");
     } catch {
+      // Restoring a previous visit on ordinary entry is optional. A failed
+      // restore must never borrow another visit or authorize checkout actions.
+      const activeVisit = activeVisitRef.current;
+      if (optionalCheckout && !triedPatientBalance && visitId !== null && current()
+        && checkoutVisitRef.current === null && activeVisit !== null && activeVisit.id !== visitId) {
+        try {
+          if (await refreshPatientBalance(activeVisit.id)) {
+            if (current()) setFailedOptionalCheckoutId(visitId);
+            return;
+          }
+        } catch { /* The current patient balance remains unverified. */ }
+      }
       if (current()) {
         setCurrentBalances(null);
         setPreviousBalances(null);
@@ -320,6 +346,12 @@ function OwnedTodayVisitTab({
         </p>
       ) : null}
 
+      {canCollect && failedOptionalCheckoutId !== null && requestedCheckoutVisitId === null ? (
+        <div role="status" className="rounded-xl border border-amber-200 p-3 text-sm">
+          تعذّر فتح ملخّص الزيارة السابقة.
+          {" "}<button type="button" className="underline" onClick={() => void loadCurrentBalances(failedOptionalCheckoutId, true)}>إعادة المحاولة</button>
+        </div>
+      ) : null}
       {canCollect && financialRead !== "verified" ? (
         <div data-testid="checkout-financial-read" role={financialRead === "error" ? "alert" : "status"} className="rounded-xl border border-amber-200 p-3 text-sm">
           {financialRead === "loading" ? "جارٍ التحقق من الأرصدة…" : "تعذّر التحقق من الأرصدة؛ لا يُعد المبلغ صفرًا"}

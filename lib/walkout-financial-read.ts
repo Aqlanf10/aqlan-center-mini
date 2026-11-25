@@ -9,16 +9,25 @@ function moneyMap(v: unknown): v is Record<Currency, number> {
   return record(v) && Object.keys(v).length === CURRENCIES.length
     && CURRENCIES.every((currency) => amount(v[currency]));
 }
-export function workflowBalanceRows(payload: unknown, patientId: number): BalanceRow[] {
+export function workflowBalanceRows(payload: unknown, patientId: number, activeVisitId?: number): BalanceRow[] {
   if (!record(payload) || !record(payload.patient) || payload.patient.id !== patientId
     || payload.canSeeFinancial !== true || !record(payload.financial) || !record(payload.financial.byCurrency)) {
     throw new Error("Unverified financial owner");
+  }
+  if (activeVisitId !== undefined && (!record(payload.openVisit) || payload.openVisit.id !== activeVisitId)) {
+    throw new Error("Unverified active visit");
   }
   const map = payload.financial.byCurrency;
   if (Object.keys(map).length !== CURRENCIES.length || !CURRENCIES.every((currency) =>
     record(map[currency]) && amount(map[currency].balanceMinor))) throw new Error("Incomplete financial currencies");
   return CURRENCIES.map((currency) => ({ currency, balanceMinor: (map[currency] as { balanceMinor: number }).balanceMinor }))
     .filter((row) => row.balanceMinor !== 0);
+}
+/** Only for an automatic attempt to restore the last signed checkout. A
+ * verified historical visit cannot own current financial presentation. */
+export function isHistoricalWalkoutReference(value: unknown, patientId: number, visitId: number): boolean {
+  return record(value) && value.patientId === patientId && value.visitId === visitId
+    && value.signedToday === false && typeof value.signedAt === "string" && Number.isFinite(Date.parse(value.signedAt));
 }
 /** Called only after the existing clinical walkout validator. No coercion or accounting calculation. */
 export function hasWalkoutFinancials(value: unknown, patientId: number, visitId: number): value is VisitWalkout {
