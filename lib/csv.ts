@@ -19,7 +19,8 @@ export function csvCell(value: unknown): string {
   // Spreadsheet programs can interpret a quoted CSV cell as a formula.
   // Preserve canonical negative numbers (including PostgreSQL numeric strings),
   // but force formula-like text into a literal cell before CSV escaping.
-  const negativeNumber = /^-\d+(?:\.\d+)?$/.test(raw);
+  const negativeNumber = /^-\d+(?:\.\d+)?$(?![\s\S])/.test(raw)
+    || (typeof value === "number" && Number.isFinite(value)) || typeof value === "bigint";
   const dangerousText = /^[\s\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f]*[=+\-@\uff1d\uff0b\uff0d\uff20]/u.test(raw)
     || /^[\t\r\n]/.test(raw);
   const text = dangerousText && !negativeNumber ? "'" + raw : raw;
