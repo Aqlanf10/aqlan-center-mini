@@ -90,6 +90,8 @@ beforeEach(() => {
   mocks.staff.mockResolvedValue({ userId: 7, username: "doctor_user", role: "doctor", partyId: 7 });
   mocks.user.mockResolvedValue({
     id: 7,
+    username: "doctor_user",
+    role: "doctor",
     isActive: true,
     partyId: 7,
     permissions: { canViewXrays: true, canUploadXrays: true },

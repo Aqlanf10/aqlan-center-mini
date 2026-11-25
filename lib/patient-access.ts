@@ -27,10 +27,14 @@ export async function canAccessPatient(
   if (session.role !== "doctor") return false;
   try {
     const user = client ? await findUserByUsername(session.username, client) : await findUserByUsername(session.username);
-    if (!user || !user.isActive || (client && session.expiresAt < Date.now())) return false;
+    // The fresh account must still be the authenticated doctor. A renamed,
+    // reassigned or recreated account must not inherit the old session's scope.
+    if (!user || user.isActive !== true || user.id !== session.userId
+      || user.username.toLowerCase() !== session.username.toLowerCase()
+      || user.role !== session.role || (client && session.expiresAt < Date.now())) return false;
     if (permission && user.permissions?.[permission] !== true) return false;
-    if (user.permissions?.canViewAllPatients) return true;
-    if (!user.partyId) return false;
+    if (user.permissions?.canViewAllPatients === true) return true;
+    if (typeof user.partyId !== "number" || !Number.isSafeInteger(user.partyId) || user.partyId <= 0) return false;
     const allowed = await (client ? (ownershipLockMode ? doctorOwnsPatient(user.partyId, patientId, client, ownershipLockMode) : doctorOwnsPatient(user.partyId, patientId, client)) : doctorOwnsPatient(user.partyId, patientId));
     return allowed && (!client || session.expiresAt >= Date.now());
   } catch (error) {

@@ -89,7 +89,7 @@ beforeEach(() => {
     partyId === 5 && patientId === 42 && owns42);
   mocks.findUserByUsername.mockImplementation(async (username: string) =>
     username === "dr.amjad"
-      ? { id: 11, username, isActive: true, partyId: 5, permissions: { canViewAllPatients: false } }
+      ? { id: 11, username, role: "doctor", isActive: true, partyId: 5, permissions: { canViewAllPatients: false } }
       : username === "reception1"
         ? { id: 21, username, isActive: true, partyId: null, permissions: { canViewPatientPayments: true } }
         : { id: 99, username, isActive: true, partyId: 999, permissions: {} });

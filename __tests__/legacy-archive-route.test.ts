@@ -20,8 +20,8 @@ const imported = { id: 51, legacyNumber: 901, sourceKind: "legacy_import", histo
   priceMinor: 60000, rate: 143.25, paidMinor: 25000, remainingMinor: 34999, payments: [] };
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.session.mockResolvedValue({ role: "doctor", username: "synthetic-doctor" });
-  mocks.user.mockResolvedValue({ isActive: true, partyId: 31, permissions: { canViewPatientPayments: true } });
+  mocks.session.mockResolvedValue({ userId: 31, role: "doctor", username: "synthetic-doctor" });
+  mocks.user.mockResolvedValue({ id: 31, username: "synthetic-doctor", role: "doctor", isActive: true, partyId: 31, permissions: { canViewPatientPayments: true } });
   mocks.owns.mockResolvedValue(true); mocks.today.mockResolvedValue(true);
   mocks.history.mockResolvedValue({ treatments: [imported], orphanPayments: [] });
 });
@@ -36,8 +36,8 @@ describe("legacy archive read authority", () => {
   });
   it("denies a clinical doctor who lacks the live financial permission", async () => {
     // A permission claimed by the browser/session must not replace the live user record.
-    mocks.session.mockResolvedValue({ role: "doctor", username: "synthetic-doctor", permissions: { canViewPatientPayments: true } });
-    mocks.user.mockResolvedValue({ isActive: true, partyId: 31, permissions: {} });
+    mocks.session.mockResolvedValue({ userId: 31, role: "doctor", username: "synthetic-doctor", permissions: { canViewPatientPayments: true } });
+    mocks.user.mockResolvedValue({ id: 31, username: "synthetic-doctor", role: "doctor", isActive: true, partyId: 31, permissions: {} });
     expect((await get()).status).toBe(403); expect(mocks.history).not.toHaveBeenCalled();
   });
   it("denies a financially permitted doctor outside the patient scope", async () => {
@@ -45,7 +45,7 @@ describe("legacy archive read authority", () => {
     expect((await get()).status).toBe(404); expect(mocks.history).not.toHaveBeenCalled();
   });
   it("denies inactive clinicians and failed ownership lookups", async () => {
-    mocks.user.mockResolvedValue({ isActive: false, partyId: 31, permissions: { canViewPatientPayments: true } });
+    mocks.user.mockResolvedValue({ id: 31, username: "synthetic-doctor", role: "doctor", isActive: false, partyId: 31, permissions: { canViewPatientPayments: true } });
     expect((await get()).status).toBe(404);
     mocks.user.mockRejectedValue(new Error("synthetic user lookup failure"));
     expect((await get()).status).toBe(404); expect(mocks.history).not.toHaveBeenCalled();
@@ -65,13 +65,13 @@ describe("legacy archive read authority", () => {
     expect(mocks.history).not.toHaveBeenCalled();
   });
   it.each(["admin", "doctor"])("allows the authorized %s without changing historical facts", async (role) => {
-    mocks.session.mockResolvedValue({ role, username: "synthetic-reader" });
+    mocks.session.mockResolvedValue(role === "doctor" ? { userId: 31, role, username: "synthetic-doctor" } : { role, username: "synthetic-reader" });
     const response = await get(); expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ treatments: [imported], orphanPayments: [] });
     expect(mocks.history).toHaveBeenCalledExactlyOnceWith(11);
   });
   it("preserves explicitly granted all-patient doctor scope with financial permission", async () => {
-    mocks.user.mockResolvedValue({ isActive: true, permissions: { canViewAllPatients: true, canViewPatientPayments: true } });
+    mocks.user.mockResolvedValue({ id: 31, username: "synthetic-doctor", role: "doctor", isActive: true, permissions: { canViewAllPatients: true, canViewPatientPayments: true } });
     mocks.owns.mockResolvedValue(false);
     expect((await get()).status).toBe(200); expect(mocks.owns).not.toHaveBeenCalled();
   });

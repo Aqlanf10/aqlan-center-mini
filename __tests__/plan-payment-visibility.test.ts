@@ -32,7 +32,7 @@ const plan: TreatmentPlan = {
   totalFromItems: false, consentAt: null, consentBy: null, consentNote: null,
 };
 const doctor = (permissions: Record<string, boolean> = { canViewPlans: true, canViewPatientPayments: false }) => ({
-  id: 7, username: "synthetic_doctor", isActive: true, partyId: 71, permissions,
+  id: 7, username: "synthetic_doctor", role: "doctor", isActive: true, partyId: 71, permissions,
 });
 const get = (route: "generic" | "patient", patientId = 201) => route === "generic"
   ? genericGet(new Request(`http://localhost/api/plans?patientId=${patientId}`))
