@@ -38,6 +38,7 @@ import type { LabDeliveryRisk } from "@/lib/lab-reconciliation";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { financeAccessFor } from "@/lib/finance-permissions";
 import { useLabBalanceOverview } from "@/components/finance/useLabBalanceOverview";
+import { receptionSettlementTargets } from "@/lib/reception-settlement-targets";
 
 interface Feed {
   /** Resolved server zone; optional for compatibility with an older shift feed. */
@@ -121,10 +122,80 @@ interface SelectedCollectPatient {
   currency?: Currency;
   invoices?: CollectInvoiceTarget[];
   plans?: CollectPlanTarget[];
+  openings?: { currency: Currency; dueMinor: number }[];
   presetInvoice?: { id: number; baseCurrency: Currency } | null;
 }
 
 export default function FinancePage() {
+  const session = useSession();
+  // Do not mount the clinic-wide dashboard while the principal is unknown,
+  // or for reception. No shift/debt/party feed is needed to select a patient.
+  if (!session?.username) return null;
+  if (session.role === "reception") {
+    return <ReceptionCollection key={JSON.stringify([session.username, session.permissions ?? null])} />;
+  }
+  return <ClinicFinancePage key={JSON.stringify([session.username, session.role])} />;
+}
+
+function ReceptionCollection() {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [selected, setSelected] = useState<SelectedCollectPatient | null>(null);
+  const [receiptId, setReceiptId] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loadingPatient, setLoadingPatient] = useState(false);
+  const request = useRef(0);
+  useEffect(() => () => { ++request.current; }, []);
+  const selectPatient = async (patient: { id: number; name: string }) => {
+    const generation = ++request.current;
+    setSearchOpen(false);
+    setSelected(null);
+    setReceiptId(null);
+    setError(null);
+    setLoadingPatient(true);
+    try {
+      // Only the selected patient's existing authorized settlement targets.
+      const response = await fetch(`/api/patients/${patient.id}/ledger`, { cache: "no-store" });
+      const data = await response.json();
+      if (generation !== request.current) return;
+      if (!response.ok || !Array.isArray(data?.invoices) || !Array.isArray(data?.plans)) {
+        throw new Error("تعذّر تحميل حساب المريض. أعد المحاولة.");
+      }
+      const invoices = (data.invoices as CollectInvoiceTarget[]).filter(
+        (invoice) => invoice.status === "open" && isCurrency(invoice.baseCurrency),
+      );
+      const { plans, openings } = receptionSettlementTargets(data);
+      setSelected({ id: patient.id, name: patient.name, invoices, plans, openings });
+    } catch {
+      if (generation === request.current) setError("تعذّر تحميل حساب المريض. أعد المحاولة.");
+    } finally {
+      if (generation === request.current) setLoadingPatient(false);
+    }
+  };
+  return (
+    <main className="mx-auto max-w-lg p-4 pb-28">
+      <PageHeader title="تحصيل المريض" subtitle="ابحث عن المريض لإصدار سند قبض." />
+      <p className="mb-4 text-sm text-slate-600">يُتحقق من صلاحية التحصيل والوردية عند تسجيل الدفعة في الخادم.</p>
+      {error ? <p role="alert" className="mb-4 text-sm text-red-800">{error}</p> : null}
+      <button type="button" disabled={loadingPatient || Boolean(selected)} onClick={() => {
+        setReceiptId(null); setError(null); setSearchOpen(true);
+      }} className="rounded-xl bg-emerald-700 px-4 py-3 text-sm font-bold text-white disabled:opacity-50">
+        {loadingPatient ? "جارٍ تحميل حساب المريض…" : "إصدار سند قبض"}
+      </button>
+      {receiptId !== null ? <a className="mt-4 block text-sm font-bold underline"
+        href={`/print/receipt/${receiptId}`} target="_blank" rel="noreferrer">طباعة سند العملية</a> : null}
+      <QuickCollectModal isOpen={searchOpen} onClose={() => setSearchOpen(false)}
+        onSelectPatient={(patient) => { void selectPatient(patient); }}
+        debtors={[]} currency={CLINIC_BASE_CURRENCY} />
+      {selected ? <CollectPaymentModal patientId={selected.id} patientName={selected.name}
+        isOpen onClose={() => setSelected(null)}
+        onSuccess={(id) => { setSelected(null); setReceiptId(id); }}
+        invoices={selected.invoices ?? []} plans={selected.plans ?? []}
+        openings={selected.openings ?? []} /> : null}
+    </main>
+  );
+}
+
+function ClinicFinancePage() {
   const session = useSession();
   const principalKey = `${session?.username ?? ""}:${session?.role ?? ""}`;
   const admin = isAdmin(session?.role);
