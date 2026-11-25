@@ -70,7 +70,7 @@ beforeEach(() => {
     partyId === 5 && patientId === 42);
   mocks.findUserByUsername.mockImplementation(async (username: string) =>
     username === "dr.amjad"
-      ? { id: 11, username, isActive: true, partyId: 5, permissions: { canViewAllPatients: false } }
+      ? { id: 11, username, role: "doctor", isActive: true, partyId: 5, permissions: { canViewAllPatients: false } }
       : { id: 99, username, isActive: true, partyId: null, permissions: {} });
   mocks.getPatient.mockImplementation(async (id: number) =>
     id === 42 ? PATIENT_A : id === 77 ? PATIENT_B : null);
@@ -202,7 +202,7 @@ describe("conversationPatientId مُسَمّم — حارس المسار", () =>
 describe("مسؤول إضافي: canViewAllPatients يفتح الرؤية الموثوقة فقط", () => {
   it("الطبيب بمنحٍ عامة يرى مريض الزميل — المنحة الصريحة تعمل", async () => {
     mocks.findUserByUsername.mockImplementation(async () => ({
-      id: 11, username: "dr.amjad", isActive: true, partyId: 5,
+      id: 11, username: "dr.amjad", role: "doctor", isActive: true, partyId: 5,
       permissions: { canViewAllPatients: true },
     }));
     const broad: AiToolContext = { ...DOCTOR_A, canViewAllPatients: true, permissions: { canViewAllPatients: true } };
