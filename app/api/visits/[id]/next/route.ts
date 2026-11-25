@@ -8,6 +8,7 @@ import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/l
 import { toWhatsAppNumber } from "@/lib/reminders";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { readOrthoAdjustmentBookingContext } from "@/lib/ortho-adjustment-booking-context";
 
 export const dynamic = "force-dynamic";
 
@@ -80,11 +81,45 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       ? source.overrideReason.trim().slice(0, 300) : "";
     /* التجاوز يُلتقط هنا ليُسجَّل بعد نجاح الكتابة — لا يُهمل كما كان. */
     const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
+    let doctorId: number | null = null;
+    const assignmentConflict = {
+      message: "تعذّر تأكيد طبيب حالة التقويم. عيّنه من بطاقة الحالة ثم أعد الحجز.",
+    };
+    let assignmentRejected = false;
     const result = await writeAppointmentInDay({
       date,
       judge: async (sameDay, client) => {
+        try {
+          const { rows: [lockedVisit] } = await client.query<{ patient_id: number | null; signed_at: Date | null }>(
+            "SELECT patient_id, signed_at FROM visits WHERE id = $1 FOR UPDATE NOWAIT", [visitId],
+          );
+          if (!lockedVisit || lockedVisit.patient_id !== visit.patientId) {
+            assignmentRejected = true;
+            return { ok: false as const, conflict: null };
+          }
+          const { rows: adjustments } = await client.query<{ id: number; case_id: number }>(
+            "SELECT id, case_id FROM ortho_adjustments WHERE visit_id = $1 ORDER BY id LIMIT 2", [visitId],
+          );
+          if (adjustments.length) {
+            const [adjustment] = adjustments;
+            const doctor = adjustments.length === 1 && lockedVisit.signed_at && lockedVisit.patient_id !== null
+              ? await readOrthoAdjustmentBookingContext(client, {
+                visitId, patientId: lockedVisit.patient_id, caseId: adjustment.case_id, adjustmentId: adjustment.id,
+              }, true)
+              : null;
+            if (!doctor?.ok) {
+              assignmentRejected = true;
+              return { ok: false as const, conflict: null };
+            }
+            doctorId = doctor.doctorId;
+          }
+        } catch (error) {
+          if ((error as { code?: string }).code !== "55P03") throw error;
+          assignmentRejected = true;
+          return { ok: false as const, conflict: null };
+        }
         const judged = await judgeBookingInDay({
-          sameDay, client, date, time, durationMinutes, service,
+          sameDay, client, date, time, durationMinutes, service, providerId: doctorId,
           context: capacityContext, canOverride, overrideReason,
           patientId: visit.patientId,
         });
@@ -93,10 +128,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         return { ok: true as const };
       },
       commit: (client) =>
-        createNextSession({ visitId, date, time, durationMinutes, phone, note }, client),
+        createNextSession({ visitId, date, time, durationMinutes, phone, note, doctorId }, client),
     });
     if (!result.ok) {
-      return NextResponse.json(result.conflict, { status: 409 });
+      return NextResponse.json(assignmentRejected ? assignmentConflict : result.conflict, { status: 409 });
     }
     const created = result.value;
     if (!created) {

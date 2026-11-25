@@ -205,7 +205,12 @@ describe("built orthodontic prescription truth", () => {
         page.goto(`${baseUrl}/patients/${fixture.patientId}?tab=ortho`, { waitUntil: "domcontentloaded" })]);
       await verifyRead(initial, null);
       const active = caseCard(page, fixture.activeId); const closed = caseCard(page, fixture.closedId);
+      const assignmentButton = { name: "تعيين الطبيب المسؤول", exact: true } as const;
+      await active.getByRole("button", assignmentButton).waitFor({ state: "visible" });
+      expect(await closed.getByRole("button", assignmentButton).count()).toBe(0);
       await openPrescription(active); await openPrescription(closed);
+      expect(await active.getByRole("button", assignmentButton).count()).toBe(0);
+      expect(await closed.getByRole("button", assignmentButton).count()).toBe(0);
       expect(await prescription(active).textContent()).toBe("غير مسجّلة");
       expect(await prescription(closed).textContent()).toBe(custom);
       expect(await closed.textContent()).toContain(objectives);

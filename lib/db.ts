@@ -2967,6 +2967,7 @@ export async function createNextSession(
     durationMinutes: number;
     phone: string | null;
     note: string | null;
+    doctorId?: number | null;
   },
   runOn?: DbClient,
 ): Promise<{ appointmentId: number; patientId: number; patientName: string; phone: string | null } | null> {
@@ -2999,9 +3000,9 @@ export async function createNextSession(
   const patientId = await resolveVisitPatient(client, visit, input.phone ?? visit.patient_phone);
 
   const { rows: created } = await client.query<{ id: number }>(
-    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note)
-     VALUES ($1, $2, $3, $4, $5::text) RETURNING id`,
-    [patientId, input.date, input.time, input.durationMinutes, input.note],
+    `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, note, doctor_id)
+     VALUES ($1, $2, $3, $4, $5::text, $6) RETURNING id`,
+    [patientId, input.date, input.time, input.durationMinutes, input.note, input.doctorId ?? null],
   );
 
   await client.query(

@@ -92,7 +92,7 @@ export type AuditAction =
   | "ai.confirmation.execute"
   | "diagnosis.create" | "ortho.book_next"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
-  | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
+  | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision" | "ortho.responsible_doctor"
   | "ortho.case_create" | "visit.create"
   | "ortho.strategy_revision" | "ortho.assessment.append"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
@@ -374,6 +374,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "plan.installment_reminder": "تنبيه مريض بقسط مستحق",
   "ortho.adjustment": "تسجيل شدّة تقويم",
   "ortho.plan_link": "ربط حالة التقويم باتفاقها المالي",
+  "ortho.responsible_doctor": "تعيين الطبيب المسؤول عن حالة التقويم",
   "ortho.billing_decision": "قرار فوترة شدّة خارج العقد",
   "appointment.create": "حجز موعد",
   "appointment.capacity_override": "تجاوز منع السعة",
