@@ -144,6 +144,58 @@ beforeEach(async () => {
 });
 afterEach(() => { hooks.effects.forEach((effect) => effect.cleanup?.()); vi.unstubAllGlobals(); });
 
+describe("invoice-linked endodontic assessment shortcut", () => {
+  function pending(patientId = 91, site = "15") {
+    cases = [{ id: 17, patientId: 91, title: "Synthetic linked case", specialty: "endodontics", status: "active", site }];
+    props.pendingAssessments = [{ id: 17, patientId, kind: "specialty", orthoCaseId: null, title: "Pending assessment",
+      specialty: "endodontics", needsAssessment: true }];
+    props.context = { patientId: 91, clinicalCaseId: 17 };
+    render();
+  }
+
+  it("preselects the exact existing case and tooth without writing until confirmation", async () => {
+    pending();
+    await vi.waitFor(() => expect(control("endo-existing-assessment-17")).toBeTruthy());
+    await click("endo-existing-assessment-17");
+    expect(writes()).toHaveLength(0);
+    expect(control("endo-tooth").props).toMatchObject({ value: "15", disabled: true });
+    expect(control("endo-case").props).toMatchObject({ value: "17", disabled: true });
+    await click("endo-open-save");
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0][0]).toBe("/api/patients/91/endo");
+    expect(JSON.parse(String(writes()[0][1].body))).toEqual({ toothCode: 15, caseId: 17, kind: "initial" });
+  });
+
+  it("opens the selected existing episode rather than a different active episode", async () => {
+    treatments = [treatment(3, 46), { ...treatment(4, 15), caseId: 17 }];
+    pending();
+    await vi.waitFor(() => expect(control("endo-existing-assessment-17")).toBeTruthy());
+    await click("endo-existing-assessment-17");
+    expect(control("endo-form")).toBeTruthy();
+    expect(writes()).toHaveLength(0);
+    expect(render().nodes.some((node) => node.props["data-testid"] === "endo-open-save")).toBe(false);
+  });
+
+  it("does not use a case from a different patient or infer an invalid tooth from its title", async () => {
+    pending(92);
+    await vi.waitFor(() => expect(control("patient-endo")).toBeTruthy());
+    expect(render().nodes.some((node) => node.props["data-testid"] === "endo-existing-assessment-17")).toBe(false);
+    props.pendingAssessments = [{ ...props.pendingAssessments![0], patientId: 91 }];
+    cases[0].site = "unknown";
+    render();
+    expect(render().nodes.some((node) => node.props["data-testid"] === "endo-existing-assessment-17")).toBe(false);
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("does not offer an active tooth from another case as the same assessment", async () => {
+    treatments = [treatment(3, 15)];
+    pending();
+    await vi.waitFor(() => expect(control("endo-existing-assessment-17").props.disabled).toBe(true));
+    await click("endo-existing-assessment-17");
+    expect(writes()).toHaveLength(0);
+  });
+});
+
 describe("endodontic cockpit integrity", () => {
   it("registers a navigation guard that blocks active saves without prompting or losing the draft", async () => {
     let guard: (() => boolean) | null = null;

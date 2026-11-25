@@ -33,14 +33,49 @@ beforeAll(async () => {
 }, 240_000);
 afterAll(async () => { await browser?.close(); await db?.end(); });
 
-async function open(who: "reception" | "doctorA", path: string): Promise<{ context: BrowserContext; page: Page }> {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 1100 }, locale: "ar-YE" });
+async function open(who: "reception" | "doctorA", path: string, width = 1280): Promise<{ context: BrowserContext; page: Page }> {
+  const context = await browser.newContext({ viewport: { width, height: 1100 }, locale: "ar-YE" });
   const [name, ...value] = h.sessions[who].cookie.split("=");
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
   await page.goto(`${baseUrl}${path}`, { waitUntil: "domcontentloaded" });
   return { context, page };
 }
+
+describe("invoice-linked endodontic assessment", () => {
+  it.each([390, 1280])("keeps exactly one case and invoice through the shortcut at %i px", async (width) => {
+    const { rows: [{ id: pid }] } = await db.query<{ id: number }>(
+      "INSERT INTO patients (patient_number, full_name, primary_doctor_id) VALUES ($1, 'Synthetic exact tooth', $2) RETURNING id",
+      [`IFJ-ENDO-${stamp}-${width}`, doctorId]);
+    const { rows: [{ id: rct }] } = await db.query<{ id: number }>(
+      "INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ($1, 110000, TRUE, TRUE, 'rct') RETURNING id",
+      [`Synthetic exact RCT ${stamp}-${width}`]);
+    const invoiced = await authedMutation("/api/invoices", h.sessions.reception, "POST", JSON.stringify({
+      patientId: pid, currency: "YER", items: [{ serviceId: rct, doctorId, toothCode: 15 }],
+    }));
+    expect(invoiced.status, await invoiced.clone().text()).toBe(201);
+    const data = await invoiced.json() as { clinical: { links: { caseId: number }[] } };
+    const id = data.clinical.links[0].caseId;
+    const counts = async () => (await db.query(
+      `SELECT (SELECT count(*)::int FROM clinical_cases WHERE patient_id=$1) AS cases,
+       (SELECT count(*)::int FROM invoices WHERE patient_id=$1) AS invoices,
+       (SELECT count(*)::int FROM endo_treatments WHERE patient_id=$1) AS episodes`, [pid],
+    )).rows[0];
+    const { context, page } = await open("doctorA", `/patients/${pid}`, width);
+    try {
+      await page.getByRole("button", { name: /بدء التقييم السريري/ }).click();
+      await page.getByTestId(`endo-existing-assessment-${id}`).click();
+      expect(await page.getByTestId("endo-case").inputValue()).toBe(String(id));
+      expect(await page.getByTestId("endo-tooth").inputValue()).toBe("15");
+      expect(await counts()).toEqual({ cases: 1, invoices: 1, episodes: 0 });
+      await page.getByTestId("endo-open-save").click();
+      await page.getByTestId("endo-tooth-15").waitFor();
+      expect(await counts()).toEqual({ cases: 1, invoices: 1, episodes: 1 });
+      const { rows } = await db.query("SELECT case_id, tooth_code FROM endo_treatments WHERE patient_id=$1", [pid]);
+      expect(rows).toEqual([{ case_id: id, tooth_code: 15 }]);
+    } finally { await context.close(); }
+  }, 120_000);
+});
 
 describe("INV-LINK D — invoice-first journey", () => {
   it("reception: preview says a new intake case will be created; a double click saves one invoice", async () => {

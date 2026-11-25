@@ -1,5 +1,6 @@
 "use client";
 
+import type { AssessmentCase } from "@/lib/patient-workflow-cases";
 import type { ClinicalNavigationContext } from "@/lib/patient-navigation";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -200,6 +201,7 @@ class EndoRequestError extends Error {
 }
 
 interface PatientEndoProps {
+  pendingAssessments?: readonly AssessmentCase[];
   onOpenTreatmentEntry?: () => unknown;
   patientId: number; authorityKey?: string; canWrite: boolean; canEditPlans?: boolean; openVisitId: number | null;
   onDraftChange?: (pending: boolean) => void;
@@ -219,7 +221,7 @@ export function PatientEndo(props: PatientEndoProps) {
   return <PatientEndoWorkspace key={JSON.stringify([props.patientId, authority, props.authorityKey ?? "", props.canWrite, props.canEditPlans])} {...props} />;
 }
 
-function PatientEndoWorkspace({ patientId, context, onContextChange, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount, onOpenTreatmentEntry, onClinicalChange, workflowReady = true, workflowIsCurrent }: PatientEndoProps) {
+function PatientEndoWorkspace({ patientId, pendingAssessments = [], context, onContextChange, canWrite, canEditPlans = false, openVisitId, onDraftChange, onNavigationGuardChange, onOpenToday, onOpenPlans, onOpenAccount, onOpenTreatmentEntry, onClinicalChange, workflowReady = true, workflowIsCurrent }: PatientEndoProps) {
   const [treatments, setTreatments] = useState<EndoTreatmentView[] | null>(null);
   const [cases, setCases] = useState<SpecialtyCase[]>([]);
   const [planItems, setPlanItems] = useState<CasePlanItem[]>([]);
@@ -231,7 +233,7 @@ function PatientEndoWorkspace({ patientId, context, onContextChange, canWrite, c
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [openForm, setOpenForm] = useState<{ toothCode: string; caseId: string; kind: string } | null>(null);
+  const [openForm, setOpenForm] = useState<{ toothCode: string; caseId: string; kind: string; assessment?: true } | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [editingVersion, setEditingVersion] = useState<number | null>(null);
   const [addendum, setAddendum] = useState<{ endoVisitId: number; treatmentId: number; text: string; requestKey: string; submitted: boolean } | null>(null);
@@ -431,6 +433,29 @@ function PatientEndoWorkspace({ patientId, context, onContextChange, canWrite, c
   const patchCanal = (index: number, changes: Partial<CanalRowState>) => setForm((current) => current
     ? { ...current, canals: current.canals.map((canal, i) => (i === index ? { ...canal, ...changes } : canal)) } : current);
   const toothOptions = ALL_TEETH.filter((code) => !treatments.some((one) => one.toothCode === code && one.status === "in_progress"));
+  const assessmentTargets = pendingAssessments.flatMap((pending) => {
+    if (pending.patientId !== patientId || pending.specialty !== "endodontics" || !pending.needsAssessment
+      || (context?.clinicalCaseId !== undefined && context.clinicalCaseId !== pending.id)) return [];
+    const known = cases.find((one) => one.id === pending.id && one.patientId === patientId);
+    const tooth = ALL_TEETH.find((code) => String(code) === known?.site);
+    if (!known || tooth === undefined) return [];
+    const matches = treatments.filter((one) => one.caseId === pending.id && one.toothCode === tooth && one.status === "in_progress");
+    const other = treatments.some((one) => one.caseId !== pending.id && one.toothCode === tooth && one.status === "in_progress");
+    return [{ id: pending.id, tooth, existing: matches.length === 1 ? matches[0] : null, blocked: matches.length > 1 || other }];
+  });
+  const assessmentReady = !caseUnavailable && workflowReady && clinicalRead === "ready";
+  const validAssessmentDraft = !openForm?.assessment || assessmentTargets.some((target) =>
+    String(target.id) === openForm.caseId && String(target.tooth) === openForm.toothCode && !target.existing && !target.blocked);
+  const openAssessment = (target: (typeof assessmentTargets)[number]) => {
+    if (!canWrite || !assessmentReady || workflowIsCurrent?.() === false || target.blocked
+      || !referenceRead.current.cases || !referenceRead.current.clinical || !discard()) return;
+    if (target.existing && onContextChange && target.existing.id !== selected?.id) {
+      onContextChange({ ...episodeContext(target.existing), visitId: undefined }); return;
+    }
+    setForm(null); setAddendum(null); setClosing(null); setCrownLink({ crown: "", rct: "" });
+    if (target.existing) { setOpenForm(null); setSelectedId(target.existing.id); startForm(target.existing); return; }
+    setOpenForm({ toothCode: String(target.tooth), caseId: String(target.id), kind: "initial", assessment: true });
+  };
   const crownCandidates = selected ? planItems.filter((item) => item.toothCode === selected.toothCode && item.category === "crown" && item.status !== "cancelled") : [];
   const rctCandidates = selected ? planItems.filter((item) => item.toothCode === selected.toothCode && item.caseId === selected.caseId && item.category === "rct" && item.status !== "cancelled") : [];
 
@@ -473,16 +498,30 @@ function PatientEndoWorkspace({ patientId, context, onContextChange, canWrite, c
           ) : null}
         </div>
 
+        {canWrite && assessmentReady && assessmentTargets.length > 0 ? (
+          <ul aria-label="الحالات المرتبطة بفاتورة وتنتظر التقييم" className="mb-3 flex flex-wrap gap-2">
+            {assessmentTargets.map((target) => (
+              <li key={target.id}>
+                <button type="button" data-testid={`endo-existing-assessment-${target.id}`}
+                  disabled={target.blocked} onClick={() => openAssessment(target)}
+                  className="min-h-11 rounded-lg border border-amber-300 bg-amber-50 px-3 text-sm font-bold text-amber-950 disabled:opacity-50">
+                  افتح تقييم السن {target.tooth}
+                </button>
+                {target.blocked ? <p className="text-xs text-amber-900">توجد نوبة أخرى لهذا السن؛ راجع الربط.</p> : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {openForm && !caseUnavailable ? (
           <div className="mb-3 grid gap-2 rounded-xl border border-navy-100 bg-navy-50/40 p-2 sm:grid-cols-3">
             <label className={label}>السنّ (FDI)
-              <select value={openForm.toothCode} onChange={(event) => setOpenForm({ ...openForm, toothCode: event.target.value })} className={field} data-testid="endo-tooth">
+              <select disabled={openForm.assessment} value={openForm.toothCode} onChange={(event) => setOpenForm({ ...openForm, toothCode: event.target.value })} className={field} data-testid="endo-tooth">
                 <option value="">—</option>
                 {toothOptions.map((code) => <option key={code} value={code}>{code} — {toothName(code)}</option>)}
               </select>
             </label>
             <label className={label}>الحالة التخصصية
-              <select value={openForm.caseId} onChange={(event) => setOpenForm({ ...openForm, caseId: event.target.value })} className={field} data-testid="endo-case">
+              <select disabled={openForm.assessment} value={openForm.caseId} onChange={(event) => setOpenForm({ ...openForm, caseId: event.target.value })} className={field} data-testid="endo-case">
                 <option value="">— حالة جديدة —</option>
                 {cases.map((one) => <option key={one.id as number} value={one.id as number}>{one.title}</option>)}
               </select>
@@ -497,9 +536,9 @@ function PatientEndoWorkspace({ patientId, context, onContextChange, canWrite, c
               <p className="text-xs text-amber-800 sm:col-span-3">لا توجد حالة علاج جذور جارية — يمكنك فتحها هنا مع السنّ.</p>
             ) : null}
             <div className="flex gap-2 sm:col-span-3">
-              <button type="button" data-testid="endo-open-save" disabled={busy || !openForm.toothCode || (caseCreationUncertain && !openForm.caseId)}
+              <button type="button" data-testid="endo-open-save" disabled={busy || !openForm.toothCode || !validAssessmentDraft || (caseCreationUncertain && !openForm.caseId)}
                 onClick={async () => {
-                  if (!referenceRead.current.cases) return;
+                  if (!referenceRead.current.cases || !validAssessmentDraft || (openForm.assessment && (!assessmentReady || workflowIsCurrent?.() === false))) return;
                   const opened = await mutate(async () => {
                     let caseId = openForm.caseId ? Number(openForm.caseId) : null;
                     if (caseId === null) {

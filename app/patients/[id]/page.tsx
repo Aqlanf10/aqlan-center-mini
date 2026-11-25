@@ -581,8 +581,12 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         return {
           label: `بدء التقييم السريري${label ? ` — ${label}` : ""}`,
           run: () => {
+            if (pending && specialty === "endodontics") {
+              void openClinicalContext({ patientId: patient.id, clinicalCaseId: pending.id }, "endo");
+              return;
+            }
             setTab("treatment");
-            setTreatmentSubTab(specialty === "orthodontics" ? "ortho" : specialty === "endodontics" ? "endo" : "cases");
+            setTreatmentSubTab(specialty === "orthodontics" ? "ortho" : "cases");
           },
           primary: true,
         };
@@ -1270,7 +1274,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="endodontics"
                 hint="افتح السنّ في علاج الجذور واختر هذه الحالة — التشخيص والقنوات يسجّلها الطبيب." />
               <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="endodontics" />
-              <PatientEndo {...endoNavigation} patientId={patient.id} onClinicalChange={refreshWorkflow} canWrite={session?.role === "doctor" || admin}
+              <PatientEndo {...endoNavigation} patientId={patient.id} pendingAssessments={summary?.assessmentCases} onClinicalChange={refreshWorkflow} canWrite={session?.role === "doctor" || admin}
                 authorityKey={`${session?.username ?? ""}:${JSON.stringify(session?.permissions ?? {})}`}
                 canEditPlans={admin || session?.permissions?.canEditPlans === true} onDraftChange={trackEndoDraft}
                 openVisitId={draftVisit?.id ?? null} workflowReady={summary !== null} workflowIsCurrent={workflowIsCurrent} />
