@@ -1,4 +1,4 @@
-export const ORTHO_RETURN_REVIEW_MESSAGE = "تعذّر تأكيد الطبيب المسؤول الحالي. راجع الاقتراح أو إعدادات الحالة قبل الحجز.";
+export const ORTHO_RETURN_REVIEW_MESSAGE = "تعذّر تأكيد الطبيب المسؤول الحالي. عيّن الطبيب من بطاقة حالة التقويم، ثم أعد التحقق قبل الحجز.";
 export const ORTHO_RETURN_REVIEW_CODE = "ortho_return_review_required";
 
 export type OrthoReturnBooking = { caseId: number; adjustmentId: number; fingerprint: string };

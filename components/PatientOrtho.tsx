@@ -90,7 +90,7 @@ interface OrthoCase {
   retainer: RetainerType | null; retainerOn: string | null; note: string | null;
   closedAt: string | null; closedBy: string | null; closedNote: string | null;
   baselineKind: "legacy" | null; baselineRecordedAt: string | null; elastics: string | null;
-  responsibleDoctorName: string | null; legacyFinancialMode: LegacyFinancialMode | null;
+  responsibleDoctorId?: number | null; responsibleDoctorName: string | null; legacyFinancialMode: LegacyFinancialMode | null;
   remainingObjectives: string | null;
   /** Absent on older payloads; explicit false means withheld, not an empty album. */
   photosVisible?: boolean;
@@ -846,6 +846,17 @@ function PatientOrthoWorkspace({ patientId, pendingAssessments, context, onConte
                   {/* ────────────────── الركن الأول: مسار الأسلاك والشدّات ────────────────── */}
                   {currentPillar === "wires" && (
                     <div className="space-y-4">
+                      {live ? (
+                        <CaseResponsibleDoctor
+                          key={`${row.id}:${row.responsibleDoctorId ?? "none"}:${row.responsibleDoctorName ?? ""}`}
+                          name={row.responsibleDoctorName}
+                          canAssign={live && session?.role === "admin" && Object.hasOwn(row, "responsibleDoctorId")}
+                          disabled={Boolean(owner.drafts.get("case-patch")?.busy || owner.drafts.get("case-patch")?.uncertain)}
+                          onAssign={(doctorId) => patch(row.id, {
+                            responsibleDoctorId: doctorId, expectedResponsibleDoctorId: row.responsibleDoctorId ?? null,
+                          })}
+                        />
+                      ) : null}
                       {/* لوحة الأسلاك المباشرة على الكرسي (Chairside High-Contrast Wire Board) */}
                       {usesArchwires(row.appliance) ? (
                         <div className="rounded-2xl border-2 border-navy-800 bg-gradient-to-r from-navy-900 to-slate-900 p-4 text-white shadow-xs">
@@ -1410,7 +1421,7 @@ function NextAppointmentCard({
           {clinician ? <p className="mb-2 text-xs font-bold">الطبيب المسؤول: {clinician.name}</p>
             : currentPreview ? <div role="status" className="mb-2 text-xs">
               {ORTHO_RETURN_REVIEW_MESSAGE}
-              {" "}<button type="button" className="underline" onClick={() => setPreviewAttempt((n) => n + 1)}>حدّث الطبيب المسؤول</button>
+              {" "}<button type="button" className="underline" onClick={() => setPreviewAttempt((n) => n + 1)}>أعد التحقق من الطبيب</button>
             </div> : <p role="status" className="mb-2 text-xs">جارٍ التحقق من الطبيب المسؤول…</p>}
           <div className="mb-2 flex flex-wrap gap-2">
             <label className="min-w-[9rem] flex-1">
@@ -2041,6 +2052,54 @@ function LegacyBaselineSummary({ row }: { row: OrthoCase }) {
       {row.remainingObjectives ? (
         <p className="mt-1 whitespace-pre-line"><b>الأهداف المتبقية:</b> {row.remainingObjectives}</p>
       ) : null}
+    </div>
+  );
+}
+
+function CaseResponsibleDoctor({ name, canAssign, disabled, onAssign }: {
+  name: string | null; canAssign: boolean; disabled: boolean; onAssign: (doctorId: number) => Promise<boolean>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [doctors, setDoctors] = useState<{ id: number; name: string }[] | null>(null);
+  const [selected, select] = useState("");
+  const [failed, fail] = useState(false);
+  useEffect(() => {
+    if (!open || !canAssign) return;
+    const controller = new AbortController();
+    void fetch("/api/parties?kind=doctor", { cache: "no-store", signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error("Unavailable");
+      const payload = await response.json();
+      const rows: unknown = Array.isArray(payload) ? payload : payload.balances;
+      if (!Array.isArray(rows)) throw new Error("Unavailable");
+      if (!controller.signal.aborted) setDoctors(rows.filter(row =>
+        typeof row?.id === "number" && row.id > 0 && typeof row?.name === "string" &&
+        row.name.trim() && row.isActive !== false,
+      ));
+    }).catch(() => { if (!controller.signal.aborted) fail(true); });
+    return () => controller.abort();
+  }, [open, canAssign]);
+  const close = () => { setOpen(false); setDoctors(null); select(""); fail(false); };
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-700">
+      <span>الطبيب المسؤول: <strong>{name || "غير معيّن"}</strong></span>
+      {canAssign && !open ? <button type="button" disabled={disabled} onClick={() => setOpen(true)}
+        className="min-h-11 rounded-lg border border-navy-200 bg-white px-3 font-bold text-navy-900 disabled:opacity-50">
+        {name ? "تغيير الطبيب المسؤول" : "تعيين الطبيب المسؤول"}
+      </button> : null}
+      {canAssign && open ? <form className="flex flex-wrap items-center gap-2" onSubmit={async (event) => {
+        event.preventDefault();
+        const doctorId = Number(selected);
+        if (!disabled && doctors?.some(doctor => doctor.id === doctorId) && await onAssign(doctorId)) close();
+      }}>
+        {failed ? <span role="alert">تعذّر تحميل قائمة الأطباء. أغلقها وحاول مجددًا.</span> : null}
+        <select aria-label="اختيار الطبيب المسؤول" value={selected} onChange={(event) => select(event.target.value)}
+          disabled={disabled || !doctors?.length} className="min-h-11 max-w-full rounded-lg border bg-white px-2">
+          <option value="">{doctors === null ? "جارٍ تحميل الأطباء…" : doctors.length ? "اختر طبيبًا" : "لا أطباء متاحون"}</option>
+          {doctors?.map(doctor => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}
+        </select>
+        <button type="submit" disabled={disabled || !selected} className="min-h-11 rounded-lg bg-navy-900 px-3 font-bold text-white disabled:opacity-50">حفظ الطبيب</button>
+        <button type="button" disabled={disabled} onClick={close} className="min-h-11 rounded-lg border px-3">إلغاء</button>
+      </form> : null}
     </div>
   );
 }
