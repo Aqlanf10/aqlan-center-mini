@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionPayload } from "../lib/auth";
+import { canAccessPatient } from "../lib/patient-access";
 import { restrictedRouteAllowed } from "../lib/role-routes";
 import { parseDoctorPermissions } from "../lib/doctor-permissions";
 
@@ -29,8 +30,8 @@ vi.mock("@/lib/db", () => ({
   browsePatients: mocks.browse,
   deletePatientCascade: mocks.delete,
 }));
-import { POST } from "../app/api/patients/route";
-import { PATCH } from "../app/api/patients/[id]/route";
+import { GET, POST } from "../app/api/patients/route";
+import { GET as GET_FILE, PATCH } from "../app/api/patients/[id]/route";
 
 const session: SessionPayload = {
   userId: 10, username: "synthetic-write-doctor", role: "doctor", partyId: 7, expiresAt: 0,
@@ -247,5 +248,145 @@ describe("ordinary receptionist and clinician writes to the same synthetic file"
     expect(mocks.update).toHaveBeenLastCalledWith(patient.id, { birthDate: "2002-01-17", birthYear: 2002 });
     expect((await patch({ birthDate: "" })).status).toBe(200);
     expect(mocks.update).toHaveBeenLastCalledWith(patient.id, { birthDate: null });
+  });
+});
+
+describe("POST patient creation route boundary", () => {
+  it.each(["assistant", "cashier", "accountant"] as const)("denies direct registration for %s before reading the body", async (role) => {
+    mocks.session.mockResolvedValue({ ...session, role });
+    const req = request("POST");
+    const response = await POST(req);
+    expect(response.status).toBe(403);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(req.bodyUsed).toBe(false);
+    expect(mocks.user).not.toHaveBeenCalled();
+    expectNoWrites();
+  });
+
+  it.each([
+    { id: 11 }, { username: "different-synthetic-doctor" },
+    { role: "reception" }, { isActive: false },
+  ])("rejects changed doctor identity before registration: %j", async (change) => {
+    mocks.user.mockResolvedValue({ ...currentDoctor(), ...change });
+    const req = request("POST");
+    const response = await POST(req);
+    expect(response.status).toBe(401);
+    expect(req.bodyUsed).toBe(false);
+    expectNoWrites();
+  });
+});
+
+describe("patient collection cache boundary", () => {
+  it.each(["?q=Synthetic", ""])("keeps receptionist GET responses private and administrative: %s", async (query) => {
+    mocks.session.mockResolvedValue({ ...session, role: "reception" });
+    const clinical = { ...patient, note: "synthetic clinical note", medicalAlert: "synthetic alert" };
+    mocks.search.mockResolvedValue([clinical]);
+    mocks.browse.mockResolvedValue({ rows: [clinical], total: 1 });
+    const response = await GET(new Request("http://test.invalid/api/patients" + query));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    const body = await response.json();
+    const rows = query ? body : body.rows;
+    expect(rows).toEqual([{ id: patient.id, patientNumber: patient.patientNumber, fullName: patient.fullName, phone: patient.phone }]);
+  });
+
+  it("marks successful creation and unauthorized reads as private", async () => {
+    const created = await POST(request("POST"));
+    expect(created.status).toBe(201);
+    expect(created.headers.get("Cache-Control")).toBe("private, no-store");
+    mocks.session.mockResolvedValue(null);
+    const denied = await GET(new Request("http://test.invalid/api/patients"));
+    expect(denied.status).toBe(401);
+    expect(denied.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+
+  it.each([["malformed", 400], ["oversized", 413]])("marks %s body errors as private before writes", async (mode, status) => {
+    const req = new Request("http://test.invalid/api/patients", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(mode === "oversized" ? { "content-length": "999999999" } : {}) },
+      body: "{",
+    });
+    const response = await POST(req);
+    expect(response.status).toBe(status);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expectNoWrites();
+  });
+
+  it("marks search failures as private", async () => {
+    mocks.search.mockRejectedValue(new Error("synthetic search failure"));
+    const response = await GET(new Request("http://test.invalid/api/patients?q=Synthetic"));
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+});
+
+
+describe("GET patient-file scope revalidation", () => {
+  const read = () => GET_FILE(new Request("http://test.invalid/api/patients/91"), {
+    params: Promise.resolve({ id: "91" }),
+  });
+
+  it.each(["missing", "failed"])("rejects a %s account lookup without using the stale session party", async (mode) => {
+    if (mode === "missing") mocks.user.mockResolvedValue(null);
+    else mocks.user.mockRejectedValue(new Error("Synthetic account lookup failure"));
+    expect((await read()).status).toBe(401);
+    expect(mocks.owns).not.toHaveBeenCalled();
+    expect(mocks.file).not.toHaveBeenCalled();
+  });
+
+  it.each([{ id: 11 }, { isActive: false }, { role: "reception" }, { username: "other-synthetic-doctor" }])(
+    "rejects changed account identity even with an all-patient grant: %j", async (change) => {
+      mocks.user.mockResolvedValue({ ...currentDoctor({ canViewAllPatients: true }), ...change });
+      expect((await read()).status).toBe(401);
+      expect(mocks.owns).not.toHaveBeenCalled();
+      expect(mocks.file).not.toHaveBeenCalled();
+    });
+
+  it("rejects a removed party link rather than falling back to the signed session", async () => {
+    mocks.user.mockResolvedValue({ ...currentDoctor(), partyId: null });
+    expect((await read()).status).toBe(403);
+    expect(mocks.owns).not.toHaveBeenCalled();
+    expect(mocks.file).not.toHaveBeenCalled();
+  });
+
+  it("preserves the current explicit all-patient grant and owned-file path", async () => {
+    mocks.user.mockResolvedValue({ ...currentDoctor({ canViewAllPatients: true }), partyId: null });
+    expect((await read()).status).toBe(200);
+    expect(mocks.owns).not.toHaveBeenCalled();
+    mocks.user.mockResolvedValue(currentDoctor());
+    expect((await read()).status).toBe(200);
+    expect(mocks.owns).toHaveBeenCalledExactlyOnceWith(7, patient.id);
+  });
+});
+
+describe("shared doctor patient access authority", () => {
+  it.each([
+    { id: 11 }, { username: "other-synthetic-doctor" },
+    { role: "reception" }, { isActive: false },
+  ])("refuses mismatched account even with an explicit all-patient grant: %j", async (change) => {
+    mocks.user.mockResolvedValue({ ...currentDoctor({ canViewAllPatients: true, canViewXrays: true }), ...change });
+    expect(await canAccessPatient(session, patient.id, "canViewXrays")).toBe(false);
+    expect(mocks.owns).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("refuses invalid current doctor party ID: %s", async (partyId) => {
+    mocks.user.mockResolvedValue({ ...currentDoctor({ canViewXrays: true }), partyId });
+    expect(await canAccessPatient(session, patient.id, "canViewXrays")).toBe(false);
+    expect(mocks.owns).not.toHaveBeenCalled();
+  });
+
+  it("requires the detailed clinical-media grant even for an all-patient doctor", async () => {
+    mocks.user.mockResolvedValue(currentDoctor({ canViewAllPatients: true }));
+    expect(await canAccessPatient(session, patient.id, "canViewXrays")).toBe(false);
+    expect(mocks.owns).not.toHaveBeenCalled();
+  });
+
+  it("preserves owned-patient access and explicit all-patient access for the current doctor", async () => {
+    mocks.user.mockResolvedValue(currentDoctor({ canViewXrays: true }));
+    expect(await canAccessPatient(session, patient.id, "canViewXrays")).toBe(true);
+    expect(mocks.owns).toHaveBeenCalledExactlyOnceWith(7, patient.id);
+    mocks.user.mockResolvedValue({ ...currentDoctor({ canViewAllPatients: true, canViewXrays: true }), partyId: null });
+    expect(await canAccessPatient(session, patient.id, "canViewXrays")).toBe(true);
+    expect(mocks.owns).toHaveBeenCalledTimes(1);
   });
 });

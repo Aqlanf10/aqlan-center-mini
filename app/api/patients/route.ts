@@ -13,8 +13,15 @@ import { isRestrictedRole } from "@/lib/role-routes";
 
 export const dynamic = "force-dynamic";
 
+// Patient identifiers and clinical/financial metadata must never enter a shared cache.
+function patientJson(body: unknown, init?: ResponseInit) {
+  const headers = new Headers(init?.headers);
+  headers.set("Cache-Control", "private, no-store");
+  return NextResponse.json(body, { ...init, headers });
+}
+
 const denied = () =>
-  NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  patientJson({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 const PAGE_SIZE = 25;
 
@@ -35,7 +42,7 @@ export async function GET(request: Request) {
       || user.role !== session.role) return denied();
     if (user.permissions?.canViewAllPatients !== true) {
       if (typeof user.partyId !== "number" || !Number.isSafeInteger(user.partyId) || user.partyId <= 0) {
-        return NextResponse.json({ message: "لا يمكنك عرض المرضى دون ربط حسابك بطبيب." }, { status: 403 });
+        return patientJson({ message: "لا يمكنك عرض المرضى دون ربط حسابك بطبيب." }, { status: 403 });
       }
       doctorPartyId = user.partyId;
     }
@@ -50,7 +57,7 @@ export async function GET(request: Request) {
     });
     if (term.trim()) {
       const rows = await searchPatients(term, 20, doctorPartyId);
-      return NextResponse.json(financeOnly ? rows.map(financeSummary) : rows);
+      return patientJson(financeOnly ? rows.map(financeSummary) : rows);
     }
 
     // بلا كلمة بحث: صفحة من كل المرضى. الحدّ مغلق هنا لا مأخوذ من الطلب — رقم ضخم
@@ -62,46 +69,54 @@ export async function GET(request: Request) {
     // (PAT-3) علَمٌ بعينه — نصٌّ قصير يُقارن حرفيًّا بأعلام المريض (مُعامَلٌ لا يُلصق في SQL).
     const flag = (params.get("flag") ?? "").trim().slice(0, 30) || null;
     if (financeOnly && (flag || ["alert", "ortho", "debt"].includes(filter))) {
-      return NextResponse.json({ message: "هذا المرشّح غير متاح لهذا الحساب." }, { status: 403 });
+      return patientJson({ message: "هذا المرشّح غير متاح لهذا الحساب." }, { status: 403 });
     }
     const { rows, total } = await browsePatients({
       offset: page * PAGE_SIZE, limit: PAGE_SIZE, filter, sort, doctorPartyId, flag,
       today: clinicDateString(new Date(), CLINIC_TIME_ZONE),
     });
-    return NextResponse.json({
+    return patientJson({
       // الأدوار المالية: هوية المريض فقط (عقد الأمن القائم) — لا أعمدة القائمة الإضافية.
       rows: financeOnly ? rows.map(financeSummary) : rows,
       total, page, pageSize: PAGE_SIZE, filter, sort, flag,
     });
   } catch {
-    return NextResponse.json({ message: "تعذّر البحث. أعد المحاولة." }, { status: 500 });
+    return patientJson({ message: "تعذّر البحث. أعد المحاولة." }, { status: 500 });
   }
 }
 
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  // Match the HTTP proxy and patient PATCH: restricted finance and assistant
+  // accounts must never create an archive file, even without proxy mediation.
+  if (!["admin", "doctor", "reception"].includes(session.role)) {
+    return patientJson({ message: "إضافة المرضى غير مصرّح لهذا الدور." },
+      { status: 403 });
+  }
   /* صلاحيات الوكيل المساعد: الطبيب الذي أغلق المدير عليه «إضافة مريض» لا ينشئ
      ملفات — الاستقبال والإدارة يبقى لهم الحق دائمًا. */
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (!user) return denied();
+    if (!user || user.isActive !== true || user.id !== session.userId
+      || user.username.toLowerCase() !== session.username.toLowerCase()
+      || user.role !== session.role) return denied();
     if (user.permissions && user.permissions.canAddPatient === false) {
-      return NextResponse.json(
+      return patientJson(
         { message: "إضافة المرضى مخفية عنك بحسب صلاحياتك." },
         { status: 403 },
       );
     }
   }
   let body: unknown;
-  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
-    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) { bounded.headers.set("Cache-Control", "private, no-store"); return bounded; }
+    return patientJson({ message: "طلب غير صالح." }, { status: 400 });
   }
 
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const validation = validatePatient((body ?? {}) as Record<string, unknown>, today);
   if (!validation.ok) {
-    return NextResponse.json({ message: validation.message, field: validation.field }, { status: 400 });
+    return patientJson({ message: validation.message, field: validation.field }, { status: 400 });
   }
 
   /* (DAY1 — قرار المالك) مريضٌ سابق عليه مبلغٌ من قبل النظام: يُسجَّل رصيده السابق مع
@@ -113,12 +128,12 @@ export async function POST(request: Request) {
     const settings = await getSettings().catch(() => null);
     const access = openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true");
     if (!access.add) {
-      return NextResponse.json({ message: "تسجيل الرصيد السابق ليس من صلاحيتك — اتركه للمدير." }, { status: 403 });
+      return patientJson({ message: "تسجيل الرصيد السابق ليس من صلاحيتك — اتركه للمدير." }, { status: 403 });
     }
     const parsed = parseOpeningInput(rawOpening as Record<string, unknown>, today);
-    if (!parsed.ok) return NextResponse.json({ message: parsed.message, field: "openingBalance" }, { status: 400 });
+    if (!parsed.ok) return patientJson({ message: parsed.message, field: "openingBalance" }, { status: 400 });
     if (await isPeriodLocked(parsed.value.asOfDate)) {
-      return NextResponse.json({ message: "تاريخ الرصيد السابق في فترة مقفلة. اختر تاريخًا بعد تاريخ الإقفال." }, { status: 409 });
+      return patientJson({ message: "تاريخ الرصيد السابق في فترة مقفلة. اختر تاريخًا بعد تاريخ الإقفال." }, { status: 409 });
     }
     opening = parsed.value;
   }
@@ -138,7 +153,7 @@ export async function POST(request: Request) {
     const confirmed = (body as Record<string, unknown>)?.confirmDuplicate === true;
     const registration = await createPatientWithDuplicateReview(validation.value, confirmed);
     if (!registration.ok) {
-      return NextResponse.json(
+      return patientJson(
         { message: duplicateWarning(registration.duplicates), duplicates: registration.duplicates },
         { status: 409 },
       );
@@ -164,14 +179,14 @@ export async function POST(request: Request) {
         });
       } catch {
         // الملف وُلد — والرصيد يُعاد من ملفه؛ يُقال ذلك صراحةً لا يُبلَع.
-        return NextResponse.json({
+        return patientJson({
           ...created,
           warning: "حُفظ المريض لكن تعذّر حفظ الرصيد السابق — أضفه من ملفه ← الحساب ← «رصيد سابق».",
         }, { status: 201 });
       }
     }
-    return NextResponse.json(created, { status: 201 });
+    return patientJson(created, { status: 201 });
   } catch {
-    return NextResponse.json({ message: "تعذّر حفظ المريض. أعد المحاولة." }, { status: 500 });
+    return patientJson({ message: "تعذّر حفظ المريض. أعد المحاولة." }, { status: 500 });
   }
 }

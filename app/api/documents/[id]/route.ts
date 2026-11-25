@@ -87,14 +87,14 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   const session = await requireSession();
   if (!session) return denied();
   if (!isAdmin(session.role)) {
-    return NextResponse.json({ message: "إخفاء المستندات للمدير وحده." }, { status: 403 });
+    return NextResponse.json({ message: "إخفاء المستندات للمدير وحده." }, { status: 403, headers: privateNoStore });
   }
   const id = await idFrom(context);
-  if (!id) return NextResponse.json({ message: "رقم المستند غير صالح." }, { status: 400 });
+  if (!id) return NextResponse.json({ message: "رقم المستند غير صالح." }, { status: 400, headers: privateNoStore });
 
   let body: unknown;
-  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
-    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) { bounded.headers.set("Cache-Control", privateNoStore["Cache-Control"]); return bounded; }
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: privateNoStore });
   }
   const note = typeof (body as Record<string, unknown>)?.note === "string"
     ? String((body as Record<string, unknown>).note) : "";
@@ -102,7 +102,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
   try {
     const found = await getDocumentForDownload(id);
     const result = await removeDocument({ id, actor: session.username, note });
-    if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409 });
+    if (!result.ok) return NextResponse.json({ message: result.message }, { status: 409, headers: privateNoStore });
     void recordAudit({
       action: "document.remove",
       entity: "patient_documents",
@@ -112,8 +112,8 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       actor: session.username,
       actorRole: session.role,
     });
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true }, { headers: privateNoStore });
   } catch {
-    return NextResponse.json({ message: "تعذّر إخفاء المستند." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر إخفاء المستند." }, { status: 500, headers: privateNoStore });
   }
 }

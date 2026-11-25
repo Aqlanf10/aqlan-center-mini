@@ -129,6 +129,18 @@ describe("document association boundary over real authenticated HTTP", () => {
       }
     }
 
+    // A denied removal is also a sensitive response; it must not be cached or
+    // change the document. Use the same synthetic document and real HTTP session.
+    const deniedRemoval = await fetch(`${baseUrl}/api/documents/${document.id}`, {
+      method: "DELETE",
+      headers: { Cookie: h.sessions.doctorA.cookie, Origin: baseUrl, "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json" },
+      body: JSON.stringify({ note: "Synthetic denied removal" }),
+      redirect: "manual",
+    });
+    expect(deniedRemoval.status).toBe(403);
+    expect(deniedRemoval.headers.get("cache-control")).toContain("no-store");
+    expect((await authedGet(`/api/documents/${document.id}`, h.sessions.doctorA)).status).toBe(200);
+
     // Clinical document metadata is sensitive even without the binary payload.
     const listPath = `/api/patients/${ownPatient}/documents`;
     const listed = await authedGet(listPath, h.sessions.doctorA);

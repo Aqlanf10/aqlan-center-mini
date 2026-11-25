@@ -42,9 +42,14 @@ async function doctorBlocked(patientId: number, skipAllGrant = false): Promise<s
   }
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (!skipAllGrant && user?.permissions?.canViewAllPatients) return null;
-    const doctorPartyId = user?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
-    if (!doctorPartyId) {
+    // A second account read may fail or change after session validation.
+    // Never fall back to the stale signed party link or grant a different account.
+    if (!user || user.isActive !== true || user.id !== session.userId
+      || user.username.toLowerCase() !== session.username.toLowerCase()
+      || user.role !== session.role) return "انتهت الجلسة. سجّل الدخول من جديد.";
+    if (!skipAllGrant && user.permissions?.canViewAllPatients === true) return null;
+    const doctorPartyId = user.partyId;
+    if (typeof doctorPartyId !== "number" || !Number.isSafeInteger(doctorPartyId) || doctorPartyId <= 0) {
       return "حساب الطبيب غير مرتبط بجهة سريرية معتمدة. تواصل مع إدارة المركز.";
     }
     const owns = await doctorOwnsPatient(doctorPartyId, patientId).catch(() => false);
