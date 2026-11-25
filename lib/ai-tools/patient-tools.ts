@@ -13,6 +13,7 @@ import {
   listAppointmentsByDate,
   type PatientSummary,
 } from "../db";
+import { receptionPatientLookup } from "./reception-patient";
 import { canAccessPatient } from "../patient-access";
 import type { SessionPayload } from "../auth";
 import { patientBalancesByCurrency, toCurrencyPaymentLikes, balancesText, formatMoney, CLINIC_BASE_CURRENCY } from "../money";
@@ -43,6 +44,10 @@ export async function searchPatient(
   }
 
   try {
+    if ((context.role ?? context.userRole) === "reception") {
+      const { matches, text } = await receptionPatientLookup(term);
+      return { success: matches.length > 0, textSummary: text, data: matches };
+    }
     const doctorScopeId = !context.canViewAllPatients && context.role === "doctor" ? context.doctorPartyId : null;
     let matches: PatientSummary[] = [];
 
@@ -134,9 +139,12 @@ export async function getPatientSummary(
      النظام (canViewPatientPayments: المدير والاستقبال نعم، الطبيب لا افتراضيًا). */
   const canSeeMoney =
     (context.role || context.userRole) === "admin" ||
-    (context.role || context.userRole) === "reception" ||
     context.permissions?.canViewPatientPayments === true;
 
+  if (session.role === "reception" && context.isDbConnected) {
+    const { text, matches } = await receptionPatientLookup(patientId);
+    return { success: matches.some(row => row.id === patientId), textSummary: text };
+  }
   if (!context.isDbConnected) {
     return {
       success: true,

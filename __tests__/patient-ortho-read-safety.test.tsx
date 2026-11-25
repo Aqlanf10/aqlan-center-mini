@@ -19,6 +19,10 @@ const hooks = vi.hoisted(() => ({
   session: null as SessionInfo | null, contexts: new Map<unknown, unknown>(),
   existingRefresh: null as (() => void) | null,
 }));
+// This component harness owns synthetic hook slots. The mounted dialog and cancellation use their dedicated React suite.
+vi.mock("../components/useNearbyBooking", () => ({ useNearbyBooking: () => ({
+  bookingFetch: (url: string, init: RequestInit) => fetch(url, init), nearbyBookingDialog: null,
+}) }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => hooks.session }));
 vi.mock("../components/SettingsProvider", () => ({ useClinicName: () => "Synthetic clinic", useSetting: () => "" }));
 vi.mock("../components/LegacyOnboardingChecklist", () => ({ LegacyOnboardingChecklist: () => null }));

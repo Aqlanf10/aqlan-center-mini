@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { SETTING_DEFAULTS } from "../lib/settings";
 import { SettingsProvider } from "../components/SettingsProvider";
 const h = vi.hoisted(() => ({ cached: "false", stored: "true", fail: false, reads: vi.fn() }));
+vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
 vi.mock("next/font/local", () => ({ default: () => ({ variable: "test-font" }) }));
 vi.mock("../lib/session", () => ({ requireSession: vi.fn(async () => null) }));
 vi.mock("../lib/db", () => ({

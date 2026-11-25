@@ -38,9 +38,12 @@ export function WebCephRecordsGrid({
 }: WebCephRecordsGridProps) {
   const session = useSession();
   const hasSession = Boolean(session?.username?.trim());
-  const canRead = hasSession && (session?.role === "admin" || session?.role === "reception"
+  // Reception can document new external records, never load saved clinical media.
+  const receptionUploadOnly = hasSession && session?.role === "reception";
+  const canRead = hasSession && (session?.role === "admin"
     || (session?.role === "doctor" && session.permissions?.canViewXrays === true));
-  const canUpload = canRead && (session?.role !== "doctor" || session.permissions?.canUploadXrays === true);
+  const canUpload = hasSession && (session?.role === "admin" || receptionUploadOnly
+    || (session?.role === "doctor" && session.permissions?.canUploadXrays === true));
   const permissionScope = JSON.stringify(session?.permissions ?? null);
   const owner = useMemo<Owner>(() => ({ scope: [patientId, orthoCaseId, session?.username, session?.role, permissionScope],
     active: false, ready: false, busy: false, sequence: 0,
@@ -50,6 +53,7 @@ export function WebCephRecordsGrid({
   const [operation, setOperation] = useState<{ owner: Owner; slot?: PhotoView; documentId?: number } | null>(null);
   const [failure, setFailure] = useState<{ owner: Owner; message: string } | null>(null);
   const [selection, setSelection] = useState<{ owner: Owner; stage: PhotoStage | "all" } | null>(null);
+  const [uploadConfirmation, setUploadConfirmation] = useState<{ owner: Owner; message: string } | null>(null);
   const ready = canRead && snapshot?.owner === owner && snapshot.status === "ready";
   const failed = canRead && snapshot?.owner === owner && snapshot.status === "error";
   const loading = canRead && !ready && !failed;
@@ -179,7 +183,7 @@ export function WebCephRecordsGrid({
 
   // تشغيل منتقي الملفات للسلوت المحدد
   const triggerUpload = (slotKey: PhotoView) => {
-    if (!owner.active || !owner.ready || owner.busy || !canUpload) return;
+    if (!owner.active || (!owner.ready && !receptionUploadOnly) || owner.busy || !canUpload) return;
     owner.picker = slotKey;
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -191,7 +195,7 @@ export function WebCephRecordsGrid({
   const onFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     const slotKey = owner.picker;
-    if (!owner.active || !owner.ready || owner.busy || !canUpload || !file || !slotKey) return;
+    if (!owner.active || (!owner.ready && !receptionUploadOnly) || owner.busy || !canUpload || !file || !slotKey) return;
     owner.picker = null; owner.busy = true;
 
     setOperation({ owner, slot: slotKey });
@@ -221,9 +225,13 @@ export function WebCephRecordsGrid({
         return;
       }
 
-      // Revalidate the saved link before offering analysis. Read recovery must
-      // never upload again or create a study from an unverified/stale document.
-      void loadData();
+      // Reception gets an acknowledgement, never a post-upload read/preview.
+      // Clinical staff continue to refresh the gallery before offering analysis.
+      if (receptionUploadOnly) {
+        setUploadConfirmation({ owner, message: "تم رفع الملف للتوثيق. لا يمكنك معاينة المستندات المحفوظة." });
+      } else {
+        void loadData();
+      }
     } catch {
       setError("تعذّر الاتصال أثناء الرفع.");
     } finally {
@@ -297,7 +305,23 @@ export function WebCephRecordsGrid({
         </div>
       )}
       {!canRead ? (
-        <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">عرض سجلات الصور والأشعة غير متاح لهذا الحساب.</p>
+        receptionUploadOnly ? (
+          <div className="space-y-2 rounded-xl bg-slate-50 p-3 text-xs" data-testid="reception-upload-only">
+            <p className="font-bold text-slate-700">رفع صور وأشعة للتوثيق فقط — دون معاينة أو استعراض السجلات المحفوظة.</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {WEBCEPH_RECORD_SLOTS.map((slot) => (
+                <button key={slot.key} type="button" onClick={() => triggerUpload(slot.key)}
+                  disabled={!canUpload || owner.busy}
+                  className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-slate-700 disabled:opacity-50">
+                  رفع {slot.labelAr}
+                </button>
+              ))}
+            </div>
+            {uploadConfirmation?.owner === owner && <p role="status" className="text-emerald-700">{uploadConfirmation.message}</p>}
+          </div>
+        ) : (
+          <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">عرض سجلات الصور والأشعة غير متاح لهذا الحساب.</p>
+        )
       ) : failed ? (
         <div role="alert" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
           <p>{ORTHO_RECORDS_READ_FAILURE}</p>
@@ -312,7 +336,7 @@ export function WebCephRecordsGrid({
         type="file"
         accept="image/*"
         className="hidden"
-        disabled={!ready || !canUpload || Boolean(operation?.owner === owner)}
+        disabled={!canUpload || (!ready && !receptionUploadOnly) || Boolean(operation?.owner === owner)}
         onChange={(e) => void onFileSelected(e)}
       />
 

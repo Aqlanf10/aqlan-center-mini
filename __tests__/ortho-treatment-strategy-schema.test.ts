@@ -46,7 +46,7 @@ describe("reserved0051 case strategy schema ownership", () => {
     expect(RESET_WIPE_TABLES.indexOf("ortho_strategy_revisions")).toBeLessThan(RESET_WIPE_TABLES.indexOf("clinical_cases"));
   });
   it("registers only canonical clinical reader/writer roles and preserves bounded-body admission", () => {
-    expect(HTTP_PERMISSIONS["/api/ortho/[id]/strategy"]).toEqual({ GET: ["admin", "reception", "doctor"], POST: ["admin", "doctor"] });
+    expect(HTTP_PERMISSIONS["/api/ortho/[id]/strategy"]).toEqual({ GET: ["admin", "doctor"], POST: ["admin", "doctor"] });
     const route = readFileSync(new URL("../app/api/ortho/[id]/strategy/route.ts", import.meta.url), "utf8");
     expect(route).toContain("readJsonBody(request, JSON_BODY_LIMIT_BYTES)");
     expect(route).toContain("guardPatient(found.patientId, write)");

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedGet, authedMutation, harness } from "./_server";
+import { authedGet, authedMutation, grantReceptionCollection, harness } from "./_server";
 
 /**
  * (INV-LEGACY / LEGACY-FIX) «علاج بدأ قبل النظام» على التطبيق المبني وقاعدة معزولة اصطناعية.
@@ -59,23 +59,23 @@ const collect = (patient: number, amount: string) => authedMutation("/api/paymen
 }), { "Idempotency-Key": `legacy-http-pay-${stamp}-${++seq}` });
 
 describe("(INV-LEGACY) registration over HTTP", () => {
-  it("reception registers 300,000 / 120,000: 201, remaining 180,000 as the only opening; replay 200; changed body 409; duplicate 409", async () => {
+  it("admin registers 300,000 / 120,000: 201, remaining 180,000 as the only opening; replay 200; changed body 409; duplicate 409", async () => {
     const patient = await newPatient();
     const body = { serviceId: rctService, toothCode: 36, idempotencyKey: `legacy:http-${stamp}` };
-    const created = await post("reception", patient, body);
+    const created = await post("admin", patient, body);
     expect(created.status).toBe(201);
     const first = await json(created) as { agreement: { id: number; remainingMinor: number; openingEffect: string }; replayed: boolean };
     expect(first.agreement).toMatchObject({ remainingMinor: 180_000, openingEffect: "created" });
     expect(first.replayed).toBe(false);
 
-    const replay = await post("reception", patient, body);
+    const replay = await post("admin", patient, body);
     expect(replay.status).toBe(200);
     expect(((await json(replay)) as { agreement: { id: number } }).agreement.id).toBe(first.agreement.id);
-    const conflict = await post("reception", patient, { ...body, previouslyPaidAmount: "100000" });
+    const conflict = await post("admin", patient, { ...body, previouslyPaidAmount: "100000" });
     expect(conflict.status).toBe(409);
     expect((await json(conflict)).message).toContain("أُرسل سابقًا");
 
-    const duplicate = await post("reception", patient, { serviceId: rctService, toothCode: 36 });
+    const duplicate = await post("admin", patient, { serviceId: rctService, toothCode: 36 });
     expect(duplicate.status).toBe(409);
     const duplicatePayload = await json(duplicate);
     expect(duplicatePayload.message).toMatch(ARABIC);
@@ -99,7 +99,7 @@ describe("(INV-LEGACY) registration over HTTP", () => {
     ];
     for (const body of cases) {
       for (const send of [post, preview]) {
-        const response = await send("reception", patient, body);
+        const response = await send("admin", patient, body);
         expect({ body, status: response.status }).toEqual({ body, status: 400 });
         expect((await json(response)).message).toMatch(ARABIC);
       }
@@ -107,15 +107,15 @@ describe("(INV-LEGACY) registration over HTTP", () => {
     const { rows: [consult] } = await db.query<{ id: number }>(
       `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ($1, 5000, TRUE, TRUE, 'consultation') RETURNING id`,
       [`كشف ${stamp}`]);
-    const financial = await post("reception", patient, { serviceId: consult.id });
+    const financial = await post("admin", patient, { serviceId: consult.id });
     expect(financial.status).toBe(400);
     expect((await json(financial)).message).toContain("خدمةً علاجية");
     expect(await money(patient)).toEqual({ payments: 0, invoices: 0, opening: null });
   });
 
-  it("doctor, cashier and accountant cannot register or preview (403 Arabic, before the body); anonymous 401; unknown patient 404", async () => {
+  it("reception, doctor, cashier and accountant cannot register or preview (403 Arabic, before the body); anonymous 401; unknown patient 404", async () => {
     const patient = await newPatient();
-    for (const who of ["doctorA", "cashier", "accountant"] as const) {
+    for (const who of ["reception", "doctorA", "cashier", "accountant"] as const) {
       for (const path of ["legacy-treatments", "legacy-treatments/preview"]) {
         const response = await authedMutation(`/api/patients/${patient}/${path}`, h.sessions[who], "POST", "{}");
         expect({ who, path, status: response.status }).toEqual({ who, path, status: 403 });
@@ -146,10 +146,10 @@ describe("(LEGACY-FIX) historical amounts are not today's catalog price, and no 
     const agreedMinor = Number(agreed) * (currency === "YER" ? 1 : 100);
     expect(agreedMinor).not.toBe(currency === "YER" ? service.yer : currency === "SAR" ? service.sar : service.usd);
     const body = { serviceId: service.id, toothCode: 36, currency, agreedAmount: agreed, previouslyPaidAmount: paid };
-    const seen = await preview("reception", patient, body);
+    const seen = await preview("admin", patient, body);
     expect(seen.status).toBe(200);
     expect(await json(seen)).toMatchObject({ refusal: null, preview: { opening: { effect: "created", afterMinor: remaining, currency } } });
-    const saved = await post("reception", patient, body);
+    const saved = await post("admin", patient, body);
     expect(saved.status).toBe(201);
     expect((await db.query(`SELECT currency, amount_minor::int AS amount FROM patient_opening_balances WHERE patient_id = $1`, [patient])).rows)
       .toEqual([{ currency, amount: remaining }]);
@@ -165,14 +165,14 @@ describe("(LEGACY-FIX) historical amounts are not today's catalog price, and no 
     const patient = await newPatient();
     const { rows: [service] } = await db.query<{ id: number }>(`INSERT INTO services (name, price_minor, is_active, price_configured, category)
       VALUES ($1, 1, TRUE, TRUE, 'rct') RETURNING id`, [`عصب بسعر 1 ${stamp}`]);
-    const invoice = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify({
+    const invoice = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify({
       patientId: patient, currency: "YER", items: [{ serviceId: service.id, price: "1", quantity: 1, toothCode: 11, caseId: "" }],
     }));
     expect(invoice.status).toBe(200);
     expect(((await json(invoice)) as { lines: { financialReviewRequired?: boolean }[] }).lines[0].financialReviewRequired).toBe(true);
-    const seen = await preview("reception", patient, { serviceId: service.id, toothCode: 11 });
+    const seen = await preview("admin", patient, { serviceId: service.id, toothCode: 11 });
     expect(await json(seen)).toMatchObject({ refusal: null });
-    expect((await post("reception", patient, { serviceId: service.id, toothCode: 11 })).status).toBe(201);
+    expect((await post("admin", patient, { serviceId: service.id, toothCode: 11 })).status).toBe(201);
   });
 
   it("an ordinary invoice price override still needs its reason", async () => {
@@ -190,13 +190,13 @@ describe("(LEGACY-FIX) historical amounts are not today's catalog price, and no 
       VALUES ($1, 300000, TRUE, TRUE, 'ortho') RETURNING id`, [`تقويم نطاق ${stamp}-${seq}`]);
     await db.query(`INSERT INTO ortho_cases (patient_id, appliance, arches, status, start_date, created_by)
       VALUES ($1, 'fixed_metal', 'lower', 'active', '2026-01-01', 'dr')`, [patient]);
-    const seen = await preview("reception", patient, { serviceId: ortho.id, scope: "upper" });
+    const seen = await preview("admin", patient, { serviceId: ortho.id, scope: "upper" });
     expect(await json(seen)).toMatchObject({ refusal: "ortho_scope_mismatch", refusalMessage: expect.stringMatching(ARABIC) });
-    const saved = await post("reception", patient, { serviceId: ortho.id, scope: "upper" });
+    const saved = await post("admin", patient, { serviceId: ortho.id, scope: "upper" });
     expect(saved.status).toBe(409);
     expect(await money(patient)).toEqual({ payments: 0, invoices: 0, opening: null });
     expect((await db.query(`SELECT 1 FROM clinical_cases WHERE patient_id = $1`, [patient])).rows).toHaveLength(0);
-    const matching = await post("reception", patient, { serviceId: ortho.id, scope: "lower" });
+    const matching = await post("admin", patient, { serviceId: ortho.id, scope: "lower" });
     expect(matching.status).toBe(201);
   });
 });
@@ -205,7 +205,7 @@ describe("(LEGACY-FIX) the legacy preview and the unchanged invoice price author
   it("previews from the agreement data with the save decision, writes nothing, and the invoice preview still refuses a placeholder price", async () => {
     const patient = await newPatient();
     const body = { serviceId: bridgeService, toothCode: 14, episodeTeeth: [14, 15, 16] };
-    const seen = await preview("reception", patient, body);
+    const seen = await preview("admin", patient, body);
     expect(seen.status).toBe(200);
     expect(await json(seen)).toMatchObject({ refusal: null, preview: {
       case: { mode: "new" }, opening: { effect: "created", afterMinor: 180_000, currency: "YER" } } });
@@ -213,28 +213,29 @@ describe("(LEGACY-FIX) the legacy preview and the unchanged invoice price author
     expect((await db.query(`SELECT 1 FROM treatment_plans WHERE patient_id = $1`, [patient])).rows).toHaveLength(0);
 
     // Root cause of the earlier 400: the form borrowed this invoice preview with price "1". It must keep refusing it.
-    const borrowed = await authedMutation("/api/invoices/clinical-preview", h.sessions.reception, "POST", JSON.stringify({
+    const borrowed = await authedMutation("/api/invoices/clinical-preview", h.sessions.admin, "POST", JSON.stringify({
       patientId: patient, currency: "YER", items: [{ serviceId: bridgeService, price: "1", quantity: 1, toothCode: 14, episodeTeeth: [14, 15, 16], caseId: "" }],
     }));
     expect(borrowed.status).toBe(400);
     expect((await json(borrowed)).message).toMatch(ARABIC);
 
-    expect((await post("reception", patient, body)).status).toBe(201);
-    const again = await preview("reception", patient, { serviceId: bridgeService, toothCode: 15, episodeTeeth: [15] });
+    expect((await post("admin", patient, body)).status).toBe(201);
+    const again = await preview("admin", patient, { serviceId: bridgeService, toothCode: 15, episodeTeeth: [15] });
     expect(again.status).toBe(200);
     expect(await json(again)).toMatchObject({ refusal: "duplicate_live", refusalMessage: expect.stringMatching(ARABIC) });
   });
 
   it("an old payment entered as a general receipt stops registration for review in preview and save; the receipt is untouched", async () => {
     const patient = await newPatient();
+    await grantReceptionCollection(h, patient);
     const general = await authedMutation("/api/payments", h.sessions.reception, "POST", JSON.stringify({
       patientId: patient, kind: "payment", currency: "YER", amount: "120000", method: "cash", invoiceId: null, planId: null, openingCurrency: null, note: "دفعة قديمة",
     }), { "Idempotency-Key": `legacy-http-general-${stamp}` });
     expect(general.status).toBeLessThan(300);
     const body = { serviceId: rctService, toothCode: 21 };
-    const seen = await preview("reception", patient, body);
+    const seen = await preview("admin", patient, body);
     expect(await json(seen)).toMatchObject({ refusal: "prior_receipts_review", refusalMessage: expect.stringContaining("مراجعة") });
-    const saved = await post("reception", patient, body);
+    const saved = await post("admin", patient, body);
     expect(saved.status).toBe(409);
     expect((await json(saved)).message).toContain("لا يصحّحها تلقائيًا");
     expect(await money(patient)).toEqual({ payments: 1, invoices: 0, opening: null });
@@ -244,13 +245,16 @@ describe("(LEGACY-FIX) the legacy preview and the unchanged invoice price author
 
   it("a real 20,000 collection after registration lowers 180,000 to 160,000 and is the only receipt", async () => {
     const patient = await newPatient();
-    expect((await post("reception", patient, { serviceId: rctService, toothCode: 46 })).status).toBe(201);
+    expect((await post("admin", patient, { serviceId: rctService, toothCode: 46 })).status).toBe(201);
     expect(await balance(patient)).toBe(180_000);
+    expect((await collect(patient, "20000")).status).toBe(403);
+    await grantReceptionCollection(h, patient);
     const paid = await collect(patient, "20000");
     expect(paid.status).toBeLessThan(300);
     expect(await balance(patient)).toBe(160_000);
     expect(await money(patient)).toEqual({ payments: 1, invoices: 0, opening: "180000" });
-    const list = await json(await authedGet(`/api/patients/${patient}/legacy-treatments`, h.sessions.reception)) as {
+    expect((await authedGet(`/api/patients/${patient}/legacy-treatments`, h.sessions.reception)).status).toBe(403);
+    const list = await json(await authedGet(`/api/patients/${patient}/legacy-treatments`, h.sessions.admin)) as {
       agreements: { agreedMinor: number; previouslyPaidMinor: number; remainingMinor: number }[] };
     expect(list.agreements[0]).toMatchObject({ agreedMinor: 300_000, previouslyPaidMinor: 120_000, remainingMinor: 180_000 });
   });
@@ -260,7 +264,7 @@ describe("(INV-LEGACY) voiding: ordinary and manager-authorized, admin only", ()
   const voidPath = (patient: number, agreement: number) => `/api/patients/${patient}/legacy-treatments/${agreement}/void`;
   const registered = async () => {
     const patient = await newPatient();
-    const created = await post("reception", patient, { serviceId: rctService, toothCode: 47 });
+    const created = await post("admin", patient, { serviceId: rctService, toothCode: 47 });
     return { patient, agreement: ((await json(created)) as { agreement: { id: number } }).agreement.id };
   };
 
@@ -286,6 +290,7 @@ describe("(INV-LEGACY) voiding: ordinary and manager-authorized, admin only", ()
 
   it("with a collection: ordinary refuses; manager-authorized needs a current preview of the same mode, then voids within the principal bound", async () => {
     const { patient, agreement } = await registered();
+    await grantReceptionCollection(h, patient);
     expect((await collect(patient, "20000")).status).toBeLessThan(300);
 
     const ordinary = await authedMutation(voidPath(patient, agreement), h.sessions.admin, "POST", JSON.stringify({ reason: "خطأ إدخال" }));

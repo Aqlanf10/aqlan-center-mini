@@ -21,9 +21,11 @@ import {
 } from "@/lib/patient";
 
 import { toWhatsAppNumber } from "@/lib/reminders";
+import { ReceptionCollectionAccount } from "@/components/patient/ReceptionCollectionAccount";
 import { PatientLedger } from "@/components/PatientLedger";
 import { LegacyHistory } from "@/components/LegacyHistory";
 import { ClinicalVisit } from "@/components/ClinicalVisit";
+import { ReceptionAgreementActions } from "@/components/ReceptionAgreementActions";
 import { PatientPlans } from "@/components/PatientPlans";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
@@ -47,6 +49,11 @@ import { ChairsideTabletView } from "@/components/ChairsideTabletView";
 import { VitalsModal } from "@/components/VitalsModal";
 import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
 import { PatientContactPanel, PatientFlagChips } from "@/components/PatientContactPanel";
+import { CollectionAssignment } from "@/components/patient/CollectionAssignment";
+import { ReceptionPatientEditor } from "@/components/patient/ReceptionPatientEditor";
+import {
+  makeReceptionPatientForm, patientIdentityEditMode, type AdministrativePatientChange,
+} from "@/lib/patient-administrative-edit";
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
@@ -131,6 +138,9 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const router = useRouter();
   const session = useSession();
   const admin = isAdmin(session?.role);
+  const operational = session?.role === "assistant" || session?.role === "reception";
+  const identityEditMode = patientIdentityEditMode(session);
+  const canViewContact = session?.role === "doctor" || admin || session?.role === "reception";
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
 
@@ -324,7 +334,8 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     onOpenPlans: (context: ClinicalNavigationContext) => openClinicalContext(context, "plans"),
     onOpenAccount: summary?.canSeeFinancial ? (context: ClinicalNavigationContext) => openClinicalContext(context, "account") : undefined,
   };
-  const [editing, setEditing] = useState(false);
+  const [editingOwner, setEditingOwner] = useState<typeof alertOwner | null>(null);
+  const editing = editingOwner === alertOwner;
 
   /** طلبان لا خمسة: ملخص الرحلة يغني عن تحميل كل وحدة بكامل تفاصيلها (§٤٨). */
   const load = useCallback(async (workflowOnly = false) => {
@@ -349,7 +360,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     setLoading(true);
     try {
       const [patientRes, workflowRes] = await Promise.all([
-        workflowOnly ? Promise.resolve(null) : read(`/api/patients/${id}`),
+        workflowOnly ? Promise.resolve(null) : read(`/api/patients/${id}${operational ? "?projection=workspace" : ""}`),
         read(`/api/patients/${id}/workflow`),
       ]);
 
@@ -413,7 +424,16 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
     } finally {
       if (current()) setLoading(false);
     }
-  }, [id, alertOwner]);
+  }, [id, alertOwner, operational]);
+
+  const applyAdministrativeChange = (change: AdministrativePatientChange) => {
+    if (!alertOwner.active || acceptedFileOwner.current !== alertOwner) return false;
+    setFile((previous) => previous?.patient.id === Number(id)
+      ? { ...previous, patient: { ...previous.patient, ...change } } : previous);
+    // Supersede any older full-file read without requesting a new full file.
+    void load(true);
+    return true;
+  };
 
   const refreshWorkflow = useCallback(() => {
     if (alertOwner.active && acceptedFileOwner.current === alertOwner) void load(true);
@@ -897,10 +917,13 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                   className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-emerald-800 hover:bg-emerald-50">
                   📋 إرشادات العناية بعد العلاج
                 </button>
-                <button type="button" onClick={() => setEditing((open) => !open)}
-                  className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
-                  ✏️ تعديل بيانات الملف
-                </button>
+                {identityEditMode ? (
+                  <button type="button" onClick={() => setEditingOwner((owner) =>
+                    owner === alertOwner && identityEditMode === "clinical" ? null : alertOwner)}
+                    className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-navy-800 hover:bg-slate-50">
+                    ✏️ {identityEditMode === "administrative" ? "تعديل البيانات الإدارية" : "تعديل بيانات الملف"}
+                  </button>
+                ) : null}
                 {summary?.canSeeFinancial ? (
                   <a href={`/print/statement/${patient.id}`} target="_blank" rel="noopener"
                     className="block rounded-lg px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
@@ -1043,15 +1066,27 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
         </p>
       ) : null}
 
-      {editing ? (
+      {editing && identityEditMode === "administrative" ? (
+        <ReceptionPatientEditor
+          patientId={patient.id}
+          initial={makeReceptionPatientForm(patient)}
+          onSaved={(change) => {
+            if (!applyAdministrativeChange(change)) return;
+            setEditingOwner(null);
+          }}
+          onCancel={() => setEditingOwner(null)}
+        />
+      ) : editing && identityEditMode === "clinical" ? (
         <PatientEditor
           patient={patient}
           onSaved={(medicalAlert) => {
             if (!confirmPatientAlert(medicalAlert)) return;
-            setEditing(false);
+            setEditingOwner(null);
             void load();
           }}
-          onError={setError}
+          onError={(message) => {
+            if (alertOwner.active && acceptedFileOwner.current === alertOwner) setError(message);
+          }}
         />
       ) : null}
 
@@ -1141,11 +1176,15 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           {/* (PAT-2) التاريخ الطبي المنظَّم — ليس للأدوار المالية (الخادم يرفضه لهم أصلًا). */}
           {!isRestrictedRole(session?.role) ? <MedicalHistoryPanel patientId={patient.id} /> : null}
           {/* (PAT-3) الأعلام والبريد والقناة المفضّلة وموافقات التواصل. */}
-          {!isRestrictedRole(session?.role) ? (
+          {canViewContact ? (
             <PatientContactPanel
               patient={patient}
-              canEdit
-              onPatientChange={(updated) => setFile((prev) => (prev ? { ...prev, patient: updated } : prev))}
+              canEdit={identityEditMode !== null}
+              onAdministrativeChange={identityEditMode === "administrative" ? applyAdministrativeChange : undefined}
+              onPatientChange={(updated) => {
+                if (!alertOwner.active || acceptedFileOwner.current !== alertOwner) return;
+                setFile((prev) => prev?.patient.id === updated.id ? { ...prev, patient: updated } : prev);
+              }}
             />
           ) : null}
           {/* (PAT-4) العائلة والضامن — الأرصدة لمن يرى المال وحده (الخادم يفرضها). */}
@@ -1243,20 +1282,24 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             </section>
           )}
 
-          {treatmentSubTab === "plans" && (
+          {treatmentSubTab === "plans" && (session?.role === "reception"
+            ? <ReceptionAgreementActions key={JSON.stringify([contextAuthority, patient.id, "approval"])} patientId={patient.id} view="approval" />
+            : (
             <section aria-label="خطة العلاج">
               <PatientPlans onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} patientId={patient.id} context={clinicalContext.context} onOpenClinicalContext={openClinicalContext} onNavigationGuardChange={trackPlansGuard} />
             </section>
-          )}
+          ))}
 
-          {treatmentSubTab === "ortho" && (
+          {treatmentSubTab === "ortho" && (session?.role === "reception"
+            ? <ReceptionAgreementActions key={JSON.stringify([contextAuthority, patient.id, "links"])} patientId={patient.id} view="links" />
+            : (
             <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />
               <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="orthodontics" />
               <PatientOrtho onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} onOpenAccount={summary?.canSeeFinancial ? openExistingAccount : undefined} patientId={patient.id} context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)} onContextChange={(context) => openClinicalContext(context, "ortho")} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
             </section>
-          )}
+          ))}
 
           {treatmentSubTab === "lab" && (
             <section aria-label="طلبات المعمل والتركيبات">
@@ -1337,15 +1380,18 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           onChanged={() => void load()}
           onOpenTabletMode={() => setShowTabletMode(true)}
         />
+      ) : tab === "account" && session?.role === "reception" ? (
+        <ReceptionCollectionAccount key={JSON.stringify([patient.id, session.username])} patientId={patient.id} actor={session.username} patientName={patient.fullName} />
       ) : tab === "account" ? (
         <>
+          {admin && <CollectionAssignment key={patient.id} patientId={patient.id} />}
           <PatientLedger patientId={patient.id} selectionContextKey={JSON.stringify([contextAuthority, location.context ?? null, location.contextError ?? null, clinicalContext.ready, clinicalContext.error ?? null])} onClinicalChange={refreshWorkflow} entryRequestKey={treatmentEntryRequest?.owner === alertOwner ? treatmentEntryRequest.key : 0} onNavigationGuardChange={trackAccountGuard} onEntryRequestConsumed={(key) => {
             setTreatmentEntryRequest(previous => previous?.owner === alertOwner && previous.key === key ? null : previous);
           }} accountDetails={<>
             <p className="mb-2 text-xs text-slate-500">القيمة المخططة وتقدم العمل منفصلان عن الدَّين. الفاتورة المعتمدة تدخل رصيد الحساب مرة واحدة فقط؛ لا تجمع هذه الأرقام مع المستحق.</p>
         {/* Account details: separate obligations and clinical work, never added to ledger totals. */}
         {/* Each agreement is a source-level reference already included in the ledger. */}
-        {accountHeader && summary?.financial
+        {!operational && accountHeader && summary?.financial
           ? (summary.financial.byCurrency
               ? (Object.entries(summary.financial.byCurrency) as [Currency, PatientWorkflowFinancialBucket][])
                 .filter(([, bucket]) => hasPatientFinancialActivity(bucket))

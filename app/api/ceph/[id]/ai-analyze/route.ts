@@ -38,6 +38,7 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "doctor" && session.role !== "admin") return NextResponse.json({ message: "للطاقم السريري المخوّل فقط." }, { status: 403 });
 
   const id = await idFrom(context);
   if (!id) return NextResponse.json({ message: "رقم التحليل غير صالح." }, { status: 400 });

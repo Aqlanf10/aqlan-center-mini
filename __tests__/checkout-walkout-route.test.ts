@@ -15,7 +15,16 @@ beforeEach(() => { vi.clearAllMocks(); state.session = { username: "synthetic", 
   state.authorize.mockResolvedValue({ ok: true, patientId: 7 }); state.see.mockResolvedValue(true); state.owner.mockResolvedValue({ found: true, patientId: 7 });
   state.reader.mockReset().mockResolvedValue({ walkout, summary: [], dueRecommendation, today: "2026-10-20" }); state.handoff.mockResolvedValue(null); });
 describe("authorized checkout recommendation transport", () => {
+  it("returns only administrative and authorized collection data to reception", async () => {
+    state.reader.mockResolvedValue({ walkout: { ...walkout, treatmentDone: "private clinical notes",
+      lines: [{ code: "private treatment" }], payments: [{ receiptNumber: "private peer receipt" }] },
+      summary: [], dueRecommendation, today: "2026-10-20" });
+    const response = await get();
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ patientId: 7, lines: [], payments: [], treatmentDone: null, dueRecommendation });
+  });
   it("returns the composed snapshot unchanged with private no-store and server clinic date", async () => {
+    state.session = { username: "synthetic-manager", role: "admin" };
     const response = await get(); expect(response.status).toBe(200); expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(await response.json()).toEqual({ ...walkout, summary: [], dueRecommendation, signedToday: true });
     expect(state.authorize).toHaveBeenCalledWith(state.session, 10); expect(state.see).toHaveBeenCalledWith(state.session, 7); expect(state.reader).toHaveBeenCalledWith(10);

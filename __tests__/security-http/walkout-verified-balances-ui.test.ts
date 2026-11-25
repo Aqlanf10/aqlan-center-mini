@@ -20,14 +20,14 @@ const patient = { id: patientId, patientNumber: "SYNTHETIC-WALKOUT-98781", fullN
 const money = (balanceMinor: number) => ({ balanceMinor, invoicedMinor: 0, paidMinor: 0, openingMinor: balanceMinor,
   agreedMinor: 999999, treatmentDoneMinor: 0, remainingTreatmentMinor: 999999, approvedAgreements: null, classicInstallments: { count: 1, totalMinor: 999999, paidMinor: 0, remainingMinor: 999999 } });
 const workflow = () => ({ patient, openVisit: null,
-  lastVisit: { id: visitId, date: "2026-10-09", treatmentDone: "شدّة موثقة", proceduresSummary: null, nextPlan: null },
+  lastVisit: { id: visitId, date: "2026-10-09", treatmentDone: null, proceduresSummary: null, nextPlan: null },
   nextAppointment: null, activePlans: [], plannedVisits: [], counts: { visits: 1, openLabOrders: 0, documents: 0, orthoCase: false },
   financial: { ...money(180000), byCurrency: { YER: money(180000), SAR: money(2300), USD: money(0) } },
   alerts: [], canSeeFinancial: true, assessmentCases: [], legacyCases: [] });
 const walkout = () => ({ dueRecommendation: buildCheckoutDueRecommendation({ patientId, visitInvoiceId: null,
   current: { YER: 180000, SAR: 2300, USD: 0 }, sources: [] }), visitId, patientId, patientName: patient.fullName, patientNumber: patient.patientNumber,
   arrivedAt: "2026-10-09T08:00:00Z", signedAt: "2026-10-09T09:00:00Z", signedToday: true, deferred: false,
-  lines: [], orthoAdjustment: { id: 98783, billingClass: "LEGACY_INCLUDED", pendingDecision: false, decision: null },
+  lines: [], orthoAdjustment: null,
   invoice: null, payments: [], nextAppointment: null,
   balances: [{ currency: "YER", balanceMinor: 180000 }, { currency: "SAR", balanceMinor: 2300 }],
   checkout: { previous: { YER: 180000, SAR: 2300, USD: 0 }, current: { YER: 180000, SAR: 2300, USD: 0 },
@@ -79,20 +79,18 @@ describe("built patient walkout verifies balances for reception", () => {
         }
         await json(route, body);
       }
+      else if (method === "GET" && path === "/api/opening-balances/access" && url.search === "") {
+        await json(route, { add: false, edit: false });
+      }
       else if (path === `/api/patients/${patientId}/ledger`) {
-        const balance = (dueMinor: number) => ({ billedMinor: 0, collectedMinor: 0, openingMinor: dueMinor, dueMinor });
-        const balances = { YER: balance(foreignCurrency ? 0 : 180000), SAR: balance(foreignCurrency ? 0 : 2300), USD: balance(0) };
-        if (foreignCurrency) balances[foreignCurrency] = balance(2300);
-        balances.SAR.billedMinor = 5000; balances.SAR.collectedMinor = 5000;
+        const current = { YER: foreignCurrency ? 0 : 180000, SAR: foreignCurrency ? 0 : 2300, USD: 0 };
+        if (foreignCurrency) current[foreignCurrency] = 2300;
         await json(route, {
-          invoices: [{ id: 98784, invoiceNumber: "SYN-PAID", status: "paid", patientId, totalMinor: 5000, discountMinor: 0,
-            baseCurrency: "SAR", note: null, createdAt: "2026-10-09T09:00:00Z", items: [] }],
-          payments: [{ id: 98786, receiptNumber: "SYN-PAID-RECEIPT", patientId, invoiceId: 98784, planId: null,
-            openingCurrency: null, kind: "payment", amountMinor: 5000, currency: "SAR", baseAmountMinor: 7000,
-            exchangeRate: 140, method: "cash", note: null, createdAt: "2026-10-09T09:00:00Z" }],
-          plans: [], opening: null, baseCurrency: "YER",
-          balance: balances.YER, balances, openings: (foreignCurrency ? [foreignCurrency] : ["YER", "SAR"] as const).map(currency => ({ patientId, currency, amountMinor: currency === "YER" ? 180000 : 2300, asOfDate: "2026-10-09", note: null })),
-          openingAccess: { add: false, edit: false }, legacyBalanceArrangements: [], legacyOpeningPositions: [], legacyArrangementAccess: { manage: false } });
+          patientId, invoices: [], payments: [], plans: [],
+          openings: (["YER", "SAR", "USD"] as const).filter(currency => current[currency] > 0)
+            .map(currency => ({ currency, dueMinor: current[currency] })),
+          dueRecommendation: buildCheckoutDueRecommendation({ patientId, visitInvoiceId: null, current, sources: [] }),
+        });
       }
       else if (method === "GET" && path === `/api/patients/${patientId}/treatment-financial-context` && url.search === "") {
         const position = (dueMinor: number) => ({ billedMinor: 0, collectedMinor: 0, openingMinor: dueMinor, dueMinor });
@@ -167,10 +165,10 @@ describe("built patient walkout verifies balances for reception", () => {
       await expect.poll(() => checkout.innerText()).toContain(formatMoney(180000, "YER"));
       expect(await checkout.innerText()).toContain(formatMoney(2300, "SAR"));
       expect(await checkout.innerText()).not.toContain(formatMoney(182300, "YER"));
-      expect(await checkout.innerText()).toContain("شدّة تقويم");
-      expect(await checkout.innerText()).toContain("مشمول بالعلاج السابق");
+      expect(await checkout.innerText()).not.toContain("شدّة تقويم");
+      expect(await checkout.innerText()).not.toContain("مشمول بالعلاج السابق");
       expect(await checkout.innerText()).not.toContain("لا مبلغ مطلوب لهذه الزيارة");
-      expect(await checkout.getByRole("link", { name: "🖨️ ملخّص المغادرة" }).getAttribute("href")).toBe(`/print/walkout/${visitId}`);
+      expect(await checkout.getByRole("link", { name: "🖨️ ملخّص المغادرة" }).count()).toBe(0);
       await page.reload({ waitUntil: "domcontentloaded" });
       await expect.poll(() => checkout.innerText()).toContain(formatMoney(180000, "YER"));
       for (const failure of ["http500", "json", "null", "empty", "missing", "amount", "foreign"] as const) {
@@ -228,7 +226,7 @@ describe("built patient walkout verifies balances for reception", () => {
       accountPage.on("pageerror", error => errors.push(error.message));
       expect(paymentAttempts).toHaveLength(0);
       expect(await checkout.getAttribute("data-financial-state")).toBe("verified");
-      await accountPage.getByRole("button", { name: "قبض دفعة", exact: true }).click();
+      await accountPage.getByRole("button", { name: "تسجيل تحصيل", exact: true }).click();
       const dialog = accountPage.getByRole("dialog", { name: "تحصيل دفعة", exact: true });
       await dialog.waitFor();
       await dialog.getByLabel("رصيد سابق", { exact: true }).selectOption("YER");
@@ -270,7 +268,7 @@ describe("built patient walkout verifies balances for reception", () => {
         await account.click();
         const foreignPage = await foreignOpened;
         foreignPage.on("pageerror", error => errors.push(error.message));
-        await foreignPage.getByRole("button", { name: "قبض دفعة", exact: true }).click();
+        await foreignPage.getByRole("button", { name: "تسجيل تحصيل", exact: true }).click();
         const foreignDialog = foreignPage.getByRole("dialog", { name: "تحصيل دفعة", exact: true });
         await foreignDialog.getByLabel("رصيد سابق", { exact: true }).selectOption(currency);
         expect(await foreignDialog.getByLabel("العملة", { exact: true }).inputValue()).toBe(currency);

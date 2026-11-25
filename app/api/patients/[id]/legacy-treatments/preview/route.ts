@@ -20,6 +20,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  if (session.role === "reception") return NextResponse.json({ message: "معاينة الاتفاق التاريخي تتطلب صلاحية سريرية أو إدارية." }, { status: 403 });
   const settings = await getSettings().catch(() => null);
   const access = openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true");
   if (!access.add) {

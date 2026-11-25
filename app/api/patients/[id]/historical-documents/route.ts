@@ -10,6 +10,7 @@ export const dynamic="force-dynamic";
 type Context={params:Promise<{id:string}>};
 export async function GET(_request:Request,context:Context){
   const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول من جديد."},{status:401});
+  if (session.role === "reception") return NextResponse.json({ message: "توثيق الاتفاق التاريخي يتطلب صلاحية سريرية أو إدارية." }, { status: 403 });
   const patientId=Number((await context.params).id);
   if(!["admin","reception"].includes(session.role)&&!(session.role==="doctor"&&await canAccessPatient(session,patientId,"canViewPatientPayments")))return NextResponse.json({message:"غير مصرّح لك بعرض الاتفاقات."},{status:403});
   try{if(!Number.isSafeInteger(patientId)||patientId<=0)throw new DebtRepaymentError("invalid","رقم المريض غير صالح.");
@@ -18,6 +19,7 @@ export async function GET(_request:Request,context:Context){
 }
 export async function POST(request:Request,context:Context){
   const session=await requireSession();if(!session)return NextResponse.json({message:"سجّل الدخول من جديد."},{status:401});
+  if (session.role === "reception") return NextResponse.json({ message: "توثيق الاتفاق التاريخي يتطلب صلاحية سريرية أو إدارية." }, { status: 403 });
   if(!["admin","reception"].includes(session.role))return NextResponse.json({message:"تسجيل الاتفاق للمدير والاستقبال المخوّل."},{status:403});
   try{const patientId=Number((await context.params).id);if(!Number.isSafeInteger(patientId)||patientId<=0)throw new DebtRepaymentError("invalid","رقم المريض غير صالح.");
     const source=await readJsonBody(request,JSON_BODY_LIMIT_BYTES);if(!source||typeof source!=="object"||Array.isArray(source))throw new DebtRepaymentError("invalid","طلب غير صالح.");

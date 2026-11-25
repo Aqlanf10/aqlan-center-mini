@@ -1,4 +1,5 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Client } from "pg";
 import { authedMutation, harness } from "./_server";
 
 /**
@@ -7,15 +8,36 @@ import { authedMutation, harness } from "./_server";
  */
 
 let h: Awaited<ReturnType<typeof harness>>;
+let patientId: number;
+let db: Client;
 const date = "2026-08-12";
 
-async function book(time: string, durationMinutes = 30) {
+async function book(time: string, durationMinutes = 30, nearbyAppointmentConfirmation?: string) {
   return authedMutation("/api/appointments", h.sessions.reception, "POST", JSON.stringify({
-    patientId: h.seeded.patientAId, date, time, durationMinutes, appointmentType: "consultation",
+    patientId, date, time, durationMinutes, appointmentType: "consultation", nearbyAppointmentConfirmation,
   }));
 }
 
-beforeAll(async () => { h = await harness(); }, 240_000);
+beforeAll(async () => {
+  h = await harness();
+  db = new Client({ connectionString: h.seeded.dbUrl });
+  await db.connect();
+  const patient = await db.query<{ id: number }>(
+    "INSERT INTO patients(patient_number, full_name) VALUES ($1, $2) RETURNING id",
+    ["SYN-OVERLAP-HTTP", "Synthetic overlap patient"],
+  );
+  patientId = patient.rows[0].id;
+}, 240_000);
+
+afterAll(async () => {
+  if (!db) return;
+  try {
+    await db.query("DELETE FROM appointments WHERE patient_id=$1", [patientId]);
+    await db.query("DELETE FROM patients WHERE id=$1", [patientId]);
+  } finally {
+    await db.end();
+  }
+});
 
 describe("P2-3 — same-patient overlap guard", () => {
   it("audit repro: the same patient at the same time is refused with an Arabic message", async () => {
@@ -32,7 +54,11 @@ describe("P2-3 — same-patient overlap guard", () => {
     expect((await book("10:30")).status).toBe(409);
   });
 
-  it("back-to-back is allowed", async () => {
-    expect((await book("11:00")).status).toBe(201);
+  it("allows back-to-back visits after confirming the nearby appointment", async () => {
+    const pending = await book("11:00");
+    expect(pending.status).toBe(409);
+    const warning = await pending.json();
+    expect(warning).toMatchObject({ kind: "nearby_patient_appointments", confirmationToken: expect.any(String) });
+    expect((await book("11:00", 30, warning.confirmationToken)).status).toBe(201);
   });
 });

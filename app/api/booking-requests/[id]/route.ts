@@ -77,6 +77,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         date,
         judge: async (sameDay, client) => {
           const judged = await judgeBookingInDay({
+          nearbyAppointmentConfirmation: typeof source.nearbyAppointmentConfirmation === "string" ? source.nearbyAppointmentConfirmation : null,
+          bookingActor: JSON.stringify([session.userId, session.username]), bookingScope: JSON.stringify(["booking-approval", id, overrideReason]),
             sameDay, client, date, time, durationMinutes, service,
             context: capacityContext, canOverride, overrideReason,
             // (P2-3) مريضٌ قائم بهاتف الطلب لا يُحجز فوق موعده.

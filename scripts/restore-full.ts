@@ -8,12 +8,13 @@
  *  ٢) أي فشل تحقق ⇒ **لا استعادة قاعدة أصلًا** (لم يعد اللمس يسبق التحقق).
  *  ٣) الهدف يجب أن يكون فارغًا (رفض غير الفارغ افتراضيًا).
  *  ٤) المستندات تُستعاد إلى دليل staging معزول — لا إلى دليل الإنتاج مباشرة.
- *  ٥) بعد كل شيء: READY FOR CUTOVER مع الخطوات موثَّقة لا منفَّذة.
+ *  ٥) بعد كل شيء: تُعرض نتيجة التحقق وقيد أرقام المرضى.
  *
  * الاستعمال:
  *   DATABASE_URL=postgres://…(هدف فارغ) DOCUMENTS_DIR=…(staging) \
  *     npm run restore:full -- النسخة.tar.gz
  */
+import { NUMBERING_CUTOVER_MESSAGE } from "../lib/restore/numbering-hold";
 import path from "node:path";
 import { validatedRestoreFullTarget } from "./security/restore-full-target-guard.mjs";
 
@@ -90,12 +91,7 @@ async function main(): Promise<number> {
   console.log(`✔ مستندات: ${result.documentsRestored} مستعادًا و${result.documentsVerified} متحققًا منه بعد الكتابة`);
   console.log(`✔ تحقق الهدف: فحص حرج=${result.verification.criticalProbeOk ? "سليم" : "فشل"}، جداول=${result.verification.tablesCount}`);
 
-  if (result.readyForCutover) {
-    console.log("\n═".repeat(60));
-    console.log("READY FOR CUTOVER — التبديل إلى الإنتاج قرار بشري، خطواته:");
-    for (const step of result.cutoverSteps) console.log(`  ${step}`);
-    console.log("═".repeat(60));
-  }
+  console.log(`\n${result.cutoverBlocker} — ${NUMBERING_CUTOVER_MESSAGE}`);
   return 0;
 }
 

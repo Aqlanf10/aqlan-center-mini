@@ -62,7 +62,7 @@ describe("authorized report envelope generation timezone", () => {
     });
     expect(boundary.dbTodayISO).toHaveBeenCalledExactlyOnceWith();
     expect(boundary.parseFilters).toHaveBeenCalledExactlyOnceWith(expect.any(URLSearchParams), "2000-02-01");
-    expect(boundary.buildReport).toHaveBeenCalledExactlyOnceWith("daily", filters);
+    expect(boundary.buildReport).toHaveBeenCalledExactlyOnceWith("daily", filters, "admin");
     expect(boundary.reportOptions).not.toHaveBeenCalled();
   });
 
@@ -121,7 +121,7 @@ describe("authorized report envelope generation timezone", () => {
       generatedBy: "synthetic author", clinicTimeZone: "America/New_York" });
     expect(boundary.dbTodayISO).toHaveBeenCalledExactlyOnceWith();
     expect(boundary.parseFilters).toHaveBeenCalledExactlyOnceWith(expect.any(URLSearchParams), "2000-02-01");
-    expect(boundary.buildReport).toHaveBeenCalledExactlyOnceWith("annual", range);
+    expect(boundary.buildReport).toHaveBeenCalledExactlyOnceWith("annual", range, "admin");
   });
 
   it.each([

@@ -27,7 +27,8 @@ describe("POST /api/patients/import", () => {
     for (const session of [h.sessions.reception, h.sessions.doctorA]) {
       const response = await post(session, { mode: "preview", csv, fileName: "x.csv" });
       expect(response.status).toBe(403);
-      expect((await response.json() as { message: string }).message).toBe("استيراد المرضى للمدير وحده.");
+      const body = await response.json();
+      expect(body).toEqual({ message: expect.stringMatching(/[؀-ۿ]/) });
     }
     // المحاسب يُردّ من الباب نفسه (قائمة سماح دوره) قبل المسار — برسالة عربية.
     const accountant = await post(h.sessions.accountant, { mode: "preview", csv, fileName: "x.csv" });

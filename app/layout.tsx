@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
@@ -61,14 +62,15 @@ export const viewport: Viewport = {
 export const dynamic = "force-dynamic";
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const publicDisplay = (await headers()).get("x-aqlan-public-display") === "1";
   const [settings, session] = await Promise.all([
     getSettingsSafe(),
     // الجلسة قد تكون غائبة — صفحة الدخول والشاشات العامة تُصيَّر بلا واحدة.
-    requireSession().catch(() => null),
+    publicDisplay ? null : requireSession().catch(() => null),
   ]);
 
   const publicSettings = publicSubset(settings);
-  if (!session) {
+  if (!publicDisplay && !session) {
     // Publication/hiding must be reflected on the next public navigation, even
     // when another server bundle still holds the ordinary five-second cache.
     // Only this non-sensitive display flag is overlaid; image bytes remain
@@ -87,9 +89,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="ar" dir="rtl" className={arabic.variable}>
       <body className="min-h-full bg-canvas font-sans text-navy-900 antialiased">
-        <PrintDocumentWatermark />
-        <SettingsProvider value={publicSettings}>
-          <SessionProvider
+        {!publicDisplay && <PrintDocumentWatermark />}
+        <SettingsProvider value={publicDisplay ? { "clinic.name": settings["clinic.name"] } : publicSettings}>
+          {publicDisplay ? children : <SessionProvider
             value={
               session
                 ? {
@@ -102,7 +104,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             }
           >
             <AppShell clinicTimeZone={CLINIC_TIME_ZONE}>{children}</AppShell>
-          </SessionProvider>
+          </SessionProvider>}
         </SettingsProvider>
         <PwaRegister />
       </body>

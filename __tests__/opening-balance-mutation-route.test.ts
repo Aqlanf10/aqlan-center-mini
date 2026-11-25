@@ -111,9 +111,21 @@ describe("opening mutation preflight ownership", () => {
     expect((await post({ reason: " " })).status).toBe(400); noWrites();
   });
 
-  it("preserves reception edit denial", async () => {
+  it("records an enabled reception addition without reading the patient's prior balance or returning their details", async () => {
     vi.mocked(requireSession).mockResolvedValue({ userId: 1, username: "synthetic-user", role: "reception", expiresAt: 4_102_444_800_000 });
-    expect((await post()).status).toBe(403); noWrites();
+    const response = await post();
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ patientId: 41, currency: "SAR", amountMinor: 30000, asOfDate: "2026-01-01" });
+    expect(getPatientOpeningBalance).not.toHaveBeenCalled();
+    expect(setPatientOpeningBalance).toHaveBeenCalledWith(expect.objectContaining({ addOnly: true, expectedBefore: null }));
+  });
+
+  it("rejects reception when the opening setting is off", async () => {
+    vi.mocked(requireSession).mockResolvedValue({ userId: 1, username: "synthetic-user", role: "reception", expiresAt: 4_102_444_800_000 });
+    vi.mocked(getSettings).mockResolvedValue({ "finance.reception_adds_opening_balance": "false" } as Awaited<ReturnType<typeof getSettings>>);
+    expect((await post()).status).toBe(403);
+    expect(getPatientOpeningBalance).not.toHaveBeenCalled();
+    noWrites();
   });
 
   it.each(["post", "clear"] as const)("keeps an unrelated %s writer error distinct from a conflict", async (action) => {

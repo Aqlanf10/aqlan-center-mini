@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { recordPlanInstallmentReminders } from "@/lib/db";
+import { CollectionScopeDenied } from "@/lib/reception-collection-scope";
 import { requireSession } from "@/lib/session";
 import { canHandleMoney } from "@/lib/roles";
 
@@ -42,7 +43,8 @@ export async function POST(request: Request) {
     try {
       const result = await recordPlanInstallmentReminders({ planIds: planIds.map(Number), bulk: true, actor: session.username, actorRole: session.role });
       return NextResponse.json({ success: true, ...result });
-    } catch {
+    } catch (error) {
+      if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
       return NextResponse.json({ message: "تعذّر تسجيل تاريخ التذكير." }, { status: 500 });
     }
 
@@ -70,7 +72,8 @@ export async function POST(request: Request) {
       installmentNumber,
       lastReminderAt: res.lastReminderAt,
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof CollectionScopeDenied) return NextResponse.json({ message: error.message }, { status: 403 });
     return NextResponse.json({ message: "تعذّر تسجيل تاريخ التذكير." }, { status: 500 });
   }
 }

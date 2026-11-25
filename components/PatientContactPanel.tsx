@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSetting } from "@/components/SettingsProvider";
 import type { Patient } from "@/lib/patient";
+import { readAdministrativePatientChange, type AdministrativePatientChange } from "@/lib/patient-administrative-edit";
 import {
   CONSENT_CHANNELS, CONSENT_CHANNEL_LABEL, CONSENT_SOURCE_LABEL, MANUAL_CONSENT_SOURCES, PREFERRED_CHANNELS,
   PREFERRED_CHANNEL_LABEL, flagClass, parseFlagList,
@@ -38,7 +39,7 @@ const dateText = (iso: string) => new Date(iso).toLocaleDateString("ar-YE-u-nu-l
 /** شارات الأعلام — للترويسة وأي شاشة تعرض المريض. */
 export function PatientFlagChips({ flags }: { flags: readonly string[] | undefined }) {
   const list = parseFlagList(useSetting("patients.flags"));
-  if (!flags || flags.length === 0) return null;
+  if (!Array.isArray(flags) || !flags.length || !flags.every((flag) => typeof flag === "string")) return null;
   return (
     <>
       {flags.map((flag) => (
@@ -51,9 +52,10 @@ export function PatientFlagChips({ flags }: { flags: readonly string[] | undefin
   );
 }
 
-export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
+export function PatientContactPanel({ patient, canEdit, onAdministrativeChange, onPatientChange }: {
   patient: Patient;
   canEdit: boolean;
+  onAdministrativeChange?: (change: AdministrativePatientChange) => void;
   onPatientChange: (patient: Patient) => void;
 }) {
   const flagList = parseFlagList(useSetting("patients.flags"));
@@ -63,6 +65,8 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
   const [email, setEmail] = useState(patient.email ?? "");
   const [source, setSource] = useState<ConsentSource>("in_person");
   const [showHistory, setShowHistory] = useState(false);
+  const pendingPatch = useRef<AbortController | null>(null);
+  useLayoutEffect(() => () => { pendingPatch.current?.abort(); pendingPatch.current = null; }, [patient.id]);
 
   useEffect(() => { setEmail(patient.email ?? ""); }, [patient.email]);
 
@@ -79,26 +83,40 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
 
   useEffect(() => { void loadConsent(); }, [loadConsent]);
 
-  const patch = async (body: Record<string, unknown>) => {
+  const patch = async (body: Record<string, unknown>, expectedFlags?: string[]) => {
+    if (!canEdit || busy || pendingPatch.current) return;
+    const request = new AbortController();
+    pendingPatch.current = request;
     setBusy(true);
     try {
       const response = await fetch(`/api/patients/${patient.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(expectedFlags ? { ...body, expectedFlags } : body), signal: request.signal,
       });
       const payload = await response.json().catch(() => ({}));
+      if (request.signal.aborted || pendingPatch.current !== request) return;
       if (!response.ok) throw new Error(payload.message ?? "تعذّر الحفظ.");
-      onPatientChange(payload as Patient);
+      if (onAdministrativeChange) {
+        const confirmed = readAdministrativePatientChange(payload, patient.id, body);
+        if (!confirmed) throw new Error("لم يمكن تأكيد بيانات التواصل المحفوظة.");
+        onAdministrativeChange(confirmed);
+      } else {
+        onPatientChange(payload as Patient);
+      }
       setError(null);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "تعذّر الحفظ.");
+      if (!request.signal.aborted) setError(saveError instanceof Error ? saveError.message : "تعذّر الحفظ.");
     } finally {
-      setBusy(false);
+      if (pendingPatch.current === request) {
+        pendingPatch.current = null;
+        setBusy(false);
+      }
     }
   };
 
+  const flags = Array.isArray(patient.flags) && patient.flags.every((item) => typeof item === "string") ? patient.flags : null;
   const toggleFlag = (flag: string) => {
-    const current = patient.flags ?? [];
-    void patch({ flags: current.includes(flag) ? current.filter((item) => item !== flag) : [...current, flag] });
+    if (!flags) return;
+    void patch({ flags: flags.includes(flag) ? flags.filter((item) => item !== flag) : [...flags, flag] }, flags);
   };
 
   const recordConsent = async (channel: ConsentChannel, granted: boolean) => {
@@ -120,7 +138,7 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
   };
 
   // الأعلام المعروضة للاختيار: قائمة الإعداد + ما على المريض وخرج منها (ليُزال إن شاء).
-  const flagOptions = Array.from(new Set([...flagList, ...(patient.flags ?? [])]));
+  const flagOptions = flags ? Array.from(new Set([...flagList, ...flags])) : [];
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs" aria-label="الهوية والتواصل">
@@ -140,7 +158,7 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
         <p className="mb-1.5 text-xs font-bold text-slate-600">الأعلام</p>
         <div className="flex flex-wrap gap-1.5">
           {flagOptions.map((flag) => {
-            const active = (patient.flags ?? []).includes(flag);
+            const active = flags?.includes(flag);
             return (
               <button key={flag} type="button" disabled={!canEdit || busy} onClick={() => toggleFlag(flag)} aria-pressed={active}
                 className={`rounded-lg border px-2 py-1 text-xs font-bold transition disabled:cursor-default ${
@@ -149,7 +167,7 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
               </button>
             );
           })}
-          {flagOptions.length === 0 ? <span className="text-xs text-slate-400">لا أعلام في الإعدادات.</span> : null}
+          {!flags ? <span role="status" className="text-xs text-amber-800">تعذّر تحميل أعلام المريض. أعد فتح الملف لتعديلها.</span> : flagOptions.length === 0 ? <span className="text-xs text-slate-400">لا أعلام في الإعدادات.</span> : null}
         </div>
       </div>
 
@@ -158,14 +176,15 @@ export function PatientContactPanel({ patient, canEdit, onPatientChange }: {
         <label className="min-w-0 text-xs font-bold text-slate-600">
           البريد الإلكتروني
           <div className="mt-1 flex gap-1.5">
-            <input type="email" dir="ltr" value={email} disabled={!canEdit || busy} onChange={(event) => setEmail(event.target.value)}
+            <input type="email" dir="ltr" value={email} disabled={!canEdit || !!onAdministrativeChange || busy} onChange={(event) => setEmail(event.target.value)}
               placeholder="name@example.com"
               className="min-w-0 w-full flex-1 rounded-xl border border-slate-300 px-3 py-1.5 text-sm outline-none focus:border-brand-blue" />
-            {canEdit && email.trim() !== (patient.email ?? "") ? (
+            {canEdit && !onAdministrativeChange && email.trim() !== (patient.email ?? "") ? (
               <button type="button" disabled={busy} onClick={() => void patch({ email: email.trim() })}
                 className="rounded-xl bg-navy-800 px-3 text-xs font-bold text-white disabled:opacity-50">حفظ</button>
             ) : null}
           </div>
+          {onAdministrativeChange ? <span className="mt-1 block font-normal">لتغيير البريد، افتح «تعديل البيانات الإدارية».</span> : null}
         </label>
         <label className="min-w-0 text-xs font-bold text-slate-600">
           القناة المفضّلة

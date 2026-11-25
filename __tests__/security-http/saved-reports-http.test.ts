@@ -63,7 +63,7 @@ describe("Saved reports — server-side permissions", () => {
     expect(ids).not.toContain(sharedDebtId);
     expect(body.canShare).toBe(false);
     const templateReports = (body.templates as { reportId: string }[]).map((item) => item.reportId);
-    expect(templateReports.every((id) => ["visits", "appointments", "recall", "inventory", "patient-statement"].includes(id))).toBe(true);
+    expect(templateReports.every((id) => ["visits", "appointments", "recall", "inventory"].includes(id))).toBe(true);
   });
 
   it("reception cannot duplicate, rename or delete the admin's templates", async () => {

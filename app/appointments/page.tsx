@@ -1,4 +1,5 @@
 "use client";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrivalPanel } from "@/components/ArrivalPanel";
@@ -202,6 +203,7 @@ export default function AppointmentsPage() {
     { id: number; date: string; time: string; reason: string } | null
   >(null);
 
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([date, moving, freed?.slot, session?.username]));
   const findCandidates = useCallback(async (item: Appointment) => {
     const request = ++candidateRequestRef.current;
     const revision = dateRevisionRef.current;
@@ -255,11 +257,11 @@ export default function AppointmentsPage() {
     const isCurrent = () => request === candidateRequestRef.current && revision === dateRevisionRef.current;
     setCandidateBusy(id);
     try {
-      const res = await fetch(`/api/waiting-list/${id}`, {
+      const res = await bookingFetch(`/api/waiting-list/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      });
+      }, isCurrent);
       const data = await res.json().catch(() => null);
       if (!res.ok) {
         if (isCurrent()) setCandidateNote(data?.message ?? "تعذّر تنفيذ الإجراء.");
@@ -279,7 +281,7 @@ export default function AppointmentsPage() {
       candidateInFlight.current = false;
       setCandidateBusy(null);
     }
-  }, []);
+  }, [bookingFetch]);
 
   useEffect(() => {
     void (async () => {
@@ -421,7 +423,7 @@ export default function AppointmentsPage() {
     if (target.reason.length < 3 || !target.date || !target.time) return;
     await act(
       () =>
-        fetch(`/api/appointments/${item.id}`, {
+        bookingFetch(`/api/appointments/${item.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -496,6 +498,7 @@ export default function AppointmentsPage() {
 
   return (
     <main className="mx-auto max-w-5xl p-4 pb-24">
+      {nearbyBookingDialog}
       <PageHeader
         title="جدول المواعيد والعيادات"
         subtitle="حجز وإدارة المواعيد مع التحويل الفوري لقائمة الانتظار وكراسي العلاج"

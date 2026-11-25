@@ -6,6 +6,10 @@ import type { ManualAppointmentReminderSnapshot } from "../lib/manual-appointmen
 
 // Real rendered handlers with synthetic transport. This is not browser acceptance.
 const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0, effects: [] as (() => void)[], cleanups: new Map<number, () => void>() }));
+// This component harness owns synthetic hook slots. The mounted dialog and cancellation use their dedicated React suite.
+vi.mock("../components/useNearbyBooking", () => ({ useNearbyBooking: () => ({
+  bookingFetch: (url: string, init: RequestInit) => fetch(url, init), nearbyBookingDialog: null,
+}) }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   const slot = (initial: unknown) => {

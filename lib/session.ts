@@ -1,13 +1,14 @@
 import { cookies, headers } from "next/headers";
-import { SESSION_COOKIE, readSessionToken, sessionCredentialVersion, type SessionPayload } from "./auth";
+import { SESSION_COOKIE, readSessionToken, readSignedSessionEnvelope, sessionCredentialVersion, type SessionPayload } from "./auth";
 import { sessionPermissionVersion } from "./auth";
+import { classifySessionEnvelope } from "./session-envelope";
 import { financeAccessFor } from "./finance-permissions";
 import { findUserByUsername, type DbClient } from "./db";
 
 async function currentSession(payload: SessionPayload | null, client?: DbClient): Promise<SessionPayload | null> {
   if (!payload?.credentialVersion) return null;
   const user = client ? await findUserByUsername(payload.username, client) : await findUserByUsername(payload.username);
-  if (client && payload.expiresAt < Date.now()) return null;
+  if (payload.expiresAt <= Date.now()) return null;
   if (!user || !user.isActive || user.id !== payload.userId
     || payload.credentialVersion !== sessionCredentialVersion(user.passwordHash)) return null;
   /* (P2-1) تغيير الدور يُبطل الجلسة: الباب (proxy) يحرس الكاشير والمحاسب بالدور
@@ -40,8 +41,8 @@ async function currentSession(payload: SessionPayload | null, client?: DbClient)
 export async function readSessionPayload(): Promise<SessionPayload | null> {
   try {
     const store = await cookies();
-    const cookieSession = readSessionToken(store.get(SESSION_COOKIE)?.value);
-    if (cookieSession) return cookieSession;
+    const selected = classifySessionEnvelope(readSignedSessionEnvelope(store.get(SESSION_COOKIE)?.value));
+    if (selected) return selected.kind === "legacy" ? selected.payload as unknown as SessionPayload : null;
   } catch {
     // تجاهل أخطاء قراءة الكوكيز
   }

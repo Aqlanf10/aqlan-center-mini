@@ -10,11 +10,11 @@ const get = (search = "?view=reception-handoff") => GET(new Request(`http://loca
 beforeEach(() => {
   state.session = { username: "reception", role: "reception" };
   state.list.mockReset().mockResolvedValue({ fromDate: "2026-10-08", toDate: "2026-10-09", clinicTimeZone: "Asia/Aden", items: [] });
-  state.today.mockReset().mockResolvedValue([{ id: 1 }]);
+  state.today.mockReset().mockResolvedValue([{ id: 1, note: "Synthetic private note" }]);
 });
 describe("reception projection on the existing visits route", () => {
   it("keeps shared visits unchanged and signed metadata separately authorized", async () => {
-    expect(await (await get("")).json()).toEqual([{ id: 1 }]);
+    expect(await (await get("")).json()).toEqual([{ id: 1, note: null }]);
     expect(state.list).not.toHaveBeenCalled();
     const response = await get();
     expect(response.status).toBe(200);

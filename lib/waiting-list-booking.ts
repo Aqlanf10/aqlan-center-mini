@@ -30,6 +30,7 @@ import type { Appointment } from "./schedule";
 import type { WaitingEntry } from "./waiting-list";
 
 export interface ConvertWaitingInput {
+  nearbyAppointmentConfirmation?: string | null;
   waitingId: number;
   date: string;
   time: string;
@@ -46,7 +47,7 @@ export type ConvertWaitingResult =
   | { ok: true; appointment: Appointment; entry: WaitingEntry; warning: string | null }
   /** الصفُّ كان محجوزًا سلفًا — والنتيجة نفسها تُعاد بلا موعدٍ ثانٍ. */
   | { ok: true; appointment: null; entry: WaitingEntry; warning: null; alreadyBooked: number }
-  | { ok: false; status: 400 | 404 | 409; message: string; conflict?: BookingConflict };
+  | { ok: false; status: 400 | 403 | 404 | 409; message: string; conflict?: BookingConflict };
 
 export async function convertWaitingToAppointment(
   input: ConvertWaitingInput, actor: BookingActor,
@@ -103,6 +104,7 @@ export async function convertWaitingToAppointment(
   try {
     const booked = await bookAppointment({
       patientId: entry.patientId,
+      nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation,
       date: input.date,
       time: input.time,
       /* المدّة: ما طلبه الموظّف، وإلا مدّةُ الانتظار المسجّلة، وإلا مدّةُ الخدمة
@@ -121,7 +123,7 @@ export async function convertWaitingToAppointment(
       await releaseWaitingClaim(waitingId).catch(() => {});
       return booked.status === 409
         ? { ok: false, status: 409, message: booked.conflict.message, conflict: booked.conflict }
-        : { ok: false, status: 400, message: booked.message };
+        : { ok: false, status: booked.status, message: booked.message };
     }
 
     const appointmentId = Number(booked.appointment.id);

@@ -13,7 +13,7 @@ import { judgeBookingInDay } from "../lib/book-appointment";
 import { evaluateCapacity, prepareCapacityEvaluator } from "../lib/capacity-context";
 
 const date = "2026-10-27";
-const client = {} as DbClient;
+const client: DbClient = { query: async () => ({ rows: [], rowCount: 0 }), release() {} };
 const service: AppointmentService = {
   id: 1, code: "RCT", nameAr: "علاج جذور", nameEn: null, specialty: "endodontics",
   defaultDurationMinutes: 30, bufferBeforeMinutes: 0, bufferAfterMinutes: 0,

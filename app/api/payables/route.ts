@@ -17,8 +17,10 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canViewMoney(session.role)) {
-    return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
+  // P1: supplier and laboratory debts are clinic-wide financial accounts,
+  // not the single-patient balance that reception may collect. Fail before DB reads.
+  if (session.role === "reception" || !canViewMoney(session.role)) {
+    return NextResponse.json({ message: "حسابات الموردين والمختبرات للإدارة المالية فقط." }, { status: 403 });
   }
   const params = new URL(request.url).searchParams;
   const nativeView = params.has("view");
@@ -59,8 +61,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) {
-    return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
+  // A reception payment is patient-scoped; creating a supplier payable is not.
+  if (session.role === "reception" || !canHandleMoney(session.role)) {
+    return NextResponse.json({ message: "إنشاء التزامات الموردين للإدارة المالية فقط." }, { status: 403 });
   }
 
   let body: unknown;

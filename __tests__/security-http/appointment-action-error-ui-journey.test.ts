@@ -32,6 +32,7 @@ let today = "";
 let tomorrow = "";
 let afterTomorrow = "";
 let slot = 0;
+let navigationPatientId: number | undefined;
 
 const CONFLICT_MESSAGE = "تغيّرت حالة الموعد — حدّث القائمة.";
 const ARRIVE_CONFLICT_MESSAGE = "سُجّل وصوله بالفعل أو تغيّرت حالة الموعد.";
@@ -42,14 +43,14 @@ function sessionCookie(raw: string): { name: string; value: string } {
 }
 
 /** موعدٌ اصطناعيّ بوقتٍ فريد في كلّ اختبار — لا يتصادم مع غيره. */
-async function seedAppointment(date: string, patient: "A" | "B" = "A"): Promise<number> {
+async function seedAppointment(date: string, patient: "A" | "B" | number = "A"): Promise<number> {
   slot += 1;
   const minutes = 7 * 60 + slot * 7;
   const time = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
   const { rows: [row] } = await db.query<{ id: number }>(
     `INSERT INTO appointments (patient_id, scheduled_date, scheduled_time, duration_minutes, status, note)
      VALUES ($1, $2::date, $3, 15, 'booked', $4) RETURNING id`,
-    [patient === "A" ? h.seeded.patientAId : h.seeded.patientBId, date, time, NOTE],
+    [typeof patient === "number" ? patient : patient === "A" ? h.seeded.patientAId : h.seeded.patientBId, date, time, NOTE],
   );
   return row.id;
 }
@@ -137,6 +138,7 @@ afterAll(async () => {
   await browser?.close();
   if (db) {
     await db.query("DELETE FROM appointments WHERE note = $1", [NOTE]).catch(() => {});
+    if (navigationPatientId) await db.query("DELETE FROM patients WHERE id=$1", [navigationPatientId]);
     await db.end();
   }
 });
@@ -454,7 +456,11 @@ describe("عقد نجاح الإجراء وملكيّة التنقّل", () => {
   );
 
   it("الخروج من اليوم والعودة إليه أثناء النقل لا يُحيي انتقالًا قديمًا", async () => {
-    const id = await seedAppointment(today);
+    // A previous test moved its own appointment into this window. This case
+    // exercises navigation during a legitimate, unambiguous move.
+    navigationPatientId = (await db.query<{id: number}>(
+      "INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic navigation patient') RETURNING id", [`SYN-NAV-${Date.now()}`])).rows[0].id;
+    const id = await seedAppointment(today, navigationPatientId);
     const tomorrowId = await seedAppointment(tomorrow, "B");
     await openDay(today);
     await row(id).waitFor({ timeout: 60_000 });

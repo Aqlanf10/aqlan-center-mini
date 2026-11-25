@@ -42,7 +42,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       }
       return NextResponse.json({ message: "هذه الإحالة أُغلقت من قبل." }, { status: 409 });
     }
-    return NextResponse.json(result.referral);
+    return NextResponse.json(session.role === "reception"
+      ? { id: result.referral.id, status: result.referral.status }
+      : result.referral);
   } catch {
     return NextResponse.json({ message: "تعذّر تحديث الإحالة. أعد المحاولة." }, { status: 500 });
   }

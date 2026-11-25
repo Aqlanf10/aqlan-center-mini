@@ -54,10 +54,10 @@ beforeAll(async () => {
 afterAll(async () => { await db?.end(); });
 
 describe("(P1) intake history", () => {
-  it("reception records a new version; history is newest first and keeps the earlier one", async () => {
-    const first = await post("reception", `/api/patients/${ownedId}/intake-history`, { conditions: ["diabetes"], allergies: "بنسلين" });
+  it("admin records a new version; history is newest first and keeps the earlier one", async () => {
+    const first = await post("admin", `/api/patients/${ownedId}/intake-history`, { conditions: ["diabetes"], allergies: "بنسلين" });
     expect(first.status).toBe(201);
-    const second = await post("reception", `/api/patients/${ownedId}/intake-history`, { conditions: [], medications: "أسبرين" });
+    const second = await post("admin", `/api/patients/${ownedId}/intake-history`, { conditions: [], medications: "أسبرين" });
     expect(second.status).toBe(201);
     const response = await get("doctorA", `/api/patients/${ownedId}/intake-history`);
     expect(response.status).toBe(200);
@@ -65,17 +65,27 @@ describe("(P1) intake history", () => {
     expect(forms.length).toBe(2);
     expect(forms[0].id).toBeGreaterThan(forms[1].id);
     expect(forms[1].answers.conditions).toEqual(["diabetes"]);
-    expect(forms[0].recordedBy).toBe("secreception");
+    expect(forms[0].recordedBy).toBe("secadmin");
   });
 
   it("a doctor cannot read or write another doctor's patient; invalid conditions are refused", async () => {
     await expectArabic(await get("doctorA", `/api/patients/${otherId}/intake-history`), 403);
     await expectArabic(await post("doctorA", `/api/patients/${otherId}/intake-history`, { conditions: [] }), 403);
-    await expectArabic(await post("reception", `/api/patients/${ownedId}/intake-history`, { conditions: ["not-a-condition"] }), 400);
+    await expectArabic(await post("admin", `/api/patients/${ownedId}/intake-history`, { conditions: ["not-a-condition"] }), 400);
   });
 
   it("(TD-06) a form for a missing patient is a 404 with an Arabic message — not a 500", async () => {
-    await expectArabic(await post("reception", `/api/patients/987654321/intake-history`, { conditions: [] }), 404);
+    await expectArabic(await post("admin", `/api/patients/987654321/intake-history`, { conditions: [] }), 404);
+  });
+
+  it("reception cannot read or add clinical intake forms, even for its own assigned patient", async () => {
+    const path = `/api/patients/${ownedId}/intake-history`;
+    const read = await get("reception", path);
+    await expectArabic(read, 403);
+    expect(read.headers.get("Cache-Control")).toMatch(/(?:^|,\s*)no-store(?:,|$)/);
+    const write = await post("reception", path, { conditions: ["diabetes"], allergies: "test-secret" });
+    await expectArabic(write, 403);
+    expect(write.headers.get("Cache-Control")).toMatch(/(?:^|,\s*)no-store(?:,|$)/);
   });
 
   it("cashier and accountant do not reach the clinical intake", async () => {
@@ -120,8 +130,8 @@ describe("(P6) billing preview is read-only", () => {
 });
 
 describe("(P2) treatment entry creates the plan through the canonical invoice and price authority", () => {
-  it("the catalog price creates a linked plan; a lower price from reception without a reason is refused", async () => {
-    const plan = (unitPriceMinor: number) => post("reception", "/api/invoices", {
+  it("the administrator creates the linked plan at catalogue price and must explain a lower price", async () => {
+    const plan = (unitPriceMinor: number) => post("admin", "/api/invoices", {
       patientId: ownedId, currency: "YER",
       items: [{ serviceId, quantity: 1, toothCode: 16, price: String(unitPriceMinor), sessions: 1 }],
     });

@@ -1,3 +1,4 @@
+import { findUserByUsername } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
@@ -27,6 +28,10 @@ export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
 
+  if (session.role !== "admin" && (session.role !== "doctor" ||
+      !(await findUserByUsername(session.username).catch(() => null))?.permissions?.canViewCostPrices)) {
+    return NextResponse.json({ message: "عرض أسعار تكلفة المختبر يتطلب صلاحية الأسعار." }, { status: 403 });
+  }
   const { searchParams } = new URL(request.url);
   const partyIdRaw = searchParams.get("partyId");
   const labServiceIdRaw = searchParams.get("labServiceId");

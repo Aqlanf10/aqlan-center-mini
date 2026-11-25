@@ -14,9 +14,9 @@ beforeAll(async()=>{
   mkdirSync(".settings-ui-artifacts",{recursive:true});
 },180000);
 afterAll(async()=>{await browser?.close();await db?.end();});
-async function open(role:"admin"|"reception",width:number){
+async function open(width:number){
   const patientId=(await db.query("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic repayment workspace') RETURNING id",[`REPAY-UI-${Date.now()}-${++serial}`])).rows[0].id;
-  const context=await browser.newContext({viewport:{width,height:844},locale:"ar-YE",serviceWorkers:"block"});const [name,...value]=h.sessions[role].cookie.split("=");
+  const context=await browser.newContext({viewport:{width,height:844},locale:"ar-YE",serviceWorkers:"block"});const [name,...value]=h.sessions.admin.cookie.split("=");
   await context.addCookies([{name,value:value.join("="),url:baseUrl}]);const page=await context.newPage();
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`,{waitUntil:"domcontentloaded"});
   await page.getByTestId("treatment-entry-open").click();await page.getByRole("button",{name:"علاج جديد",exact:true}).click();
@@ -26,10 +26,10 @@ async function open(role:"admin"|"reception",width:number){
   await expect.poll(()=>page.getByRole("button",{name:"احفظ الفاتورة",exact:true}).isEnabled()).toBe(true);
   return{patientId,context,page};
 }
-const scenarios=[{role:"admin" as const,width:1280},{role:"reception" as const,width:390}];
+const widths = [1280, 390];
 describe("ordinary invoice recovery and persistent repayment workspace",()=>{
-  it.each(scenarios)("$role at$width persists installments, collects partially, revises only remaining and cancels dates without cancelling debt",async({role,width})=>{
-    const {patientId,context,page}=await open(role,width);const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
+  it.each(widths)("at %i px billing persists installments, collects partially, revises only remaining and cancels dates without cancelling debt",async width=>{
+    const {patientId,context,page}=await open(width);const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
     try{
       await page.getByRole("radio",{name:"جدول أقساط",exact:true}).check();
       await page.getByLabel("مبلغ السداد 1",{exact:true}).fill("23.45");await page.getByLabel("تاريخ السداد 1",{exact:true}).fill("2026-10-12");
@@ -63,7 +63,7 @@ describe("ordinary invoice recovery and persistent repayment workspace",()=>{
         keys.push(collection.request().headers()["idempotency-key"]);
         await panel.getByRole("link",{name:"طباعة سند التحصيل",exact:true}).waitFor();
         await expect.poll(()=>panel.innerText()).toContain((123.45-step*20).toFixed(2));
-        const workspace=await (await authedGet(`/api/patients/${patientId}/debt-repayments`,h.sessions[role])).json();
+        const workspace=await (await authedGet(`/api/patients/${patientId}/debt-repayments`,h.sessions.admin)).json();
         expect(workspace.arrangements[0]).toMatchObject({requiresReview:false,remainingMinor:12345-step*2000,collectedMinor:step*2000,version:1});
       }
       expect(new Set(keys).size).toBe(3);
@@ -76,11 +76,11 @@ describe("ordinary invoice recovery and persistent repayment workspace",()=>{
       const [facts]=(await db.query("SELECT (SELECT count(*)::int FROM invoices WHERE patient_id=$1) AS invoices,(SELECT count(*)::int FROM payments WHERE patient_id=$1) AS payments,(SELECT sum(amount_minor)::int FROM payments WHERE patient_id=$1) AS paid",[patientId])).rows;
       expect(facts).toEqual({invoices:1,payments:3,paid:6000});expect(await panel.innerText()).toContain("63.45");
       const geometry=await page.evaluate(()=>({width:innerWidth,document:document.documentElement.scrollWidth}));expect(geometry.document).toBeLessThanOrEqual(geometry.width+1);
-      expect(errors).toEqual([]);await page.screenshot({path:`.settings-ui-artifacts/debt-repayment-${role}-${width}.png`,fullPage:true});
+      expect(errors).toEqual([]);await page.screenshot({path:`.settings-ui-artifacts/debt-repayment-admin-${width}.png`,fullPage:true});
     }finally{await context.close();}
   });
-  it.each(scenarios.flatMap(s=>["lost","malformed","lost-reload","malformed-reload"].map(fault=>({...s,fault}))))("$role ordinary$fault acknowledgement keeps exact intent at$width and closes only after verified replay",async({role,width,fault})=>{
-    const {patientId,context,page}=await open(role,width);const commands:string[]=[];const receipts:Record<string,unknown>[]=[];
+  it.each(widths.flatMap(width=>["lost","malformed","lost-reload","malformed-reload"].map(fault=>({width,fault}))))("billing ordinary$fault acknowledgement keeps exact intent at$width and closes only after verified replay",async({width,fault})=>{
+    const {patientId,context,page}=await open(width);const commands:string[]=[];const receipts:Record<string,unknown>[]=[];
     await page.route("**/api/invoices",async route=>{
       if(route.request().method()!=="POST")return route.continue();commands.push(route.request().postData()!);const response=await route.fetch();const receipt=await response.json();receipts.push(receipt);
       if(commands.length===1){expect(response.status()).toBe(201);if(fault.startsWith("lost"))return route.abort("failed");return route.fulfill({status:201,contentType:"application/json",body:JSON.stringify({...receipt,repayment:null})});}

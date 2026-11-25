@@ -1,10 +1,12 @@
 "use client";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { useEffect, useId, useRef, useState } from "react";
 import {
   SHIFTS, SHIFT_LABEL, WEEKDAYS, WEEKDAY_LABEL,
   type PreferredShift, type Weekday,
 } from "@/lib/waiting-list";
+import { createRegistrationKey } from "@/lib/patient-create-warning";
 import { Modal } from "./Modal";
 import { APPOINTMENT_TYPES } from "@/lib/schedule";
 import type { AppointmentService } from "@/lib/appointment-services";
@@ -70,6 +72,7 @@ export function QuickAppointmentModal({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const bookingInFlight = useRef(false);
+  const registrationKey = useRef(createRegistrationKey());
   const [error, setError] = useState<string | null>(null);
   const [doctors, setDoctors] = useState<{ id: number; name: string }[]>([]);
   const [selectedDoctorId, setSelectedDoctorId] = useState<number | undefined>();
@@ -103,6 +106,7 @@ export function QuickAppointmentModal({
   const [overrideReason, setOverrideReason] = useState("");
   /* الرفض بلا وجهةٍ يعني مريضًا ضاع. فمن رُدّ يُكتب في قائمة الانتظار من
      اللوحة نفسها التي ردّته — لا من شاشةٍ أخرى يُنسى الانتقال إليها. */
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([patientId, isOpen, newPatientCreated || !selectedPatientId ? patientQuery : selectedPatientId, date, time, duration, appointmentType, note, selectedDoctorId, selectedServiceId, chairNo, overrideReason]));
   const [waitingBusy, setWaitingBusy] = useState(false);
   const [waitingNote, setWaitingNote] = useState<string | null>(null);
   /* خطوةُ التفضيلات — تُفتح بالضغط على «أضِف إلى قائمة الانتظار».
@@ -340,16 +344,22 @@ export function QuickAppointmentModal({
       if (!targetId) {
         // Create new patient on the fly
         try {
+          const body = JSON.stringify({ fullName: name, phone: phone.trim() });
           const pRes = await fetch("/api/patients", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fullName: name, phone: phone.trim() }),
+            headers: { "Content-Type": "application/json", "Idempotency-Key": registrationKey.current.forBody(body) },
+            body,
           });
           if (!pRes.ok) {
             setError("تعذّر إنشاء ملف للمريض الجديد.");
             return;
           }
           const newP = await pRes.json();
+          if (!Number.isSafeInteger(newP?.id) || newP.id <= 0) {
+            setError("تعذّر تأكيد حفظ ملف المريض. أعد المحاولة.");
+            return;
+          }
+          registrationKey.current.acknowledged();
           targetId = newP.id;
           isNewPatient = true;
           setNewPatientCreated(true);
@@ -366,7 +376,7 @@ export function QuickAppointmentModal({
         }
       }
 
-      const res = await fetch("/api/appointments", {
+      const res = await bookingFetch("/api/appointments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -440,6 +450,7 @@ export function QuickAppointmentModal({
 
   return (
     <Modal onClose={onClose} labelledBy={`${formId}-title`} busy={busy} initialFocus="input">
+      {nearbyBookingDialog}
       {/* Include conflict/override and search-result controls as well as the form.
           Native disabling prevents pointer and keyboard edits during both writes. */}
       <fieldset

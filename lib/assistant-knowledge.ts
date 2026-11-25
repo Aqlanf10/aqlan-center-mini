@@ -24,6 +24,7 @@ import {
   CLINIC_TIME_ZONE,
   type PatientSummary,
 } from "./db";
+import { receptionPatientLookup } from "./ai-tools/reception-patient";
 import { canAccessPatient } from "./patient-access";
 import type { SessionPayload } from "./auth";
 import { balancesText, patientBalancesByCurrency, toCurrencyPaymentLikes, formatMoney, CLINIC_BASE_CURRENCY, type Currency } from "./money";
@@ -230,7 +231,7 @@ export async function resolvePatientInquiry(
     partyId: context?.doctorPartyId ?? null,
   };
   const canSeePatientMoney =
-    role === "admin" || role === "reception" || Boolean(context?.canViewPatientPayments);
+    role === "admin" || (role === "doctor" && Boolean(context?.canViewPatientPayments));
 
   if (!isDbAvailable()) {
     return {
@@ -239,6 +240,11 @@ export async function resolvePatientInquiry(
       reply: `🔍 **استعلام عن المريض «${identifier}»:**
 ⚠️ خدمة قاعدة البيانات غير متصلة في هذا الوضع التجريبي. عند التشغيل المباشر للعيادة، سيعرض النظام كامل الملف المالي (الرصيد والمديونية) والمواعيد والتنبيهات الطبية فوراً.`,
     };
+  }
+
+  if (role === "reception") {
+    const { text } = await receptionPatientLookup(identifier);
+    return { found: true, type: "patient", reply: text };
   }
 
   const deniedResult: AssistantQueryResult = {

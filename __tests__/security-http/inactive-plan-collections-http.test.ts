@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
-import { authedMutation, harness } from "./_server";
+import { grantReceptionCollection, authedMutation, harness } from "./_server";
 import { PATIENT_NUMBER_SQL } from "../../lib/document-numbers";
 
 let h: Awaited<ReturnType<typeof harness>>;
@@ -20,6 +20,7 @@ async function seed(status: string) {
     `INSERT INTO patients (patient_number, full_name)
      VALUES (${PATIENT_NUMBER_SQL}, 'Synthetic plan HTTP') RETURNING id`,
   );
+  await grantReceptionCollection(h, patient.id);
   const { rows: [plan] } = await db.query<{ id: number }>(
     `INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, billing_mode, status)
      VALUES ($1, 'Synthetic agreement', 300000, 'YER', 'installments', $2) RETURNING id`, [patient.id, status],
@@ -52,7 +53,7 @@ describe("inactive plan collection over built HTTP", () => {
     const first = await post(path, target, key);
     expect(first.status).toBe(201);
     const original = await first.json();
-    const close = await authedMutation(`/api/plans/${target.planId}`, h.sessions.reception,
+    const close = await authedMutation(`/api/plans/${target.planId}`, h.sessions.admin,
       "PATCH", JSON.stringify({ status: "completed" }));
     expect(close.status).toBe(200);
     const again = await post(path, target, key);

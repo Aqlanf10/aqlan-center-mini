@@ -214,6 +214,40 @@ describe("إعادة إنتاج عيوب تدقيق الجاهزية (يجب أ�
 
 const NOW_ISO = () => new Date().toISOString();
 
+describe("collected commission on a YER 1,000 invoice with a YER 200 lab order", () => {
+  it.each([
+    { deductLabCost: true, full: 240, half: 120 },
+    { deductLabCost: false, full: 300, half: 150 },
+  ])("applies deductLabCost=$deductLabCost to instalments and their linked refunds", async ({ deductLabCost, full, half }) => {
+    const doctorId = await doctor("Synthetic commission policy doctor", 30);
+    const userId = await doctorUser(doctorId, "synthetic-policy-doctor");
+    await updateUser(userId, {
+      commissionConfig: {
+        ...parseDoctorCommissionConfig(null), calculationMode: "percentage",
+        defaultPercent: 30, basis: "collected_cash", deductLabCost, deductMaterialCost: false,
+      },
+    }, { actor: "owner" });
+    const patientId = await patient();
+    const at = new Date().toISOString();
+    const { invoiceId, visitId } = await visitInvoice({
+      patientId, currency: "YER", at, items: [{ doctorId, amount: 1000 }],
+    });
+    await lab({ patientId, visitId, doctorId, cost: 200, currency: "YER" });
+    const payment = { patientId, invoiceId, currency: "YER", amount: 500 } as const;
+    const result = async () => row(await report(), doctorId);
+
+    expect(await result()).toMatchObject({ accruedMinor: full, earnedMinor: 0 });
+    const first = await pay(payment);
+    expect(await result()).toMatchObject({ accruedMinor: full, earnedMinor: half });
+    const second = await pay(payment);
+    expect(await result()).toMatchObject({ accruedMinor: full, earnedMinor: full });
+    await refund({ patientId, originId: second, amount: 500, currency: "YER" });
+    expect(await result()).toMatchObject({ accruedMinor: full, earnedMinor: half });
+    await refund({ patientId, originId: first, amount: 500, currency: "YER" });
+    expect(await result()).toMatchObject({ accruedMinor: full, earnedMinor: 0 });
+  });
+});
+
 describe("الحالات ١–١٨: صحة المحرّك", () => {
   it("CASE 1: نسبة عادية بلا مختبر — ٤٠٪ من ١٠٬٠٠٠ مقبوضة = ٤٬٠٠٠", async () => {
     const d = await doctor("د. عادي", 40);

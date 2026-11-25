@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getPrescription, recordAudit, recordPrint } from "@/lib/db";
-import { canAccessPatient } from "@/lib/patient-access";
+import { getPayment, getPrescription, recordAudit, recordPrint } from "@/lib/db";
+import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
 import { canHandleMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
@@ -35,6 +35,15 @@ export async function POST(request: Request) {
 
   /* الوصفات وثائق سريرية: طباعتها وإعادة طباعتها للطبيب والمدير — والسندات
      المالية للإدارة والاستقبال. فحص النوع قبل فحص الدور. */
+  if (session.role === "reception") {
+    if (docType !== "receipt" || !/^[1-9]\d*$/.test(docId) || !Number.isSafeInteger(Number(docId))) {
+      return NextResponse.json({ message: "يمكن تسجيل طباعة سند عمليتك فقط." }, { status: 403 });
+    }
+    const receipt = await getPayment(Number(docId), session.username);
+    if (!receipt || !await canViewPatientMoney(session, receipt.patientId)) {
+      return NextResponse.json({ message: "السند غير متاح." }, { status: 403 });
+    }
+  }
   if (docType === "prescription") {
     if (!isAdmin(session.role) && session.role !== "doctor") {
       return NextResponse.json({ message: "طباعة الوصفات للطبيب والمدير." }, { status: 403 });

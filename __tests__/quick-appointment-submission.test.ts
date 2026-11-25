@@ -6,6 +6,10 @@ import { QuickAppointmentModal } from "../components/QuickAppointmentModal";
 // This repository has no DOM unit-test dependency. Effects are intentionally
 // excluded here; the built-app browser journey covers actual clicks and dialogs.
 const hooks = vi.hoisted(() => ({ values: [] as unknown[], cursor: 0 }));
+// This component harness owns synthetic hook slots. The mounted dialog and cancellation use their dedicated React suite.
+vi.mock("../components/useNearbyBooking", () => ({ useNearbyBooking: () => ({
+  bookingFetch: (url: string, init: RequestInit) => fetch(url, init), nearbyBookingDialog: null,
+}) }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   function slot(initial: unknown) {

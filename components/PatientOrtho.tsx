@@ -1,4 +1,5 @@
 "use client";
+import { useNearbyBooking } from "./useNearbyBooking";
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
@@ -474,7 +475,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     }, ORTHO_PARENT_READ_TIMEOUT_MS));
     const read = async (kind: "clinical" | "contact") => {
       try {
-        const response = await fetch(kind === "clinical" ? `/api/ortho?patientId=${patientId}` : `/api/patients/${patientId}`,
+        const response = await fetch(kind === "clinical" ? `/api/ortho?patientId=${patientId}` : `/api/patients/${patientId}${session?.role === "reception" || session?.role === "assistant" ? "?projection=workspace" : ""}`,
           { cache: "no-store", signal: controller.signal });
         if (!current()) return;
         // Both endpoints guard this patient/session; denial is authoritative at headers.
@@ -755,7 +756,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                     && (row.baselineKind !== "legacy" || row.legacyFinancialMode === "installments") ? (
                       <details className="mt-2 text-xs"><summary className="cursor-pointer text-slate-500">رابط خطة أقساط قديم · للتوافق فقط</summary>
                         <OrthoPackageLink caseId={row.id} patientId={patientId} planId={row.planId}
-                          canLink={row.planId !== null && (session?.role === "admin" || session?.role === "reception"
+                          canLink={row.planId !== null && (session?.role === "admin"
                             || (session?.role === "doctor" && session.permissions?.canEditPlans !== false))}
                           onChanged={() => { if (currentView()) refreshAfterConfirmedChange(); }} />
                       </details>
@@ -1247,6 +1248,7 @@ function NextAppointmentCard({
   const [date, setDate] = form.field("date", suggested);
   const [time, setTime] = form.field("time", "16:00");
   const busy = form.draft.busy;
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([patientId, caseId, draftKey, date, time, booking]));
   const [booked] = form.field<{ date: string; time: string } | null>("booked", null);
   // The card survives Back/success, but a captured form command must not.
   // Retained draft values alone cannot distinguish two separate form openings.
@@ -1280,7 +1282,7 @@ function NextAppointmentCard({
     if (!operation) return;
     onError(null);
     try {
-      const response = await fetch("/api/appointments", {
+      const response = await bookingFetch("/api/appointments", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId, date, time, durationMinutes: 15,
@@ -1308,6 +1310,7 @@ function NextAppointmentCard({
 
   return (
     <div className="rounded-2xl border-2 border-emerald-500 bg-emerald-50 p-4 shadow-xs">
+      {nearbyBookingDialog}
       <p className="mb-1 text-sm font-black text-emerald-900">
         {booked ? "تم حجز الجلسة القادمة بنجاح" : "📅 الجلسة القادمة المقترحة"}
       </p>

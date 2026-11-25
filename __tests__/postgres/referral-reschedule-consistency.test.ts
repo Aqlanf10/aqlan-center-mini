@@ -346,10 +346,13 @@ describe("internal-referral rescheduling consistency", () => {
     const f = await fixture();
     const replacement = await book(f.patientId, f.nextDate, "11:00", receivingDoctor);
     expect(await step(f.referralId, "schedule", replacement)).toMatchObject({ ok: true });
-    expect(await booking.rescheduleAppointment({
-      appointmentId: f.appointmentId, date: f.date, time: "12:00", doctorId: otherDoctor,
-      reason: "Synthetic old appointment reassignment",
-    }, reception)).toMatchObject({ ok: true });
+    const move = { appointmentId: f.appointmentId, date: f.date, time: "12:00", doctorId: otherDoctor,
+      reason: "Synthetic old appointment reassignment" };
+    const first = await booking.rescheduleAppointment(move, reception);
+    expect(first).toMatchObject({ ok: false, status: 409, conflict: { kind: "nearby_patient_appointments" } });
+    if (first.ok || !first.conflict?.confirmationToken) throw new Error("Missing scoped confirmation for nearby replacement");
+    expect(await booking.rescheduleAppointment({ ...move, nearbyAppointmentConfirmation: first.conflict.confirmationToken }, reception))
+      .toMatchObject({ ok: true });
     expect(await q("SELECT referral_id FROM appointments WHERE id = $1", [f.appointmentId])).toEqual([{ referral_id: null }]);
     expect(await db.getReferral(f.referralId)).toMatchObject({ workflowState: "scheduled", appointmentId: replacement });
   });

@@ -1,4 +1,5 @@
 "use client";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
@@ -77,6 +78,7 @@ export default function WaitingListPage() {
   const [editing, setEditing] = useState<{ id: number; draft: PreferenceDraft } | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
 
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([closing, contacting, editing, expanded]));
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -101,7 +103,7 @@ export default function WaitingListPage() {
   const act = async (id: number, body: Record<string, unknown>, done?: () => void) => {
     setBusyId(id);
     try {
-      const res = await fetch(`/api/waiting-list/${id}`, {
+      const res = await bookingFetch(`/api/waiting-list/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -138,6 +140,7 @@ export default function WaitingListPage() {
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-5" dir="rtl">
+      {nearbyBookingDialog}
       <PageHeader
         title="قائمة الانتظار"
         subtitle="من طلب موعدًا ولم يجد مكانًا — يُنادى حين يشغر"

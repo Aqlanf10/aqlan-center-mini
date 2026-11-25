@@ -34,6 +34,7 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (!["admin", "doctor", "assistant"].includes(session.role)) return clinicalOnly();
   const visitId = await idFrom(context);
   if (!visitId) return NextResponse.json({ message: "رقم الزيارة غير صالح." }, { status: 400 });
 

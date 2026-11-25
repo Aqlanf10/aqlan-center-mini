@@ -34,6 +34,10 @@ export default async function LabOrderPrintPage({
 }) {
   const session = await requireSession();
   if (!session) notFound();
+  // The lab dispatch contains the patient's identity, teeth, treatment and
+  // laboratory work details. General reception patient access is administrative
+  // and must never authorize this clinical print. Deny before any order query.
+  if (session.role !== "admin" && session.role !== "doctor") notFound();
 
   const { id: rawId } = await params;
   const orderId = Number(rawId);

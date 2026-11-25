@@ -17,6 +17,7 @@ import { POST } from "../app/api/appointments/route";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE } from "../lib/ortho-booking-intent";
 import { lockBookableAppointmentDoctor } from "../lib/appointment-doctor";
 import type { AppointmentService } from "../lib/appointment-services";
+const transactionClient = { query: vi.fn(async () => ({ rows: [] })) };
 const service = (): AppointmentService => ({ id: 81, code: "ORTHO_FOLLOW_UP", nameAr: "Periodic synthetic", nameEn: null,
   specialty: "orthodontics", legacyType: "follow_up", isActive: true, defaultDurationMinutes: 10,
   bufferBeforeMinutes: 1, bufferAfterMinutes: 2, requiresChair: true, requiresProvider: true,
@@ -33,7 +34,7 @@ beforeEach(() => {
   vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(service());
   vi.mocked(prepareCapacityEvaluator).mockResolvedValue(() => ({ state: "AVAILABLE", occupiedChairs: 0, chairs: 3, dayPercent: 0, outsideHours: false, message: "Synthetic capacity available", reasons: [] }));
   vi.mocked(writeAppointmentInDay).mockImplementation(async ({ judge, commit }) => {
-    const client = {} as never;
+    const client = transactionClient as never;
     const verdict = await judge([], client);
     return verdict.ok ? { ok: true, value: await commit(client) } : verdict;
   });
@@ -69,7 +70,7 @@ describe("untouched board intent validates the exact resolved scheduling service
     vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue({ ...service(), legacyType });
     expect(await bookAppointment(request(), actor)).toMatchObject({ ok: true });
     expect(resolveService).toHaveBeenCalledTimes(1);
-    expect(insertAppointmentOnClient).toHaveBeenCalledWith({}, expect.objectContaining({ patientId: 19, serviceId: 81,
+    expect(insertAppointmentOnClient).toHaveBeenCalledWith(transactionClient, expect.objectContaining({ patientId: 19, serviceId: 81,
       appointmentType: "follow_up", durationMinutes: 45, doctorId: 7, bufferBeforeMinutes: 1, bufferAfterMinutes: 2 }));
   });
   it("leaves explicit manual choices and generic entrypoints on their existing path", async () => {
@@ -83,7 +84,7 @@ describe("untouched board intent validates the exact resolved scheduling service
     if (change === "specialty") current.specialty = "endodontics";
     vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(change === "removed" ? null : current);
     expect(await bookAppointment(request(), actor)).toEqual({ ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE });
-    expect(lockAppointmentServiceForBooking).toHaveBeenCalledWith({}, 81);
+    expect(lockAppointmentServiceForBooking).toHaveBeenCalledWith(transactionClient, 81);
     expect(lockAppointmentServiceForBooking).toHaveBeenCalledTimes(1);
     expect(prepareCapacityEvaluator).not.toHaveBeenCalled(); expect(insertAppointmentOnClient).not.toHaveBeenCalled();
   });
@@ -91,8 +92,8 @@ describe("untouched board intent validates the exact resolved scheduling service
     const current = { ...service(), defaultDurationMinutes: 20, bufferBeforeMinutes: 4, bufferAfterMinutes: 7, requiresChair: false };
     vi.mocked(lockAppointmentServiceForBooking).mockResolvedValue(current);
     expect(await bookAppointment({ ...request(), durationMinutes }, actor)).toMatchObject({ ok: true });
-    expect(prepareCapacityEvaluator).toHaveBeenCalledWith(expect.objectContaining({ service: current, durationMinutes: durationMinutes ?? 20, client: {} }));
-    expect(insertAppointmentOnClient).toHaveBeenCalledWith({}, expect.objectContaining({ serviceId: 81,
+    expect(prepareCapacityEvaluator).toHaveBeenCalledWith(expect.objectContaining({ service: current, durationMinutes: durationMinutes ?? 20, client: transactionClient }));
+    expect(insertAppointmentOnClient).toHaveBeenCalledWith(transactionClient, expect.objectContaining({ serviceId: 81,
       durationMinutes: durationMinutes ?? 20, bufferBeforeMinutes: 4, bufferAfterMinutes: 7, occupiesChair: false }));
   });
   it("does not acquire a follow-up service lock for explicit generic/manual bookings", async () => {

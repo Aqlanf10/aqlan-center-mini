@@ -1,7 +1,7 @@
 import {afterAll,beforeAll,describe,expect,it} from "vitest";
 import {chromium,type Browser} from "playwright";
 import {Client} from "pg";
-import {authedMutation,baseUrl,harness} from "./_server";
+import {authedGet,authedMutation,baseUrl,harness} from "./_server";
 let browser:Browser,h:Awaited<ReturnType<typeof harness>>,db:Client,endo:number,ortho:number,serial=0;
 beforeAll(async()=>{
   h=await harness();db=new Client({connectionString:h.seeded.dbUrl,ssl:false});await db.connect();
@@ -9,15 +9,13 @@ beforeAll(async()=>{
   const service=async(category:string,amount:number)=>(await db.query("INSERT INTO services(name,category,price_minor,price_sar_minor,price_configured,is_active) VALUES($1,$2,$3,$4,TRUE,TRUE) RETURNING id",[`Synthetic historical ${category}`,category,amount,amount*100])).rows[0].id;
   endo=await service("rct",55000);ortho=await service("ortho",210000);
   await db.query("INSERT INTO settings(key,value) VALUES('finance.reception_adds_opening_balance','true') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
-  // The positive reception journey has a documented 6.25% discount. Grant its
-  // synthetic fixture a 10% limit; application/default authority is unchanged.
   await db.query("INSERT INTO settings(key,value) VALUES('billing.max_discount_percent','10') ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value");
 },180000);
 afterAll(async()=>{await browser?.close();await db?.end();});
-const scenarios=[{role:"admin" as const,width:1280,currency:"YER"},{role:"reception" as const,width:390,currency:"SAR"}];
+const scenarios=[{width:1280,currency:"YER"},{width:390,currency:"SAR"}];
 async function open(scenario:typeof scenarios[number]){
   const patientId=(await db.query("INSERT INTO patients(patient_number,full_name,birth_date) VALUES($1,'Synthetic historical UI','1990-01-01') RETURNING id",[`HIST-UI-${Date.now()}-${++serial}`])).rows[0].id;
-  const context=await browser.newContext({viewport:{width:scenario.width,height:900},locale:"ar-YE",serviceWorkers:"block"});const [name,...value]=h.sessions[scenario.role].cookie.split("=");
+  const context=await browser.newContext({viewport:{width:scenario.width,height:900},locale:"ar-YE",serviceWorkers:"block"});const [name,...value]=h.sessions.admin.cookie.split("=");
   await context.addCookies([{name,value:value.join("="),url:baseUrl}]);const page=await context.newPage();const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`,{waitUntil:"domcontentloaded"});
   await page.getByTestId("treatment-entry-open").click();await page.getByRole("button",{name:"علاج بدأ قبل النظام",exact:true}).click();
@@ -40,7 +38,7 @@ async function facts(patientId:number){return(await db.query(`SELECT
  (SELECT count(*)::int FROM treatment_plans WHERE patient_id=$1) AS plans,
  (SELECT amount_minor::text FROM patient_opening_balances WHERE patient_id=$1) AS opening`,[patientId])).rows[0];}
 describe("approved historical workspace persists one mixed document",()=>{
-  it.each(scenarios)("$role at$width saves and reloads2teeth+grouped orthodontics in$currency with real dated terms",async scenario=>{
+  it.each(scenarios)("admin at$width saves and reloads2teeth+grouped orthodontics in$currency with real dated terms",async scenario=>{
     const {patientId,context,page,errors}=await open(scenario);
     try{
       await page.getByRole("radio",{name:"جدول أقساط",exact:true}).check();await page.getByLabel("مبلغ السداد 1",{exact:true}).fill("80000");await page.getByLabel("تاريخ السداد 1",{exact:true}).fill("2026-10-12");
@@ -57,7 +55,7 @@ describe("approved historical workspace persists one mixed document",()=>{
       const geometry=await page.evaluate(()=>({viewport:innerWidth,width:document.documentElement.scrollWidth}));expect(geometry.width).toBeLessThanOrEqual(geometry.viewport+1);expect(errors).toEqual([]);
     }finally{await context.close();}
   });
-  it.each(scenarios.flatMap(scenario=>["lost","malformed","lost-reload","malformed-reload"].map(fault=>({...scenario,fault}))))("$role $fault acknowledgement retains exact actor/patient command at$width",async scenario=>{
+  it.each(scenarios.flatMap(scenario=>["lost","malformed","lost-reload","malformed-reload"].map(fault=>({...scenario,fault}))))("admin $fault acknowledgement retains exact actor/patient command at$width",async scenario=>{
     const {patientId,context,page,errors}=await open(scenario);const bodies:string[]=[];const receipts:Record<string,unknown>[]=[];
     await page.route(`**/api/patients/${patientId}/historical-documents`,async route=>{
       if(route.request().method()!=="POST")return route.continue();bodies.push(route.request().postData()!);const response=await route.fetch();const payload=await response.json();receipts.push(payload);
@@ -66,7 +64,8 @@ describe("approved historical workspace persists one mixed document",()=>{
     });
     try{
       const save=page.getByRole("button",{name:"احفظ الاتفاق التاريخي",exact:true});await save.evaluate((button:HTMLButtonElement)=>{button.click();button.click();});
-      const recovery=page.getByTestId("invoice-command-recovery");await expect.poll(()=>recovery.innerText()).toContain("نتيجة الطلب غير مؤكدة");
+      const recovery=page.getByTestId("invoice-command-recovery");
+      await recovery.getByText(/نتيجة الطلب غير مؤكدة/).waitFor({ timeout: 10_000 });
       expect(bodies).toHaveLength(1);expect(await save.isDisabled()).toBe(true);expect(await page.getByLabel("عملة الاتفاق",{exact:true}).isDisabled()).toBe(true);
       await page.getByTestId("patient-tab-summary").click();expect(new URL(page.url()).searchParams.get("tab")).toBe("account");
       if(scenario.fault.endsWith("reload")){
@@ -80,10 +79,10 @@ describe("approved historical workspace persists one mixed document",()=>{
     }finally{await context.close();}
   });
   it("rejects forbidden actors and onlyadmin can correct historical facts",async()=>{
-    for(const role of ["doctorA","cashier","accountant"] as const){
+    for(const role of ["reception","doctorA","cashier","accountant"] as const){
       for(const tail of ["historical-documents","historical-documents/preview","historical-documents/1/correct"])
         expect((await authedMutation(`/api/patients/${h.seeded.patientAId}/${tail}`,h.sessions[role],"POST",JSON.stringify({}))).status).toBe(403);
     }
-    expect((await authedMutation(`/api/patients/${h.seeded.patientAId}/historical-documents/1/correct`,h.sessions.reception,"POST",JSON.stringify({}))).status).toBe(403);
+    expect((await authedGet(`/api/patients/${h.seeded.patientAId}/historical-documents`,h.sessions.reception)).status).toBe(403);
   });
 });

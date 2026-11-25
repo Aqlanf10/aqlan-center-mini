@@ -1,3 +1,4 @@
+import { NUMBERING_CUTOVER_BLOCKER } from "./numbering-hold";
 import path from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 import { Client } from "pg";
@@ -35,13 +36,14 @@ export interface RestoreDrillState {
   requestedAt: string;
   completedAt: string | null;
   requestedBy: string;
-  status: "running" | "ready" | "failed";
+  status: "running" | "restored" | "failed";
   targetEnvironment: "staging" | "test";
   archiveSha256: string;
   documentsVerified: number;
   tablesCount: number;
   durationMs: number | null;
-  readyForCutover: boolean;
+  readyForCutover: false;
+  cutoverBlocker: typeof NUMBERING_CUTOVER_BLOCKER | null;
   errorCode: string | null;
 }
 
@@ -87,10 +89,15 @@ export function restoreDrillAvailability(
 }
 
 export async function readRestoreDrillState(backupDir: string): Promise<RestoreDrillState | null> {
-  const read = await readJsonFile<RestoreDrillState>(
+  type Stored = Omit<RestoreDrillState, "status" | "readyForCutover" | "cutoverBlocker"> & {
+    status: RestoreDrillState["status"] | "ready";
+  };
+  const read = await readJsonFile<Stored>(
     path.join(backupStateDir(backupDir), RESTORE_DRILL_STATE_FILE),
   );
-  return read.ok ? read.data : null;
+  if (!read.ok || !read.data) return null;
+  const status = read.data.status === "ready" ? "restored" : read.data.status;
+  return { ...read.data, status, readyForCutover: false, cutoverBlocker: status === "restored" ? NUMBERING_CUTOVER_BLOCKER : null };
 }
 
 async function writeRestoreDrillState(backupDir: string, state: RestoreDrillState): Promise<void> {
@@ -113,7 +120,8 @@ async function resetDedicatedTarget(targetUrl: string): Promise<void> {
 export type AdminRestoreDrillResult =
   | {
       ok: true;
-      readyForCutover: true;
+      readyForCutover: false;
+      cutoverBlocker: typeof NUMBERING_CUTOVER_BLOCKER;
       backupId: string;
       archiveSha256: string;
       documentsVerified: number;
@@ -194,6 +202,7 @@ export async function runAdminRestoreDrill(input: {
     tablesCount: 0,
     durationMs: null,
     readyForCutover: false,
+    cutoverBlocker: null,
     errorCode: null,
   };
   await writeRestoreDrillState(input.backupDir, running);
@@ -209,7 +218,7 @@ export async function runAdminRestoreDrill(input: {
     });
     const durationMs = Date.now() - startedAt.getTime();
 
-    if (!result.ok || !result.readyForCutover) {
+    if (!result.ok) {
       await writeRestoreDrillState(input.backupDir, {
         ...running,
         completedAt: new Date().toISOString(),
@@ -225,15 +234,17 @@ export async function runAdminRestoreDrill(input: {
     await writeRestoreDrillState(input.backupDir, {
       ...running,
       completedAt: new Date().toISOString(),
-      status: "ready",
+      status: "restored",
       documentsVerified: result.documentsVerified,
       tablesCount: result.verification.tablesCount,
       durationMs,
-      readyForCutover: true,
+      readyForCutover: false,
+      cutoverBlocker: NUMBERING_CUTOVER_BLOCKER,
     });
     return {
       ok: true,
-      readyForCutover: true,
+      readyForCutover: false,
+      cutoverBlocker: NUMBERING_CUTOVER_BLOCKER,
       backupId: input.backupId,
       archiveSha256: record.archiveSha256,
       documentsVerified: result.documentsVerified,

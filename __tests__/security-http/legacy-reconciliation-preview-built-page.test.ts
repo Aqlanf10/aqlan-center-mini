@@ -99,7 +99,9 @@ const events = (page: Page) => page.evaluate(() => (window.__legacyPreviewStorag
 async function fixture(width: number) {
   const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 },
     locale: "ar-YE", timezoneId: "Asia/Aden", serviceWorkers: "block", acceptDownloads: false });
+  let activeRole: "admin" | "reception" = "admin";
   const installCookie = async (role: "admin" | "reception") => {
+    activeRole = role;
     const [name, ...value] = h.sessions[role].cookie.split("=");
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   };
@@ -144,8 +146,22 @@ async function fixture(width: number) {
     if (!url.pathname.startsWith("/api/")) { await route.continue(); return; }
     if (method !== "GET") { unexpected.push(method + " " + target); await route.abort(); return; }
     reads.push(target);
+    if (activeRole === "reception" && target === "/api/opening-balances/access") {
+      await route.continue();
+      return;
+    }
     for (const id of ids) {
       const prefix = `/api/patients/${id}`;
+      if (target === prefix + "?projection=workspace") { await route.continue(); return; }
+      if (activeRole === "reception" && target === prefix + "/ledger") {
+        await json(route, { message: "حساب هذا المريض خارج تكليف التحصيل" }, 403);
+        return;
+      }
+      if (activeRole === "reception" && [prefix, prefix + "/legacy", prefix + "/historical-documents", prefix + "/treatment-financial-context"].includes(target)) {
+        unexpected.push(method + " " + target);
+        await route.abort();
+        return;
+      }
       if (target === prefix) { await json(route, { patient: patient(id), visits: [], appointments: [] }); return; }
       if (target === prefix + "/workflow") { await json(route, workflow(id)); return; }
       if (target === prefix + "/ledger") { pending.push({ patientId: id, route }); return; }
@@ -566,7 +582,12 @@ describe("read-only legacy comparison on the actual built Account page", () => {
       for (const role of ["reception", "admin"] as const) {
         await f.installCookie(role); f.resetFinancialRead();
         const response = await page.reload({ waitUntil: "domcontentloaded" }); expect(response?.status()).toBe(200);
-        await f.waitRead(h.seeded.patientAId); await f.respond(); await f.storageBaseline(); await freshDraft(f);
+        if (role === "reception") {
+          await page.getByText("حساب هذا المريض خارج تكليف التحصيل", { exact: true }).waitFor();
+          expect(await panel(page).count()).toBe(0);
+        } else {
+          await f.waitRead(h.seeded.patientAId); await f.respond(); await f.storageBaseline(); await freshDraft(f);
+        }
       }
     } finally { await f.close(); }
   });

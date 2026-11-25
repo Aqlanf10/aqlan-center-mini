@@ -158,6 +158,20 @@ export interface LabOrder extends LabOrderClinicalDTO {
   postedAt?: string | null;
 }
 
+const CLINICAL_KEYS = Object.freeze([
+  "id", "patientId", "patientName", "patientNumber", "patientPhone", "labName", "labPhone", "partyId", "labServiceId", "serviceName",
+  "workType", "details", "toothNumbers", "shade", "shadeSpecification", "shadeSpecificationWarning", "stumpShade", "priority", "impressionType",
+  "sentDate", "dueDate", "status", "receivedAt", "deliveredAt", "doctorId", "doctorName", "visitId", "toothCode", "source",
+  "qualityCheck", "qualityNotes", "remakeOriginalId", "remakeReason", "technicianName", "note", "createdAt",
+] as const satisfies readonly (keyof LabOrderClinicalDTO)[]);
+
+/** The clinical projection of an order: only allowlisted fields, never the money group. */
+export function clinicalLabOrder(order: LabOrder): LabOrderClinicalDTO {
+  const out: Record<string, unknown> = {};
+  for (const key of CLINICAL_KEYS) if (key in order) out[key] = (order as unknown as Record<string, unknown>)[key];
+  return out as unknown as LabOrderClinicalDTO;
+}
+
 export const PENDING_LAB_NAME = "لم يُحدَّد بعد";
 
 export const LAB_STATUS_LABEL: Record<LabOrderStatus, string> = {

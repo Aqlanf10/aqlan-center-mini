@@ -79,6 +79,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       plannedVisitId, date, time, chairs: capacityContext.chairs,
       judge: async (day, client, durationMinutes) => {
         const judged = await judgeBookingInDay({
+          nearbyAppointmentConfirmation: typeof source.nearbyAppointmentConfirmation === "string" ? source.nearbyAppointmentConfirmation : null,
+          bookingActor: JSON.stringify([session.userId, session.username]), bookingScope: JSON.stringify(["planned-schedule", plannedVisitId]),
           sameDay: day, client, date, time, durationMinutes, service,
           context: capacityContext, canOverride, overrideReason,
           patientId: rows[0].patient_id,
@@ -98,7 +100,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         });
       }
       return NextResponse.json(
-        { appointmentId: result.appointmentId, title: result.title }, { status: 201 },
+        { appointmentId: result.appointmentId, title: session.role === "reception" ? `جلسة رقم ${plannedVisitId}` : result.title }, { status: 201 },
       );
     }
     if (result.reason === "conflict") {

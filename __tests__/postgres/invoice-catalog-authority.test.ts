@@ -30,6 +30,10 @@ afterAll(async () => { await db.resetPoolForTesting(); });
 
 async function command(name: string,repaymentTerms?:DebtRepaymentTerms) {
   const patientId = (await q("INSERT INTO patients(patient_number,full_name) VALUES($1,$1) RETURNING id", [name]))[0].id as number;
+  if (repaymentTerms) {
+    await q(`INSERT INTO appointments (patient_id, scheduled_date, scheduled_time)
+             VALUES ($1, (now() AT TIME ZONE 'Asia/Aden')::date, '09:00')`, [patientId]);
+  }
   const source = { patientId, currency: "SAR", items: [{ serviceId, price: "123.45", catalogPriceMinor: 12345 }], idempotencyKey: name,...(repaymentTerms?{repaymentTerms}:{}) };
   const parsed = parseInvoiceCommand(source, new Map((await db.listServices()).map(s => [s.id,s])), new Set(), await db.getSettings(), true);
   if (!parsed.ok) throw new Error(parsed.message);

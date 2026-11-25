@@ -7,6 +7,10 @@ const runtime = vi.hoisted(() => ({
   frame: null as Frame | null,
   session: { username: "front-a", role: "reception", permissions: null } as { username: string; role: string; permissions: unknown } | null,
 }));
+// This component harness owns synthetic hook slots. The mounted dialog and cancellation use their dedicated React suite.
+vi.mock("../components/useNearbyBooking", () => ({ useNearbyBooking: () => ({
+  bookingFetch: (url: string, init: RequestInit) => fetch(url, init), nearbyBookingDialog: null,
+}) }));
 vi.mock("../components/SessionProvider", () => ({ useSession: () => runtime.session }));
 vi.mock("../components/CollectPaymentModal", () => ({ CollectPaymentModal: () => null }));
 vi.mock("react", async (original) => {

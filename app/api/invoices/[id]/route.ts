@@ -10,6 +10,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
+  if (session?.role === "reception") {
+    return NextResponse.json({ message: "استخدم حساب التحصيل المخصص للمريض." }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+  }
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
@@ -34,6 +37,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+  }
+  if (session.role === "reception") {
+    return NextResponse.json({ message: "تحديث الفواتير يتطلب صلاحية الفوترة." }, { status: 403 });
   }
   if (!canHandleMoney(session.role)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });

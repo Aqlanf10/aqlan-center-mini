@@ -9,7 +9,7 @@ vi.mock("../lib/db", () => ({
   CLINIC_TIME_ZONE: "UTC", getSettingsSafe: async () => ({}),
   getVisitOwner: async () => ({ patientId: 1 }), visitWalkout: async () => state.walkout,
 }));
-vi.mock("../lib/session", () => ({ requireSession: async () => ({ username: "synthetic", role: "reception" }) }));
+vi.mock("../lib/session", () => ({ requireSession: async () => ({ username: "synthetic", role: "admin" }) }));
 vi.mock("../lib/operational-access", () => ({ authorizeVisit: async () => ({ ok: true }) }));
 vi.mock("../lib/walkout-access", () => ({ canSeeWalkout: async () => true }));
 vi.mock("../components/PrintHeader", () => ({ PrintHeader: () => null, PrintFooter: () => null }));

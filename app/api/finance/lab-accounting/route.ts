@@ -13,7 +13,7 @@ import {
   STANDARD_LAB_PAYABLE_ACCOUNTS,
   getAccountName,
 } from "@/lib/accounting";
-import { canViewMoney, isAdmin } from "@/lib/roles";
+import { canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -24,8 +24,10 @@ const denied = () =>
 export async function GET() {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canViewMoney(session.role)) {
-    return NextResponse.json({ message: "حسابات المختبرات للإدارة والمصرح لهم بالمالية فقط." }, { status: 403 });
+  // Reuse PR #553: laboratory debts, paid amounts and mapping codes are not reception data.
+  // Enforce this before listLabAccountingMappings, never rely on proxy alone.
+  if (!canViewFinancialReports(session.role)) {
+    return NextResponse.json({ message: "حسابات المختبرات للإدارة والمحاسب المخوّل فقط." }, { status: 403 });
   }
 
   try {

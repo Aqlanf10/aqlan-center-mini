@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { createNextSession, findUserByUsername, getClinicalVisit, writeAppointmentInDay } from "@/lib/db";
+import { prepareNextSessionPatient, createNextSession, findUserByUsername, getClinicalVisit, writeAppointmentInDay } from "@/lib/db";
 import { loadCapacityContext, resolveService } from "@/lib/capacity-context";
 import type { CapacityVerdict } from "@/lib/capacity";
 import { actorCanOverride, judgeBookingInDay, recordCapacityOverride } from "@/lib/book-appointment";
@@ -79,14 +79,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const overrideReason = typeof source.overrideReason === "string"
       ? source.overrideReason.trim().slice(0, 300) : "";
     /* التجاوز يُلتقط هنا ليُسجَّل بعد نجاح الكتابة — لا يُهمل كما كان. */
-    const overrideState: { verdict: CapacityVerdict | null } = { verdict: null };
+    const overrideState: { verdict: CapacityVerdict | null; refusal: { status: number; message: string } | null } = { verdict: null, refusal: null };
     const result = await writeAppointmentInDay({
       date,
       judge: async (sameDay, client) => {
+        const patientId = await prepareNextSessionPatient(client, { visitId, phone });
+        if (patientId === null || !await canAccessPatient(session, patientId, undefined, client, "nowait")) {
+          overrideState.refusal = patientId === null
+            ? { status: 404, message: "الزيارة غير موجودة." }
+            : { status: 403, message: "غير مصرّح لك بجدولة جلسة لهذا المريض." };
+          return { ok: false as const, conflict: null };
+        }
         const judged = await judgeBookingInDay({
+          nearbyAppointmentConfirmation: typeof source.nearbyAppointmentConfirmation === "string" ? source.nearbyAppointmentConfirmation : null,
+          bookingActor: JSON.stringify([session.userId, session.username]), bookingScope: JSON.stringify(["next-visit", visitId, phone, note]),
           sameDay, client, date, time, durationMinutes, service,
           context: capacityContext, canOverride, overrideReason,
-          patientId: visit.patientId,
+          patientId,
         });
         if (!judged.ok) return { ok: false as const, conflict: judged.conflict };
         if (judged.overridden) overrideState.verdict = judged.verdict;
@@ -96,6 +105,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         createNextSession({ visitId, date, time, durationMinutes, phone, note }, client),
     });
     if (!result.ok) {
+      if (overrideState.refusal) return NextResponse.json({ message: overrideState.refusal.message }, { status: overrideState.refusal.status });
       return NextResponse.json(result.conflict, { status: 409 });
     }
     const created = result.value;
@@ -112,7 +122,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       });
     }
     return NextResponse.json(created, { status: 201 });
-  } catch {
+  } catch (error) {
+    if ((error as { code?: string }).code === "55P03") return NextResponse.json({ message: "يجري تحديث ملف المريض. أعد المحاولة بعد لحظة." }, { status: 409 });
     return NextResponse.json({ message: "تعذّر حجز الجلسة. أعد المحاولة." }, { status: 500 });
   }
 }

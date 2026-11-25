@@ -7,8 +7,8 @@ import { toWhatsAppNumber } from "@/lib/reminders";
 
 interface Proposal {
   planId: number; patientId: number; patientName: string; patientPhone: string | null;
-  title: string; doctorName: string | null; createdOn: string; lastContactOn: string | null;
-  items: number; totalMinor: number | null; currency: Currency; timing: ProposalTiming;
+  title: string | null; doctorName: string | null; createdOn: string; lastContactOn: string | null;
+  items: number | null; totalMinor: number | null; currency: Currency; timing: ProposalTiming;
   whatsappAllowed: boolean;
 }
 
@@ -92,7 +92,7 @@ export function ProposalFollowUp() {
                 <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${STAGE_CLASS[one.timing.stage]}`}>
                   {PROPOSAL_STAGE_LABEL[one.timing.stage]}
                 </span>
-                <span className="text-slate-600">{one.title} · {one.items} بند</span>
+                {one.title && <span className="text-slate-600">{one.title} · {one.items} بند</span>}
                 {one.totalMinor !== null ? <span className="font-bold text-slate-800">{formatMoney(one.totalMinor, one.currency)}</span> : null}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-600">

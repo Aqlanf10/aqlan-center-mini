@@ -1,4 +1,5 @@
 "use client";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CURRENCY_LABEL, formatMoney, isCurrency } from "@/lib/money";
@@ -95,9 +96,9 @@ export function CheckoutExtras(props: CheckoutExtrasProps) {
   const session = useSession();
   if (!session) return null;
   const owner = JSON.stringify([props.visitId, props.expectedPatientId, session.username, session.role, session.permissions ?? null]);
-  return <OwnedCheckoutExtras key={owner} {...props} />;
+  return <OwnedCheckoutExtras key={owner} {...props} canPrintWalkout={session.role !== "reception"} />;
 }
-function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = true, financialRevision = 0, dueRecommendation = null, financialSummary = null, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps) {
+function OwnedCheckoutExtras({ canPrintWalkout, visitId, expectedPatientId, financialVerified = true, financialRevision = 0, dueRecommendation = null, financialSummary = null, collected, suggestedDate, durationMinutes, onChanged, onFinancialReadChange }: CheckoutExtrasProps & { canPrintWalkout: boolean }) {
   const mounted = useRef(true);
   const command = useRef(false);
   const [walkoutRead, setWalkout] = useState<CheckoutWalkout | null>(null);
@@ -109,6 +110,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
   const [date, setDate] = useState(() => suggestedDate ?? addDays(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK), 28));
   const [time, setTime] = useState("10:00");
   const [booked, setBooked] = useState<string | null>(null);
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([visitId, expectedPatientId, date, time, durationMinutes]));
 
   useEffect(() => {
     mounted.current = true;
@@ -168,7 +170,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
     command.current = true;
     setBusy(true);
     try {
-      const response = await fetch(`/api/visits/${visitId}/next`, {
+      const response = await bookingFetch(`/api/visits/${visitId}/next`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date, time, durationMinutes: durationMinutes ?? 30 }),
       });
@@ -231,6 +233,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
 
   return (
     <div className="mt-3 space-y-2">
+      {nearbyBookingDialog}
       {!walkout ? <p role="status" className="text-xs font-bold text-slate-500">ملخص المغادرة غير متحقق؛ لا تُستنتج منه حالة تغطية أو مبلغ للتحصيل.</p> : null}
       {/* (P0-G) «أُنجز اليوم» بتصنيف الخادم لكل سطر — لا حساب فوترة في الواجهة. */}
       {walkout && (walkout.lines.length > 0 || walkout.orthoAdjustment) ? (
@@ -286,10 +289,10 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
             </button>
           )
         ) : null}
-        <a href={`/print/walkout/${visitId}`} target="_blank" rel="noopener"
+        {canPrintWalkout && <a href={`/print/walkout/${visitId}`} target="_blank" rel="noopener"
           className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800">
           🖨️ ملخّص المغادرة
-        </a>
+        </a>}
       </div>
 
       {booked || walkout?.nextAppointment ? (

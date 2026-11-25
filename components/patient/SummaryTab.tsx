@@ -1,4 +1,5 @@
 "use client";
+import { useNearbyBooking } from "@/components/useNearbyBooking";
 
 import { useEffect, useRef, useState } from "react";
 import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
@@ -97,6 +98,7 @@ export function SummaryTab({
   const [scheduleTime, setScheduleTime] = useState("16:00");
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [rebookReason, setRebookReason] = useState("");
+  const { bookingFetch, nearbyBookingDialog } = useNearbyBooking(JSON.stringify([patientId, scheduleFor, scheduleDate, scheduleTime, rebookReason]));
   const [rebookUncertain, setRebookUncertain] = useState(false);
   const [scheduleError, setScheduleError] = useState<{ field?: "date" | "time" | "reason"; text: string } | null>(null);
   const scheduleInFlight = useRef(false);
@@ -176,7 +178,7 @@ export function SummaryTab({
     setScheduleError(null);
     setMessage(null);
     try {
-      const response = await fetch(`/api/planned-visits/${visit.id}/rebook`, {
+      const response = await bookingFetch(`/api/planned-visits/${visit.id}/rebook`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: attempt.body,
         signal: AbortSignal.timeout(30_000),
       });
@@ -223,7 +225,7 @@ export function SummaryTab({
     setScheduleBusy(true);
     setMessage(null);
     try {
-      const response = await fetch(`/api/planned-visits/${plannedVisitId}/schedule`, {
+      const response = await bookingFetch(`/api/planned-visits/${plannedVisitId}/schedule`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ date: scheduleDate, time: scheduleTime }),
@@ -273,6 +275,7 @@ export function SummaryTab({
 
   return (
     <div className="space-y-4">
+      {nearbyBookingDialog}
       {message ? (
         <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800">
           {message}

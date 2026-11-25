@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function ReferralPrintPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
-  if (!session) notFound();
+  if (!session || session.role === "reception") notFound();
   // وثيقة سريرية: الطبيب أو المدير — ومن يفتحها يملك المريض.
   if (!isAdmin(session.role) && session.role !== "doctor") notFound();
 

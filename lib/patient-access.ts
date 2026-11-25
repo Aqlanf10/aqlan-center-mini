@@ -1,4 +1,5 @@
-import { doctorOwnsPatient, findUserByUsername, patientHasVisitToday, type DbClient } from "./db";
+import { receptionCollectionAllowed } from "./reception-collection-scope";
+import { CLINIC_TIME_ZONE, ensureSchema, getPool, doctorOwnsPatient, findUserByUsername, patientHasVisitToday, type DbClient } from "./db";
 import type { SessionPayload } from "./auth";
 import type { DoctorPermissions } from "./doctor-permissions";
 import { canViewMoney } from "./roles";
@@ -12,7 +13,11 @@ export async function canAccessPatient(
   ownershipLockMode?: "nowait",
 ): Promise<boolean> {
   if (client && session.expiresAt < Date.now()) return false;
-  if (session.role === "admin" || session.role === "reception") return true;
+  if (session.role === "admin") return true;
+  /* P0: front desk may record external images/PDFs, but cannot read stored
+   * clinical media. Keep operational patient access and upload unchanged.
+   * Owner-configurable granular permissions need a separate reviewed grant. */
+  if (session.role === "reception") return permission !== "canViewXrays";
   /* (P0-F) المساعد السريري: مرضى زيارات اليوم وحدهم — وبلا صلاحيات طبيبٍ إضافية (مدفوعات، أشعة…). */
   if (session.role === "assistant") {
     if (permission) return false;
@@ -43,5 +48,9 @@ export async function canAccessPatient(
  */
 export async function canViewPatientMoney(session: SessionPayload, patientId: number): Promise<boolean> {
   if (session.role === "doctor") return canAccessPatient(session, patientId, "canViewPatientPayments");
+  if (session.role === "reception") {
+    await ensureSchema();
+    return receptionCollectionAllowed(getPool(), patientId, session.username, CLINIC_TIME_ZONE);
+  }
   return canViewMoney(session.role);
 }

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { CLINIC_TIME_ZONE, browsePatients, createPatientWithDuplicateReview, findUserByUsername, getSettings, isPeriodLocked, recordAudit, searchPatients, setPatientOpeningBalance } from "@/lib/db";
+import { CLINIC_TIME_ZONE, browsePatients, createPatientWithDuplicateReview, findUserByUsername, getSettings, searchPatients } from "@/lib/db";
 import { parseListFilter, parseListSort } from "@/lib/patient-browse";
-import { openingBalanceAccess, parseOpeningInput, type OpeningInput } from "@/lib/opening-access";
-import { PATIENT_AUDIT_FIELDS, auditSnapshot } from "@/lib/audit-diff";
+import { openingBalanceAccess, parseOpeningInput, ReceptionOpeningDisabled, type OpeningInput } from "@/lib/opening-access";
+import { IDEMPOTENCY_KEY_PATTERN } from "@/lib/idempotency-key";
 import { validatePatient } from "@/lib/patient";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
@@ -44,7 +44,7 @@ export async function GET(request: Request) {
   try {
     // Explicit server projection: finance staff never receive clinical fields,
     // even when requesting this API directly rather than through the UI.
-    const financeOnly = isRestrictedRole(session.role);
+    const financeOnly = isRestrictedRole(session.role) || session.role === "reception";
     const financeSummary = (patient: { id: number; patientNumber: string; fullName: string; phone: string | null }) => ({
       id: patient.id, patientNumber: patient.patientNumber, fullName: patient.fullName, phone: patient.phone,
     });
@@ -61,6 +61,9 @@ export async function GET(request: Request) {
     const sort = parseListSort(params.get("sort"));
     // (PAT-3) علَمٌ بعينه — نصٌّ قصير يُقارن حرفيًّا بأعلام المريض (مُعامَلٌ لا يُلصق في SQL).
     const flag = (params.get("flag") ?? "").trim().slice(0, 30) || null;
+    if (financeOnly && (flag || ["alert", "ortho", "debt"].includes(filter))) {
+      return NextResponse.json({ message: "هذا المرشّح غير متاح لهذا الحساب." }, { status: 403 });
+    }
     const { rows, total } = await browsePatients({
       offset: page * PAGE_SIZE, limit: PAGE_SIZE, filter, sort, doctorPartyId, flag,
       today: clinicDateString(new Date(), CLINIC_TIME_ZONE),
@@ -78,11 +81,19 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  // Match the HTTP proxy and patient PATCH: restricted finance and assistant
+  // accounts must never create an archive file, even without proxy mediation.
+  if (!["admin", "doctor", "reception"].includes(session.role)) {
+    return NextResponse.json({ message: "إضافة المرضى غير مصرّح لهذا الدور." },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } });
+  }
   /* صلاحيات الوكيل المساعد: الطبيب الذي أغلق المدير عليه «إضافة مريض» لا ينشئ
      ملفات — الاستقبال والإدارة يبقى لهم الحق دائمًا. */
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
-    if (!user) return denied();
+    if (!user || user.isActive !== true || user.id !== session.userId
+      || user.username.toLowerCase() !== session.username.toLowerCase()
+      || user.role !== session.role) return denied();
     if (user.permissions && user.permissions.canAddPatient === false) {
       return NextResponse.json(
         { message: "إضافة المرضى مخفية عنك بحسب صلاحياتك." },
@@ -95,6 +106,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
+  const key = request.headers.get("Idempotency-Key");
+  if (key !== null && !IDEMPOTENCY_KEY_PATTERN.test(key)) {
+    return NextResponse.json({ message: "مفتاح إعادة التسجيل غير صالح." }, { status: 400 });
+  }
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const validation = validatePatient((body ?? {}) as Record<string, unknown>, today);
   if (!validation.ok) {
@@ -106,17 +121,17 @@ export async function POST(request: Request) {
      ناقص؛ والاستقبال يضيف (إن فعّله الإعداد) والمدير يضيف ويعدّل. */
   const rawOpening = (body as Record<string, unknown> | null)?.openingBalance;
   let opening: OpeningInput | null = null;
+  let openingDateSpecified = false;
   if (rawOpening && typeof rawOpening === "object" && String((rawOpening as Record<string, unknown>).amount ?? "").trim()) {
     const settings = await getSettings().catch(() => null);
     const access = openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true");
     if (!access.add) {
       return NextResponse.json({ message: "تسجيل الرصيد السابق ليس من صلاحيتك — اتركه للمدير." }, { status: 403 });
     }
-    const parsed = parseOpeningInput(rawOpening as Record<string, unknown>, today);
+    const fields = rawOpening as Record<string, unknown>;
+    openingDateSpecified = typeof fields.asOfDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(fields.asOfDate);
+    const parsed = parseOpeningInput(fields, today);
     if (!parsed.ok) return NextResponse.json({ message: parsed.message, field: "openingBalance" }, { status: 400 });
-    if (await isPeriodLocked(parsed.value.asOfDate)) {
-      return NextResponse.json({ message: "تاريخ الرصيد السابق في فترة مقفلة. اختر تاريخًا بعد تاريخ الإقفال." }, { status: 409 });
-    }
     opening = parsed.value;
   }
 
@@ -133,42 +148,23 @@ export async function POST(request: Request) {
      * ولذلك يُرسل `confirmDuplicate` من الواجهة بعد أن يراها الموظف بعينه.
      */
     const confirmed = (body as Record<string, unknown>)?.confirmDuplicate === true;
-    const registration = await createPatientWithDuplicateReview(validation.value, confirmed);
+    const registration = await createPatientWithDuplicateReview(validation.value, confirmed, {
+      actor: session.username, actorId: session.userId, actorRole: session.role, key, opening,
+      // An omitted date means the day of the original write, even on a later retry.
+      openingDateSpecified,
+    });
     if (!registration.ok) {
+      if ("status" in registration) {
+        return NextResponse.json({ message: registration.message }, { status: registration.status });
+      }
       return NextResponse.json(
         { message: duplicateWarning(registration.duplicates), duplicates: registration.duplicates },
         { status: 409 },
       );
     }
-    const created = registration.patient;
-    // (P1-4) الإنشاء يُدقَّق بلقطته — ومع علامة إن أُكِّد رغم تحذير التكرار.
-    await recordAudit({
-      action: "patient.create",
-      entity: "patient", entityId: created.id, entityLabel: `${created.fullName} (${created.patientNumber})`,
-      details: { ...auditSnapshot(created as unknown as Record<string, unknown>, PATIENT_AUDIT_FIELDS), تأكيد_رغم_التكرار: confirmed },
-      actor: session.username, actorRole: session.role,
-    });
-    if (opening) {
-      try {
-        await setPatientOpeningBalance({
-          patientId: created.id, currency: opening.currency, amountMinor: opening.amountMinor,
-          asOfDate: opening.asOfDate, note: opening.note, createdBy: session.username, addOnly: true,
-        });
-        await recordAudit({
-          action: "opening_balance.set", entity: "patient", entityId: created.id, entityLabel: created.fullName,
-          details: { المبلغ: opening.amountMinor, العملة: opening.currency, التاريخ: opening.asOfDate, ملاحظة: opening.note, عند_التسجيل: true },
-          actor: session.username, actorRole: session.role,
-        });
-      } catch {
-        // الملف وُلد — والرصيد يُعاد من ملفه؛ يُقال ذلك صراحةً لا يُبلَع.
-        return NextResponse.json({
-          ...created,
-          warning: "حُفظ المريض لكن تعذّر حفظ الرصيد السابق — أضفه من ملفه ← الحساب ← «رصيد سابق».",
-        }, { status: 201 });
-      }
-    }
-    return NextResponse.json(created, { status: 201 });
-  } catch {
+    return NextResponse.json(registration.patient, { status: 201 });
+  } catch (error) {
+    if (error instanceof ReceptionOpeningDisabled) return NextResponse.json({ message: error.message }, { status: 403 });
     return NextResponse.json({ message: "تعذّر حفظ المريض. أعد المحاولة." }, { status: 500 });
   }
 }

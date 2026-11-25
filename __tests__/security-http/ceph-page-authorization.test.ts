@@ -69,11 +69,16 @@ describe.each([false, true])("Ceph page authorization (RSC=%s)", (rsc) => {
       await db.query("UPDATE users SET permissions=$1 WHERE username=$2", [original, TEST_USERS.doctorA.username]);
     }
   });
-  it.each(["doctorA", "admin", "reception"] as const)("preserves authorized %s access", async (role) => {
+  it.each(["doctorA", "admin"] as const)("preserves authorized %s access", async (role) => {
     const body = await payload(`/ceph/${first}`, role, rsc);
     for (const marker of markers) expect(body.includes(marker), `authorized response missing ${marker}`).toBe(true);
     expect((await payload(compare(first, second, patientId), role, rsc)).includes(patientMarker)).toBe(true);
     expect((await payload(compare(first, second), role, rsc)).includes(patientMarker)).toBe(true);
+  });
+  it.each(["workspace", "comparison"] as const)("does not serialize ceph patient records to reception: %s", async (page) => {
+    const path = page === "workspace" ? `/ceph/${first}` : compare(first, second, patientId);
+    privateDataAbsent(await payload(path, "reception", rsc));
+    if (page === "comparison") privateDataAbsent(await payload(compare(first, second), "reception", rsc));
   });
   it("rejects missing, invalid, discarded, same and mismatched comparison identities", async () => {
     for (const path of [

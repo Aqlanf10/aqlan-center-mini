@@ -39,7 +39,7 @@ export async function GET(request: Request) {
        * «مخطَّط لليوم» من الخطط النشطة. مدخلٌ واحد يفتح منه الطبيب عمل يومه.
        * والطبيب المربوط يرى لوحته هو (§٣٩).
        */
-      todayPlannedVisits(
+      session.role === "reception" ? [] : todayPlannedVisits(
         date,
         session.role === "doctor" && typeof session.partyId === "number" && session.partyId > 0
           ? session.partyId

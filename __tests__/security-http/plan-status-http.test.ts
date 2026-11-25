@@ -24,9 +24,17 @@ beforeAll(async () => {
 afterAll(async () => { await db?.end(); });
 
 const patch = (body: Record<string, unknown>) =>
-  authedMutation(`/api/plans/${planId}`, h.sessions.reception, "PATCH", JSON.stringify(body));
+  authedMutation(`/api/plans/${planId}`, h.sessions.admin, "PATCH", JSON.stringify(body));
 
 describe("(FIN-3) plan status over HTTP", () => {
+  it("denies reception plan edits and consent before any financial or clinical change", async () => {
+    const base = `/api/plans/${planId}`;
+    for (const [path, method] of [[base, "PATCH"], [base + "/consent", "POST"], [base + "/items", "POST"],
+      [base + "/items", "PATCH"], [base + "/items", "DELETE"]] as const) {
+      expect((await authedMutation(path, h.sessions.reception, method, JSON.stringify({}))).status).toBe(403);
+    }
+  });
+
   it("cancel and reactivate need a reason; completing does not; every change is audited with its actor", async () => {
     const noReason = await patch({ status: "cancelled" });
     expect(noReason.status).toBe(400);
@@ -48,6 +56,6 @@ describe("(FIN-3) plan status over HTTP", () => {
       ["cancelled", "active", "عاد المريض"],
       ["active", "completed", null],
     ]);
-    expect(new Set(rows.map((row) => row.actor))).toEqual(new Set([TEST_USERS.reception.username]));
+    expect(new Set(rows.map((row) => row.actor))).toEqual(new Set([TEST_USERS.admin.username]));
   });
 });

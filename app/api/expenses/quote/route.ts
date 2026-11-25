@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) {
+  if (session.role === "reception" || !canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   let body: unknown;
@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   }
   const settingsRates = ratesFromSettings(await getSettings());
   const parsed = parseExpenseRequest((body ?? {}) as Record<string, unknown>, settingsRates, isAdmin(session.role));
-  if (!parsed.ok) return NextResponse.json({ message: parsed.message }, { status: parsed.status });
+  if (!parsed.ok) return NextResponse.json({ message: parsed.message, code: parsed.code }, { status: parsed.status });
   const value = parsed.value;
   try {
     const { reason, quote } = await recordExpense({

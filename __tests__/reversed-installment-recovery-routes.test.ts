@@ -11,13 +11,17 @@ vi.mock("@/lib/db", () => ({
   recordReversedInstallmentRecovery: mock.recovery, recordPayment: mock.direct,
   recordSettingsOwnedPayment: mock.ordinary,
   recordPlanInstallment: mock.installment, recordAudit: mock.audit,
-  getPlan: mock.plan, isPlanFundedByAgreement: mock.funded, getPayment: mock.payment,
+  getPlanPatientId: vi.fn(async (id: number) => id === 7 ? 7 : null), getPlan: mock.plan, isPlanFundedByAgreement: mock.funded, getPayment: mock.payment,
   getPaymentByIdempotencyKey: vi.fn().mockResolvedValue(null), listPaymentsByDate: vi.fn(), setPlanStatus: vi.fn(),
   patientReversedInstallmentRecoveries: mock.readRecovery, patientLedger: mock.ledger,
   listPatientPlans: mock.plans, patientReceiptRemainders: vi.fn().mockResolvedValue({}),
   openingMinorsOf: () => ({ YER: 0, SAR: 0, USD: 0 }),
 }));
-vi.mock("@/lib/patient-access", () => ({ canAccessPatient: mock.access }));
+vi.mock("@/lib/patient-access", () => ({
+  canAccessPatient: mock.access,
+  canViewPatientMoney: async (session: { username: string }, patientId: number) =>
+    session.username === "cashier-a" && patientId === 7,
+}));
 vi.mock("@/lib/legacy-balance-arrangements-db", () => ({
   listLegacyBalanceArrangements: vi.fn().mockResolvedValue([]),
   listLegacyOpeningPositions: vi.fn().mockResolvedValue([]),
@@ -46,6 +50,12 @@ beforeEach(() => {
 });
 
 describe("explicit recovery payment route", () => {
+  it("refuses a different patient before entering any writer", async () => {
+    expect((await postPayment(request({ ...intent, patientId: 8 }))).status).toBe(403);
+    expect(mock.recovery).not.toHaveBeenCalled();
+    expect(mock.ordinary).not.toHaveBeenCalled();
+    expect(mock.settings).not.toHaveBeenCalled();
+  });
   it.each([null, { username: "doctor", role: "doctor" }, { username: "cashier", role: "cashier", financeAccess: { collectPayments: false } }])("checks session/permission before reading recovery or FX: %j", async (session) => {
     mock.session.mockResolvedValue(session);
     const response = await postPayment(request());
@@ -164,7 +174,8 @@ describe("ledger recovery projection boundary", () => {
     expect((await getLedger(new Request("https://synthetic.invalid/api/patients/7/ledger"), context)).status).toBe(403);
     expect(mock.readRecovery).not.toHaveBeenCalled();
   });
-  it("returns the dedicated reader projection without inferring from ledger rows", async () => {
+  it("returns recovery evidence in the administrator ledger without inferring from ledger rows", async () => {
+    mock.session.mockResolvedValue({ role: "admin", username: "synthetic-manager" });
     const response = await getLedger(new Request("https://synthetic.invalid/api/patients/7/ledger"), context);
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ clinicTimeZone: "Asia/Aden", installmentRecovery: { recoveries: [], reviews: [{ invoiceId: 17, planId: 7, reason: "missing_creation_provenance" }] } });

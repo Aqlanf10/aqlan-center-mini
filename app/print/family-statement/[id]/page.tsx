@@ -26,7 +26,7 @@ function balanceCell(minor: number | undefined, currency: Currency): string {
  */
 export default async function FamilyStatementPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
-  if (!session) notFound();
+  if (!session || session.role === "reception") notFound();
   const { id: rawId } = await params;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();

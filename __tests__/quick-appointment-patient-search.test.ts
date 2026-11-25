@@ -10,6 +10,10 @@ const hooks = vi.hoisted(() => ({
   effects: [] as { deps?: DependencyList; cleanup?: ReturnType<EffectCallback> }[],
   pending: [] as { index: number; deps?: DependencyList; run: EffectCallback }[],
 }));
+// This component harness owns synthetic hook slots. The mounted dialog and cancellation use their dedicated React suite.
+vi.mock("../components/useNearbyBooking", () => ({ useNearbyBooking: () => ({
+  bookingFetch: (url: string, init: RequestInit) => fetch(url, init), nearbyBookingDialog: null,
+}) }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
   function slot(initial: unknown) {

@@ -1,5 +1,5 @@
 import type { SessionPayload } from "./auth";
-import { canAccessPatient } from "./patient-access";
+import { canAccessPatient, canViewPatientMoney } from "./patient-access";
 import { canHandleMoney } from "./roles";
 
 /**
@@ -9,6 +9,7 @@ import { canHandleMoney } from "./roles";
  * زيارة المشي بلا ملف: لمن يلمس المال وحده. الفحص في الخادم لا في الشاشة.
  */
 export async function canSeeWalkout(session: SessionPayload, patientId: number | null): Promise<boolean> {
+  if (session.role === "reception") return patientId !== null && canViewPatientMoney(session, patientId);
   if (canHandleMoney(session.role) && session.role !== "cashier") return true;
   if (session.role !== "doctor" || patientId === null) return false;
   return canAccessPatient(session, patientId, "canViewPatientPayments");

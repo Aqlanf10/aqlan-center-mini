@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
-  CLINIC_TIME_ZONE, closeOrthoCase, findUserByUsername, getOrthoCase, linkOrthoCasePlan, recordAdjustment,
+  CLINIC_TIME_ZONE, closeOrthoCase, getOrthoCase, linkOrthoCasePlan, recordAdjustment,
   setOrthoPhase, setRetainer,
 } from "@/lib/db";
 import { isElasticClass, PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
@@ -30,6 +30,11 @@ const forbidden = (msg = "غير مصرّح لك بالوصول لهذه الح�
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  // Reception handles appointments, collection, not clinical adjustments.
+  // This gate runs before fetching case details; patient scope remains a second gate.
+  if (session.role !== "admin" && session.role !== "doctor") {
+    return forbidden("تسجيل جلسات التقويم السريرية للطبيب المخوّل أو الإدارة فقط.");
+  }
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
@@ -93,30 +98,33 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
-  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const found = await getOrthoCase(caseId, today);
-  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
-  if (!(await canAccessPatient(session, found.patientId))) {
-    return forbidden("غير مصرّح لك بتعديل هذه الحالة.");
-  }
-
+  // A front-desk caller must not probe orthodontic case existence or clinical
+  // data by submitting a clinical PATCH. Read/authorize the action before SQL.
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
+  const deskLink = session.role === "reception" && Object.keys(source).length === 1 && Object.hasOwn(source, "planId");
+  if (!deskLink && session.role !== "admin" && session.role !== "doctor") {
+    return forbidden("تعديل حالة التقويم السريرية للطبيب المخوّل أو الإدارة فقط.");
+  }
+  // Malformed JSON must not be interpreted as a clinical action or leak a 500.
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+
   try {
+    // The desk command needs only the identifiers validated under the link writer's locks.
+    const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    const found = deskLink ? null : await getOrthoCase(caseId, today);
+    if (!deskLink && !found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
+    if (found && !(await canAccessPatient(session, found.patientId))) return forbidden("غير مصرّح لك بتعديل هذه الحالة.");
     /* (P1-B) ربط الحالة باتفاقها المالي أو فكّه — يغيّر مصدر فوترة الشدّات القادمة، فلمن يملك الخطط. */
     if ("planId" in source) {
-      if (!["admin", "doctor", "reception"].includes(session.role)) {
-        return forbidden("ربط حالة التقويم بالاتفاق للإدارة والطبيب والاستقبال.");
-      }
-      if (session.role === "doctor") {
-        const user = await findUserByUsername(session.username).catch(() => null);
-        if (user?.permissions && user.permissions.canEditPlans === false) {
-          return forbidden("غير مصرّح لك بتعديل خطط العلاج.");
-        }
+      if (session.role === "doctor" && (!found || !(await canAccessPatient(session, found.patientId, "canEditPlans")))) {
+        return forbidden("غير مصرّح لك بتعديل خطط العلاج.");
       }
       const raw = source.planId;
       const planId = raw === null ? null : Number(raw);
@@ -173,6 +181,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role === "reception") return NextResponse.json({ message: "السجل السريري غير متاح لهذا الدور." }, { status: 403 });
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);

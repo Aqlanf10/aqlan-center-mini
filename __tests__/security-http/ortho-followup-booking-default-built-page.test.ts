@@ -185,12 +185,21 @@ describe("orthodontic board booking defaults satisfy its own follow-up classifie
         expect(await dialog.locator('[id$="-doctor"]').inputValue()).toBe(String(doctorId));
       }
       expected = expectedPayload;
-      const saved = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/appointments");
-      const reloaded = feedResponse();
-      await dialog.locator("form").evaluate((form) => { (form as HTMLFormElement).requestSubmit(); (form as HTMLFormElement).requestSubmit(); });
-      const savedResponse = await saved;
+      const bookingResponse = () => page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/appointments");
+      const [warned] = await Promise.all([bookingResponse(), dialog.locator("form").evaluate((form) => {
+        (form as HTMLFormElement).requestSubmit(); (form as HTMLFormElement).requestSubmit();
+      })]);
+      expect(warned.status()).toBe(409);
+      const warning = await warned.json();
+      expect(warning).toMatchObject({ kind: "nearby_patient_appointments", confirmationToken: expect.any(String),
+        nearbyAppointments: [expect.objectContaining({ id: unrelatedId })] });
+      expect((await db.query("SELECT id FROM appointments WHERE patient_id=$1", [patientId])).rows).toEqual([{ id: unrelatedId }]);
+      const confirmedPayload = { ...expectedPayload, nearbyAppointmentConfirmation: warning.confirmationToken };
+      expected = confirmedPayload;
+      const [savedResponse, refreshed] = await Promise.all([bookingResponse(), feedResponse(),
+        page.getByRole("button", { name: "تأكيد موعد إضافي مقصود", exact: true }).click()]);
       expect({ status: savedResponse.status(), body: await savedResponse.text() }).toMatchObject({ status: 201 });
-      const refreshed = await reloaded; expect(refreshed.status()).toBe(200);
+      expect(refreshed.status()).toBe(200);
       const row = ownRow(await refreshed.json() as Feed);
       expect(row.nextAppointment).toMatchObject({ date: bookedDate, time: "16:00", appointmentType: "follow_up", serviceName: periodic.nameAr, matchBasis: "designated_service" });
       expect(row.buckets).not.toContain("no_appointment");
@@ -198,7 +207,7 @@ describe("orthodontic board booking defaults satisfy its own follow-up classifie
       await expect.poll(() => dialog.count()).toBe(0);
       await page.getByRole("button", { name: new RegExp(`^${BUCKET_LABEL.upcoming}`) }).click();
       await patient.getByText("موعد متابعة التقويم المسجل:", { exact: false }).waitFor();
-      expect(writes).toEqual(mode === "stale" ? [expectedPayload, expectedPayload] : [expectedPayload]);
+      expect(writes).toEqual([...(mode === "stale" ? [expectedPayload] : []), expectedPayload, confirmedPayload]);
       const appointments = (await db.query<{ id: number; patient_id: number; service_id: number; appointment_type: string; doctor_id: number; duration_minutes: number }>(
         "SELECT id, patient_id, service_id, appointment_type, doctor_id, duration_minutes FROM appointments WHERE patient_id=$1 ORDER BY id", [patientId],
       )).rows;

@@ -4,7 +4,6 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { addPlanItem, doctorOwnsPatient, findUserByUsername, getPlanCurrency, getPlanPatientId, getService, getSettings, recordAudit, removePlanItem, updatePlanItem } from "@/lib/db";
 import { agreementPricedService, checkInvoiceAuthority, formatPriceOverrides, type InvoicePriceOverride } from "@/lib/invoice-pricing";
 import { foreignRatesFromSettings } from "@/lib/service-pricing";
-import { canHandleMoney } from "@/lib/roles";
 import { CLINIC_BASE_CURRENCY, parseAmount } from "@/lib/money";
 import { requireSession } from "@/lib/session";
 import type { BillingRule } from "@/lib/plans";
@@ -28,7 +27,7 @@ const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 
 const forbidden = () =>
-  NextResponse.json({ message: "خطط العلاج للإدارة والاستقبال." }, { status: 403 });
+  NextResponse.json({ message: "تعديل بنود العلاج للإدارة والطبيب المخوّل." }, { status: 403 });
 
 const planIdFrom = async (context: { params: Promise<{ id: string }> }) => {
   const { id } = await context.params;
@@ -65,7 +64,7 @@ async function doctorBlockedForPlan(session: { username: string; role: string; p
     return "غير مصرّح لك بإضافة أو تعديل بنود خطة العلاج.";
   }
   const doctorPartyId = user?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
-  if (!doctorPartyId) return "خطط العلاج للإدارة والاستقبال.";
+  if (!doctorPartyId) return "تعديل بنود العلاج للإدارة والطبيب المخوّل.";
   const patientId = await getPlanPatientId(planId).catch(() => null);
   if (patientId === null) return "رقم الخطة غير صالح.";
   const owns = await doctorOwnsPatient(doctorPartyId, patientId).catch(() => false);
@@ -76,13 +75,13 @@ async function doctorBlockedForPlan(session: { username: string; role: string; p
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "admin" && session.role !== "doctor") return forbidden();
 
   const planId = await planIdFrom(context);
   if (!planId) return NextResponse.json({ message: "رقم الخطة غير صالح." }, { status: 400 });
 
   const doctorBlocked = await doctorBlockedForPlan(session, planId);
   if (doctorBlocked) return NextResponse.json({ message: doctorBlocked }, { status: 403 });
-  if (session.role !== "doctor" && !canHandleMoney(session.role)) return forbidden();
 
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
@@ -200,13 +199,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "admin" && session.role !== "doctor") return forbidden();
 
   const planId = await planIdFrom(context);
   if (!planId) return NextResponse.json({ message: "رقم الخطة غير صالح." }, { status: 400 });
 
   const doctorBlocked = await doctorBlockedForPlan(session, planId);
   if (doctorBlocked) return NextResponse.json({ message: doctorBlocked }, { status: 403 });
-  if (session.role !== "doctor" && !canHandleMoney(session.role)) return forbidden();
 
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
@@ -244,13 +243,13 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "admin" && session.role !== "doctor") return forbidden();
 
   const planId = await planIdFrom(context);
   if (!planId) return NextResponse.json({ message: "رقم الخطة غير صالح." }, { status: 400 });
 
   const doctorBlocked = await doctorBlockedForPlan(session, planId);
   if (doctorBlocked) return NextResponse.json({ message: doctorBlocked }, { status: 403 });
-  if (session.role !== "doctor" && !canHandleMoney(session.role)) return forbidden();
 
   const itemId = Number(new URL(request.url).searchParams.get("itemId"));
   if (!Number.isInteger(itemId) || itemId <= 0) {

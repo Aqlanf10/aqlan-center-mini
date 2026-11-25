@@ -26,6 +26,8 @@ beforeAll(async () => {
     [`ARRH-${suffix}-${stamp}`, `وصول ${suffix}`, primary])).rows[0].id;
   ownedId = await insert("A", doctor.party_id);
   otherId = await insert("B", null);
+  await db.query(`INSERT INTO appointments (patient_id, scheduled_date, scheduled_time)
+                  VALUES ($1, (now() AT TIME ZONE 'Asia/Aden')::date, '09:00')`, [ownedId]);
   await db.query(`INSERT INTO patient_opening_balances (patient_id, currency, amount_minor, as_of_date, created_by)
                   VALUES ($1, 'YER', 90000, CURRENT_DATE, 'm'), ($1, 'SAR', 3000, CURRENT_DATE, 'm')`, [ownedId]);
 }, 120_000);
@@ -42,13 +44,17 @@ describe("(P0-D) arrival panel access", () => {
     }
   });
 
-  it("the cashier gets money only — no appointments, cases or orthodontic detail; collection follows the role", async () => {
+  it("keeps orthodontic details off both desks and shows them to the treating doctor", async () => {
     await db.query(`INSERT INTO ortho_cases (patient_id, created_by, upper_wire) VALUES ($1, 'dr', '019×025 SS')`, [ownedId]);
     const cashier = await (await get("cashier", ownedId)).json() as Record<string, unknown>;
     expect(cashier).toMatchObject({ appointments: [], cases: [], ortho: null, activeVisit: null, canCollect: true });
     expect(JSON.stringify(cashier)).not.toContain("019×025");
     const reception = await (await get("reception", ownedId)).json() as { ortho: { upperWire: string } | null; canCollect: boolean };
-    expect(reception).toMatchObject({ ortho: { upperWire: "019×025 SS" }, canCollect: true });
+    expect(reception).toMatchObject({ ortho: null, canCollect: true });
+    expect(JSON.stringify(reception)).not.toContain("019×025");
+    const clinical = await get("doctorA", ownedId);
+    expect(clinical.status).toBe(200);
+    expect(await clinical.json()).toMatchObject({ ortho: { upperWire: "019×025 SS" } });
   });
 
   it("a doctor sees only own patients, and no money without the payments permission", async () => {
@@ -58,6 +64,12 @@ describe("(P0-D) arrival panel access", () => {
     const other = await get("doctorA", otherId);
     expect(other.status).toBe(403);
     expect(((await other.json()) as { message: string }).message).toMatch(/[؀-ۿ]/);
+  });
+
+  it("shows an unassigned patient’s arrival information without money or collection", async () => {
+    const response = await get("reception", otherId);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ money: null, ortho: null, canCollect: false });
   });
 
   it("the accountant does not reach the arrival panel; bad ids are refused in Arabic", async () => {

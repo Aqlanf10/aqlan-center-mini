@@ -32,6 +32,9 @@ const parseCaseId = (value: unknown): number | null | "invalid" => {
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "admin" && session.role !== "doctor") {
+    return NextResponse.json({ message: "هذا السجل للطاقم السريري المخوّل." }, { status: 403 });
+  }
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
 

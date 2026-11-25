@@ -18,7 +18,8 @@ let h: Awaited<ReturnType<typeof harness>>;
 let browser: Browser;
 let db: Client;
 const stamp = Date.now();
-const fixtureDay = "2000-03-03";
+// Keep the reporting day separate from the receipt-provenance fixture after clinic-time conversion.
+const fixtureDay = "2000-04-11";
 const fixtureAt = `${fixtureDay}T10:00:00.000Z`;
 const artifacts = ".collections-native-artifacts";
 const receiverA = `SYN-A-${stamp.toString(36)}`;
@@ -130,7 +131,7 @@ beforeAll(async () => {
   // A later unrelated SAR plan must not make an old unlinked receipt look linked.
   // This insert shape is shared with existing Postgres integrity tests.
   await db.query(`INSERT INTO treatment_plans (patient_id, title, total_minor, base_currency, status, start_date, created_at)
-    VALUES ($1, 'SYNTHETIC-UNRELATED-SAR', 0, 'SAR', 'completed', '2000-03-04', '2000-03-04T10:00:00Z')`, [unknown.patientId]);
+    VALUES ($1, 'SYNTHETIC-UNRELATED-SAR', 0, 'SAR', 'completed', '2000-04-12', '2000-04-12T10:00:00Z')`, [unknown.patientId]);
   await receipt(unknown, { note: "NCUNK", currency: "SAR", amount: 6000, base: 9000, rate: 150, unlinked: true, receiver: receiverB,
     nativeMinor: 6000, nativeText: "60.00 ر.س", amountText: "60.00 ر.س", exportText: "60.00 SAR" });
   const usd = await patient("USD", "USD", 9876);

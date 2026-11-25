@@ -59,8 +59,13 @@ describe("historical archive financial scope and safe merge over HTTP", () => {
     const response = await authedGet(`/api/patients/${other}/legacy`, permitted);
     expect(response.status).toBe(404); expect(await response.text()).not.toContain("treatments");
   });
-  it.each(["admin", "reception", "permitted"])("returns the preserved import plus internal provenance identity to %s", async (role) => {
-    const session = role === "permitted" ? permitted : h.sessions[role as "admin" | "reception"];
+  it("denies reception access to the clinical archive", async () => {
+    const response = await authedGet(`/api/patients/${own}/legacy`, h.sessions.reception);
+    expect(response.status).toBe(403);
+    expect(Object.keys(await response.json())).toEqual(["message"]);
+  });
+  it.each(["admin", "permitted"])("returns the preserved import plus internal provenance identity to %s", async (role) => {
+    const session = role === "permitted" ? permitted : h.sessions.admin;
     const response = await authedGet(`/api/patients/${own}/legacy`, session); expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.treatments).toEqual([expect.objectContaining({ id: archiveId, legacyNumber: 1000000 + own,

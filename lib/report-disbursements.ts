@@ -241,7 +241,14 @@ export async function loadDisbursementReport(
     "GROUP BY m.id, m.entry_date",
   ].join("\n"), [from, to, [...liquidity.keys()]])).rows as ManualSource[], currency);
   const vouchers = expenses.movements.map(item => voucherRow(item, payee(item), category(item)));
-  const rows = [...vouchers, ...refunds.rows, ...manual].sort((a, b) => b.at.localeCompare(a.at) || b.serial - a.serial).map(item => item.row);
+  // Group by the clinic-local day, not the UTC date embedded in a timestamp.
+  // Date-only manual entries have no proven time; display them after timed
+  // movements for their day instead of inventing a chronological position.
+  const rows = [...vouchers, ...refunds.rows, ...manual].sort((a, b) =>
+    String(b.row.day).localeCompare(String(a.row.day))
+    || Number(a.row.time == null) - Number(b.row.time == null)
+    || b.at.localeCompare(a.at)
+    || b.serial - a.serial).map(item => item.row);
   addKpis(base.kpis, "voucher", "صافي سندات الصرف", vouchers.map(item => item.row), currency);
   addKpis(base.kpis, "refund-cash", "ردود المرضى المسجّلة نقدًا", refunds.groups.cash, currency);
   addKpis(base.kpis, "refund-bank", "ردود المرضى المسجّلة بحوالة", refunds.groups.transfer, currency);

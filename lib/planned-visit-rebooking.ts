@@ -51,7 +51,7 @@ const INTENT_CONFLICT = "استُخدم رقم هذه المحاولة لطلب 
 export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: SessionPayload): Promise<PlannedRebookResult> {
   const parsed = parsePlannedRebookIntent(input.plannedVisitId, {
     expectedAppointmentId: input.expectedAppointmentId, expectedGeneration: input.expectedGeneration, date: input.date, time: input.time,
-    reason: input.reason, requestId: input.requestId,
+    reason: input.reason, requestId: input.requestId, nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation,
   });
   if (!parsed) return { ok: false, status: 400, message: "أدخل موعدًا صحيحًا وسبب إعادة الحجز ورقم محاولة صالحًا." };
   input = parsed;
@@ -160,7 +160,8 @@ export async function rebookPlannedVisit(input: PlannedRebookIntent, admitted: S
         service = serviceId ? await lockAppointmentServiceForBooking(client, serviceId) : null;
         if (serviceId && !service?.isActive) reject(409, "خدمة الموعد غير متاحة للحجز. راجع الجلسة أولًا.");
         if (old.chair_no !== null && (old.chair_no < 1 || old.chair_no > capacityContext.chairs)) reject(409, "كرسي الموعد غير متاح. راجع الجلسة أولًا.");
-        const judged = await judgeBookingInDay({ sameDay: day, client, date: input.date, time: input.time,
+        const judged = await judgeBookingInDay({ nearbyAppointmentConfirmation: input.nearbyAppointmentConfirmation,
+          bookingActor: JSON.stringify([admitted.userId, admitted.username]), bookingScope: JSON.stringify(["planned-rebook", input.plannedVisitId, input.requestId, input.expectedGeneration, input.expectedAppointmentId, input.reason]), sameDay: day, client, date: input.date, time: input.time,
           durationMinutes: plan.duration_minutes, service, context: capacityContext,
           providerId: doctorId, chairNo: old.chair_no, isNewPatient: old.is_new_patient,
           patientId: plan.patient_id, canOverride: false, overrideReason: "" });
