@@ -68,8 +68,27 @@ describe("clinical document transport (synthetic only)", () => {
     m.session.mockResolvedValue({ role: "doctor", username: "synthetic" });
     m.access.mockResolvedValue(false);
     expect((await list(request, context)).status).toBe(403);
-    expect((await download(request, context)).status).toBe(403);
+    expect((await download(request, context)).status).toBe(404);
     expect(m.list).not.toHaveBeenCalled();
+    expect(m.bytes).not.toHaveBeenCalled();
+  });
+  it("does not distinguish an inaccessible or removed document from an unknown ID", async () => {
+    m.session.mockResolvedValue({ role: "doctor", username: "synthetic" });
+    m.access.mockResolvedValue(false);
+    const inaccessible = await download(request, context);
+    m.lookup.mockResolvedValue(null);
+    const unknown = await download(request, context);
+    m.access.mockResolvedValue(true);
+    m.lookup.mockResolvedValue({
+      document: { ...saved, mimeType: "application/pdf", removedAt: "2026-01-01T00:00:00Z" },
+      storageKey: "synthetic-key",
+    });
+    const removed = await download(request, context);
+    for (const response of [inaccessible, unknown, removed]) {
+      expect(response.status).toBe(404);
+      expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(await response.json()).toEqual({ message: "المستند غير موجود." });
+    }
     expect(m.bytes).not.toHaveBeenCalled();
   });
   it.each(["reception", "doctor"])("saves a synthetic external PDF and projects the correct receipt for %s", async role => {
