@@ -49,6 +49,15 @@ describe("restore numbering floor (planning only, no storage or cutover)", () =>
     expect(planRestoredNumberingFloor({ ...archive, historyComplete: false }, binding, witness))
       .toEqual({ ok: false, reason: "history-unverified" });
   });
+  it.each(["false", "true", 1, undefined, null])("rejects non-boolean history evidence %s", value => {
+    const malformed = { ...archive, historyComplete: value } as unknown as PrefixSnapshot;
+    expect(planRestoredNumberingFloor(malformed, binding, witness))
+      .toEqual({ ok: false, reason: "history-unverified" });
+  });
+  it.each([123, true, " ", "", null, undefined])("rejects malformed archive revision %s", value => {
+    const malformed = { ...archive, revision: value } as unknown as PrefixSnapshot;
+    expect(planRestoredNumberingFloor(malformed, binding, witness).ok).toBe(false);
+  });
   it("rejects exhausted numbers and preserves integer precision", () => {
     expect(planRestoredNumberingFloor(archive, binding, { ...witness, reservedThrough: PATIENT_NUMBER_MAX }))
       .toEqual({ ok: false, reason: "numbering-exhausted" });
