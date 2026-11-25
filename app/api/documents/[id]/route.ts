@@ -40,13 +40,15 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
 
   try {
     const found = await getDocumentForDownload(id);
-    if (!found) return NextResponse.json({ message: "المستند غير موجود." }, { status: 404 });
+    // A scoped doctor must not learn whether an inaccessible document ID exists.
+    const notFound = () => NextResponse.json({ message: "المستند غير موجود." }, {
+      status: 404, headers: { "Cache-Control": "private, no-store" },
+    });
+    if (!found) return notFound();
     if (!(await canAccessPatient(session, found.document.patientId, "canViewXrays"))) {
-      return NextResponse.json({ message: "غير مصرّح لك بعرض هذا المستند." }, { status: 403 });
+      return notFound();
     }
-    if (found.document.removedAt && !isAdmin(session.role)) {
-      return NextResponse.json({ message: "المستند مخفيّ." }, { status: 404 });
-    }
+    if (found.document.removedAt && !isAdmin(session.role)) return notFound();
 
     const bytes = await readFileByKey(found.storageKey);
     if (!bytes) {
