@@ -80,6 +80,25 @@ describe("independent reservation contract (synthetic model only)", () => {
       .toEqual({ ok: false, reason: "watermark-reservation-unconfirmed" });
     expect(store.writes()).toBe(0);
   });
+  it("does not let a queued caller replace unverified archive evidence while waiting for admission", async () => {
+    const store = model(initial());
+    const mutable = { ...archive, historyComplete: false };
+    const pending = reserveRestoredNumber(mutable, binding, store.backend);
+    mutable.historyComplete = true;
+    expect(await pending).toEqual({ ok: false, reason: "history-unverified" });
+    expect(store.writes()).toBe(0);
+  });
+  it("pins the generation, prefix and archive floor before asynchronous admission", async () => {
+    const store = model(initial());
+    const mutableBinding = { ...binding };
+    const mutableArchive = { ...archive, pendingNext: 7050n };
+    const pending = reserveRestoredNumber(mutableArchive, mutableBinding, store.backend);
+    mutableBinding.generation = "synthetic_generation_003";
+    mutableArchive.prefix = "Q";
+    mutableArchive.pendingNext = 7030n;
+    expect(await pending).toEqual({ ok: true, prefix: "P", reserved: "7050" });
+    expect(store.watermark()?.reservedThrough).toBe(7050n);
+  });
   it("honors the pending 7000 floor with no earlier reservation above it", async () => {
     const store = model({ ...initial(), reservedThrough: 42n });
     const start = { ...archive, allocatedThrough: 42n, historicalThrough: 42n, pendingNext: 7000n };
