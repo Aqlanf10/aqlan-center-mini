@@ -3,11 +3,11 @@ import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import {
   CLINIC_TIME_ZONE, closeOrthoCase, findUserByUsername, getOrthoCase, linkOrthoCasePlan, recordAdjustment,
-  setOrthoPhase, setRetainer,
+  getPool, insertAuditRow, setOrthoPhase, setRetainer,
 } from "@/lib/db";
 import { isElasticClass, PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
 import { clinicDateString } from "@/lib/schedule";
-import { requireSession } from "@/lib/session";
+import { requireSession, revalidateSessionInTransaction } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
@@ -107,6 +107,44 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const source = (body ?? {}) as Record<string, unknown>;
 
   try {
+    if ("responsibleDoctorId" in source) {
+      if (session.role !== "admin") return forbidden("تعيين طبيب الحالة من صلاحيات الإدارة.");
+      const doctorId = source.responsibleDoctorId;
+      const expected = source.expectedResponsibleDoctorId;
+      const id = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
+      if (!id(doctorId) || (expected !== null && !id(expected))) {
+        return NextResponse.json({ message: "اختر طبيبًا صالحًا من قائمة الأطباء." }, { status: 400 });
+      }
+      const db = await getPool().connect();
+      try {
+        await db.query("BEGIN");
+        const authorized = await revalidateSessionInTransaction(session, db);
+        if (authorized?.role !== "admin") return forbidden("تعيين طبيب الحالة من صلاحيات الإدارة.");
+        const { rows: [current] } = await db.query<{ responsible_doctor_id: number | null }>(
+          "SELECT responsible_doctor_id FROM ortho_cases WHERE id = $1 AND patient_id = $2 AND status IN ('active','retention') FOR UPDATE",
+          [caseId, found.patientId],
+        );
+        if (!current || current.responsible_doctor_id !== expected) {
+          return NextResponse.json({ message: "تغيّرت الحالة. حدّث بياناتها قبل تعيين الطبيب." }, { status: 409 });
+        }
+        const { rows: [doctor] } = await db.query<{ name: string }>(
+          "SELECT name FROM parties WHERE id = $1 AND kind = 'doctor' AND is_active FOR SHARE", [doctorId],
+        );
+        if (!doctor?.name.trim()) return NextResponse.json({ message: "الطبيب المحدد غير نشط أو غير موجود." }, { status: 409 });
+        if (current.responsible_doctor_id !== doctorId) {
+          await db.query("UPDATE ortho_cases SET responsible_doctor_id = $2 WHERE id = $1", [caseId, doctorId]);
+          await insertAuditRow(db, {
+            action: "ortho.responsible_doctor", entity: "ortho_cases", entityId: caseId,
+            actor: authorized.username, actorRole: authorized.role,
+            details: { الطبيب_السابق: current.responsible_doctor_id, الطبيب_الجديد: doctorId },
+          });
+        }
+        await db.query("COMMIT");
+        return NextResponse.json({ ok: true, doctorId, doctorName: doctor.name });
+      } finally {
+        try { await db.query("ROLLBACK"); } finally { db.release(); }
+      }
+    }
     /* (P1-B) ربط الحالة باتفاقها المالي أو فكّه — يغيّر مصدر فوترة الشدّات القادمة، فلمن يملك الخطط. */
     if ("planId" in source) {
       if (!["admin", "doctor", "reception"].includes(session.role)) {
