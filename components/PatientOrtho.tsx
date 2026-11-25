@@ -22,6 +22,7 @@ import {
   friendlyDateLong, friendlyTime, orthoSessionBookedText, toWhatsAppNumber,
 } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
+import { ORTHO_RETURN_REVIEW_CODE, ORTHO_RETURN_REVIEW_MESSAGE } from "@/lib/ortho-adjustment-booking-contract";
 import { useClinicName, useSetting } from "./SettingsProvider";
 import { PatientCeph } from "./PatientCeph";
 import { PatientDiagnosis } from "./PatientDiagnosis";
@@ -603,7 +604,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
           patientId={patientId}
           patientName={patient?.name ?? ""}
           patientPhone={patient?.phone ?? null}
-          draftKey={`next:${saved.adjustmentId}`} contactReady={owner.contact}
+          draftKey={`next:${saved.adjustmentId}`} adjustmentId={saved.adjustmentId} contactReady={owner.contact}
           caseId={saved.caseId}
           doneOn={saved.doneOn}
           nextWeeks={saved.nextWeeks}
@@ -1231,11 +1232,11 @@ function SignTodayVisitCard({ visitId, patientId, onError, onUncertain, onSigned
 }
 
 function NextAppointmentCard({
-  patientId, patientName, patientPhone, caseId, doneOn, nextWeeks,
+  patientId, patientName, patientPhone, caseId, adjustmentId, doneOn, nextWeeks,
   photosUploaded, onDismiss, onError, draftKey, contactReady,
 }: {
   patientId: number; patientName: string; patientPhone: string | null;
-  caseId: number; doneOn: string; nextWeeks: number; photosUploaded: number;
+  caseId: number; adjustmentId: number; doneOn: string; nextWeeks: number; photosUploaded: number;
   draftKey: string; contactReady: boolean;
   onDismiss: () => void; onError: (message: string | null) => void;
 }) {
@@ -1247,7 +1248,7 @@ function NextAppointmentCard({
   const [date, setDate] = form.field("date", suggested);
   const [time, setTime] = form.field("time", "16:00");
   const busy = form.draft.busy;
-  const [booked] = form.field<{ date: string; time: string } | null>("booked", null);
+  const [booked] = form.field<{ date: string; time: string; doctorName: string } | null>("booked", null);
   // The card survives Back/success, but a captured form command must not.
   // Retained draft values alone cannot distinguish two separate form openings.
   const bookingView = useMemo(() => makeViewLease(), [booking, form.draft]);
@@ -1257,6 +1258,34 @@ function NextAppointmentCard({
   }, [bookingView, booking]);
   const currentBookingView = () => bookingView.active && form.draft.values.get("booking") === true
     && !form.draft.values.get("booked");
+
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [previewState, setPreviewState] = useState<{
+    owner: typeof bookingView; attempt: number; clinician: { id: number; name: string; fingerprint: string } | null;
+  } | null>(null);
+  const currentPreview = previewState?.owner === bookingView && previewState.attempt === previewAttempt ? previewState : null;
+  const clinician = booking && contactReady ? currentPreview?.clinician ?? null : null;
+  useEffect(() => {
+    if (!booking || !contactReady || booked) return;
+    const controller = new AbortController();
+    const query = new URLSearchParams({ patientId: String(patientId), adjustmentId: String(adjustmentId) });
+    const writePreview = (next: NonNullable<typeof previewState>["clinician"]) => {
+      if (!controller.signal.aborted && bookingView.active) setPreviewState({ owner: bookingView, attempt: previewAttempt, clinician: next });
+    };
+    void (async () => {
+      try {
+        const response = await fetch(`/api/ortho/${caseId}/return-booking?${query}`, { cache: "no-store", signal: controller.signal });
+        const p = response.ok ? await response.json() : null;
+        writePreview(p?.ok === true && p.patientId === patientId && p.caseId === caseId && p.adjustmentId === adjustmentId
+          && Number.isSafeInteger(p.doctorId) && p.doctorId > 0 && typeof p.doctorName === "string" && p.doctorName.trim()
+          && typeof p.fingerprint === "string" && /^[a-f0-9]{64}$/.test(p.fingerprint)
+          ? { id: p.doctorId, name: p.doctorName, fingerprint: p.fingerprint } : null);
+      } catch {
+        writePreview(null);
+      }
+    })();
+    return () => controller.abort();
+  }, [booking, contactReady, booked, bookingView, previewAttempt, caseId, adjustmentId, patientId]);
 
   const message = booked
     ? orthoSessionBookedText({
@@ -1276,6 +1305,7 @@ function NextAppointmentCard({
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (!clinician) return;
     const operation = form.begin(currentBookingView() && contactReady && form.owner.contact);
     if (!operation) return;
     onError(null);
@@ -1285,6 +1315,7 @@ function NextAppointmentCard({
         body: JSON.stringify({
           patientId, date, time, durationMinutes: 15,
           appointmentType: "follow_up",
+          orthoReturn: { caseId, adjustmentId, fingerprint: clinician.fingerprint },
           note: "جلسة شدّ تقويم — من كابينة التقويم",
         }),
       });
@@ -1293,10 +1324,18 @@ function NextAppointmentCard({
       if (!form.current(operation)) return;
       if (!response.ok) {
         if (response.status >= 500) form.uncertain();
+        if (payload?.code === ORTHO_RETURN_REVIEW_CODE) setPreviewAttempt((n) => n + 1);
         onError(payload?.suggestionMessage || payload?.message || "تعذّر الحجز.");
         return;
       }
-      form.commit("booked", { date, time });
+      if (!Number.isSafeInteger(payload?.id) || payload.id <= 0 || payload.patientId !== patientId
+        || payload.doctorId !== clinician.id || payload.scheduledDate !== date || payload.scheduledTime !== time
+        || typeof payload.doctorName !== "string" || !payload.doctorName.trim()) {
+        form.uncertain();
+        onError("تعذّر التحقق من الموعد المحفوظ. راجع المواعيد قبل تكرار الحجز.");
+        return;
+      }
+      form.commit("booked", { date: payload.scheduledDate, time: payload.scheduledTime, doctorName: payload.doctorName });
       bookingView.retire();
       form.commit("booking", false);
     } catch {
@@ -1322,6 +1361,7 @@ function NextAppointmentCard({
         {friendlyDateLong(booked?.date ?? suggested)} — متابعة تقويم وشد · 15 دقيقة
         {booked ? ` · الساعة ${friendlyTime(booked.time)}` : ""}
       </p>
+      {booked?.doctorName ? <p className="mb-2 text-xs text-emerald-900">الموعد مع: {booked.doctorName}</p> : null}
 
       {booked ? (
         <>
@@ -1358,6 +1398,11 @@ function NextAppointmentCard({
         </div>
       ) : (
         <form onSubmit={submit} className="rounded-xl border border-emerald-200 bg-white p-3">
+          {clinician ? <p className="mb-2 text-xs font-bold">الطبيب المسؤول: {clinician.name}</p>
+            : currentPreview ? <div role="status" className="mb-2 text-xs">
+              {ORTHO_RETURN_REVIEW_MESSAGE}
+              {" "}<button type="button" className="underline" onClick={() => setPreviewAttempt((n) => n + 1)}>حدّث الطبيب المسؤول</button>
+            </div> : <p role="status" className="mb-2 text-xs">جارٍ التحقق من الطبيب المسؤول…</p>}
           <div className="mb-2 flex flex-wrap gap-2">
             <label className="min-w-[9rem] flex-1">
               <span className="mb-1 block text-[10px] font-bold text-slate-500">التاريخ المقترح</span>
@@ -1373,7 +1418,7 @@ function NextAppointmentCard({
             </label>
           </div>
           <div className="flex gap-2">
-            <button type="submit" disabled={busy || form.draft.uncertain || !contactReady || !date || !time}
+            <button type="submit" disabled={busy || form.draft.uncertain || !contactReady || !clinician || !date || !time}
               className="flex-1 rounded-xl bg-emerald-600 py-2 text-xs font-black text-white disabled:opacity-50">
               {busy ? "جارٍ الحجز…" : "أكّد الحجز"}
             </button>
