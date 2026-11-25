@@ -25,7 +25,7 @@ const noDoctor = { ok: false, code: "responsibility_missing" } as const;
  * of leaving day capacity locked. The case UPDATE lock also serializes a new bridge link.
  */
 export async function readOrthoAdjustmentBookingContext(
-  client: Runner, input: { patientId: number; caseId: number; adjustmentId: number }, lock = false,
+  client: Runner, input: { patientId: number; caseId: number; adjustmentId: number; visitId?: number }, lock = false,
 ): Promise<OrthoAdjustmentBookingContext> {
   const { patientId, caseId, adjustmentId } = input;
   if (![patientId, caseId, adjustmentId].every(positiveId)) return missing;
@@ -34,10 +34,12 @@ export async function readOrthoAdjustmentBookingContext(
     FROM ortho_cases WHERE id = $1 AND patient_id = $2${lock ? " FOR UPDATE NOWAIT" : ""}
   `, [caseId, patientId]);
   if (!ortho || !["active", "retention"].includes(ortho.status)) return missing;
+  const visitConstraint = input.visitId === undefined ? "" : " AND visit_id = $3";
+  const adjustmentParams = input.visitId === undefined ? [adjustmentId, caseId] : [adjustmentId, caseId, input.visitId];
   const { rows: [adjustment] } = await client.query<Adjustment>(`
     SELECT id, case_id, xmin::text AS revision
-    FROM ortho_adjustments WHERE id = $1 AND case_id = $2${lock ? " FOR SHARE NOWAIT" : ""}
-  `, [adjustmentId, caseId]);
+    FROM ortho_adjustments WHERE id = $1 AND case_id = $2${visitConstraint}${lock ? " FOR SHARE NOWAIT" : ""}
+  `, adjustmentParams);
   if (!adjustment) return missing;
 
   let bridge: ClinicalBridge | undefined;
