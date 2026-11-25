@@ -23,6 +23,7 @@ import {
   OrthoPlanTab,
   OrthoRetentionTab,
 } from "./OrthoDiagnosisPlanRetentionTabs";
+import { OrthoScientificAnalysisTab } from "./OrthoScientificAnalysisTab";
 import { useSession } from "@/components/SessionProvider";
 
 export interface AdvancedOrthoWorkspaceProps {
@@ -385,9 +386,15 @@ export function AdvancedOrthoWorkspace({
             onChange: handleRecordChange,
           })
         ) : (
-          <div className="rounded-xl border border-slate-200 bg-white p-6 text-xs text-slate-600">
-            وحدة القياسات والتحليلات العلمية (السيفالومتري، Bolton، Moyers، Tanaka-Johnston، Nance، Pont، Ashley Howe).
-          </div>
+          <OrthoScientificAnalysisTab
+            record={record}
+            actorName={actorName}
+            canEdit={canEdit}
+            canPerform={perms.can("measurements.perform")}
+            canApprove={perms.can("measurements.approve")}
+            onChange={handleRecordChange}
+            onOpenCephTab={() => setActiveTab("sessions")}
+          />
         )
       )}
 
