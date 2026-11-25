@@ -346,6 +346,11 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </span>
               </div>
 
+              {plan.items.length > 0 || (plan.status === "active" && !plan.consentAt) ? (
+                <PlanItems plan={plan} canSeeFinancial={canSeeFinancial} context={context} onOpenItem={(item, target) => openItem(plan.id, item, target)} registerGuard={registerItemGuard}
+                  onChanged={() => void load()} onError={setError} />
+              ) : null}
+
               {canSeeFinancial && hasHistory && !plan.approvedAgreement ? <section role="status" data-testid="historical-plan-principal" className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm">
                 <p className="font-bold">{coverageVerified ? "مصدر العلاج اتفاق تاريخي قائم" : "يلزم مراجعة المصدر التاريخي"}</p>
                 <p>لا تعتمد قيمة الخطة كالتزام جديد. راجع الاتفاق التاريخي ورصيد الحساب من الحساب؛ تعديل المصدر السابق له مساره المستقل.</p>
@@ -355,7 +360,7 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
               {canSeeFinancial && session?.role === "admin" && plan.status !== "cancelled"
                 && !plan.approvedAgreement && !plan.totalFromItems && (plan.hasInstallments || plan.installments.length > 0)
                 ? <AgreementReconciliationPanel patientId={patientId} planId={plan.id} onChanged={load} disabled={busy || money.attempt !== null} /> : null}
-              {approvalUnavailable ? <p data-testid="plan-amount-summary" role="status" className="mb-2 text-sm text-amber-800">الرصيد الحالي غير متاح؛ يلزم مراجعة مصدر الاتفاق.</p> : <div data-testid="plan-amount-summary" className="mb-2 grid grid-cols-3 gap-2 text-center">
+              {approvalUnavailable ? <p data-testid="plan-amount-summary" role="status" className="mb-2 text-sm text-amber-800">الرصيد الحالي غير متاح؛ يلزم مراجعة مصدر الاتفاق.</p> : <div data-testid="plan-amount-summary" className="mb-2 grid min-w-0 grid-cols-3 gap-2 break-words text-center [overflow-wrap:anywhere]">
                 <div className="rounded-xl bg-slate-50 p-2">
                   <p className="text-sm font-bold">{currentTotal === undefined ? "غير متاح" : formatMoney(currentTotal, plan.baseCurrency)}</p>
                   <p className="text-[11px] text-slate-500">
@@ -366,11 +371,11 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                   <>
                     <div className="rounded-xl bg-emerald-50 p-2">
                       <p className="text-sm font-extrabold text-emerald-800">{formatMoney(currentFinancial?.paidMinor ?? plan.progress.paidMinor, plan.baseCurrency)}</p>
-                      <p className="text-[11px] text-emerald-700">المدفوع</p>
+                      <p className="text-[11px] text-emerald-700">المدفوع لهذه الخطة</p>
                     </div>
                     <div className="rounded-xl bg-slate-50 p-2">
                       <p className="text-sm font-bold">{formatMoney(currentFinancial?.remainingMinor ?? plan.progress.remainingMinor, plan.baseCurrency)}</p>
-                      <p className="text-[11px] text-slate-500">الباقي</p>
+                      <p className="text-[11px] text-slate-500">المتبقي لهذه الخطة</p>
                     </div>
                   </>
                 ) : (
@@ -493,10 +498,6 @@ function PatientPlansContent({ patientId, context, onOpenClinicalContext, onNavi
                 </div>
               ) : null}
 
-              {plan.items.length > 0 || (plan.status === "active" && !plan.consentAt) ? (
-                <PlanItems plan={plan} canSeeFinancial={canSeeFinancial} context={context} onOpenItem={(item, target) => openItem(plan.id, item, target)} registerGuard={registerItemGuard}
-                  onChanged={() => void load()} onError={setError} />
-              ) : null}
 
               {plan.status === "active" && !plan.consentAt && coverageVerified && (plan.items.length > 0 || !plan.totalFromItems && plan.totalMinor > 0) ? (
                 consentFor === plan.id ? (
@@ -737,7 +738,7 @@ function PlanItems({ plan, canSeeFinancial, context, onOpenItem, registerGuard, 
                       : "border-slate-200 bg-white/60"
                 }`}>
                 <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/60 pb-1.5">
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <span className={`flex h-5 w-5 items-center justify-center rounded-lg text-[10px] font-black ${
                       allDone ? "bg-emerald-600 text-white" : "bg-navy-800 text-white"
                     }`}>
@@ -755,9 +756,9 @@ function PlanItems({ plan, canSeeFinancial, context, onOpenItem, registerGuard, 
                 <ul className="space-y-1">
                   {group.items.map((item) => (
                     <li key={item.id} data-testid={`plan-item-${item.id}`} aria-current={context?.planItemId === item.id ? "true" : undefined} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs">
-                      <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                      <span className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
                         {item.status === "done" ? <span className="text-emerald-600">✓</span> : null}
-                        <span className={`truncate font-bold ${item.status === "done" ? "text-emerald-700" : ""}`}>
+                        <span className={`min-w-0 max-w-full break-words font-bold [overflow-wrap:anywhere] ${item.status === "done" ? "text-emerald-700" : ""}`}>
                           {item.serviceName}
                         </span>
                         {item.toothCode ? (
@@ -770,7 +771,7 @@ function PlanItems({ plan, canSeeFinancial, context, onOpenItem, registerGuard, 
                         ) : null}
                         {item.billingStatus === "needs_financial_review" ? (
                           <span role="status" data-testid={`plan-item-financial-review-${item.id}`}
-                            className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-900">
+                            className="max-w-full break-words rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold text-amber-900 [overflow-wrap:anywhere]">
                             يحتاج مراجعة مالية — لا تُنشأ فاتورة جديدة لهذا البند
                           </span>
                         ) : item.billingStatus === "billed" ? (

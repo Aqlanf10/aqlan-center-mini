@@ -186,13 +186,13 @@ describe("plan receipt visibility over actual authenticated HTTP", () => {
       const card = page.locator("li").filter({ has: page.getByText(title, { exact: true }) });
       await card.waitFor();
       expect(await card.innerText()).toContain("باقي العلاج");
-      expect(await card.getByText("المدفوع", { exact: true }).count()).toBe(0);
+      expect(await card.getByText("المدفوع لهذه الخطة", { exact: true }).count()).toBe(0);
       expect(await card.getByRole("button", { name: "تحصيل قسط" }).count()).toBe(0);
       expect(await card.locator("summary").filter({ hasText: "جدول الأقساط" }).count()).toBe(0);
       expect(await card.innerText()).not.toContain("متأخر:");
       await page.reload({ waitUntil: "domcontentloaded" });
       await card.waitFor();
-      expect(await card.getByText("المدفوع", { exact: true }).count()).toBe(0);
+      expect(await card.getByText("المدفوع لهذه الخطة", { exact: true }).count()).toBe(0);
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
       expect(await page.locator("html").getAttribute("dir")).toBe("rtl");
       const summary = card.getByTestId("plan-amount-summary");
@@ -227,7 +227,15 @@ describe("plan receipt visibility over actual authenticated HTTP", () => {
     try {
       await page.goto(`${baseUrl}/patients/${patientId}?tab=plans`, { waitUntil: "domcontentloaded" });
       const content = page.getByTestId("patient-plans-content");
-      await content.getByText("المدفوع", { exact: true }).waitFor();
+      await content.getByText("المدفوع لهذه الخطة", { exact: true }).waitFor();
+      const summary = content.getByTestId("plan-amount-summary");
+      expect(await summary.innerText()).toContain("المتبقي لهذه الخطة");
+      const treatment = await content.getByLabel("أسطح البند", { exact: true }).elementHandle();
+      expect(treatment).not.toBeNull();
+      expect(await summary.evaluate((money, clinical) =>
+        Boolean(clinical && (clinical.compareDocumentPosition(money) & Node.DOCUMENT_POSITION_FOLLOWING)), treatment!)).toBe(true);
+      await readableCard(summary);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
       await content.getByRole("button", { name: "تحصيل قسط", exact: true }).click();
       await content.getByLabel("مبلغ القسط", { exact: true }).fill("55");
       const reread = page.waitForResponse((res) => new URL(res.url()).pathname === patientPath() && res.request().method() === "GET");
@@ -243,7 +251,7 @@ describe("plan receipt visibility over actual authenticated HTTP", () => {
       await page.evaluate(() => window.dispatchEvent(new Event("focus")));
       await expect.poll(() => held.length).toBeGreaterThan(0);
       await content.getByText("جارٍ تحديث الخطط…", { exact: true }).waitFor();
-      expect(await content.getByText("المدفوع", { exact: true }).count()).toBe(0);
+      expect(await content.getByText("المدفوع لهذه الخطة", { exact: true }).count()).toBe(0);
       expect(await content.getByRole("button", { name: "تحصيل قسط", exact: true }).count()).toBe(0);
       expect(await content.getByLabel("أسطح البند", { exact: true }).inputValue()).toBe("MO");
       expect(await content.getByLabel("كيف وُثّقت الموافقة").inputValue()).toBe("Synthetic unsaved consent draft");
@@ -261,7 +269,7 @@ describe("plan receipt visibility over actual authenticated HTTP", () => {
         await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(authorized) }).catch(() => {});
       }
       await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-      expect(await content.getByText("المدفوع", { exact: true }).count()).toBe(0);
+      expect(await content.getByText("المدفوع لهذه الخطة", { exact: true }).count()).toBe(0);
       expect(await content.innerText()).not.toContain(title);
       expect(await content.innerText()).not.toContain("لا توجد خطط علاج");
       expect(await content.getByTestId("plans-open-treatment-entry").count()).toBe(0);

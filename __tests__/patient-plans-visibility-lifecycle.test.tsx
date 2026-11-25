@@ -460,6 +460,14 @@ it("uses net invoice principal in the financial summary without rewriting the cl
   const summary = text(find(node => node.props["data-testid"] === "plan-amount-summary"));
   expect(summary).toContain("450,000");expect(summary).toContain("180,000");expect(summary).toContain("270,000");
   expect(summary).not.toContain("500,000");
+  expect(summary).toContain("المدفوع لهذه الخطة");
+  expect(summary).toContain("المتبقي لهذه الخطة");
+  expect(summary).not.toContain("رصيد حساب المريض");
+  const nodes = elements(render());
+  const clinicalItemsIndex = nodes.findIndex(node => typeof node.type === "function" && node.type.name === "PlanItems");
+  const moneyIndex = nodes.findIndex(node => node.props["data-testid"] === "plan-amount-summary");
+  expect(clinicalItemsIndex).toBeGreaterThanOrEqual(0);
+  expect(moneyIndex).toBeGreaterThan(clinicalItemsIndex);
 });
 
 
