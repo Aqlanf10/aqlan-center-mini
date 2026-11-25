@@ -41,7 +41,7 @@ function elements(node: ReactNode): Element[] {
   if (!node || typeof node !== "object" || !("props" in node)) return [];
   const e = node as Element; return [e, ...elements(e.props.children as ReactNode)];
 }
-const workflow = () => ({ patient: { id: 1 }, canSeeFinancial: true,
+const workflow = () => ({ patient: { id: 1 }, openVisit: { id: 10 }, canSeeFinancial: true,
   financial: { byCurrency: { YER: { balanceMinor: 180000 }, SAR: { balanceMinor: 0 }, USD: { balanceMinor: 0 } } } });
 const walkout = (balance = 180000) => ({ visitId: 10, patientId: 1, patientName: "Synthetic",
   signedAt: "2026-10-09T10:00:00Z", arrivedAt: "2026-10-09T09:00:00Z", signedToday: true,
@@ -51,11 +51,11 @@ const walkout = (balance = 180000) => ({ visitId: 10, patientId: 1, patientName:
   checkout: { previous: { YER: 180000, SAR: 0, USD: 0 }, current: { YER: balance, SAR: 0, USD: 0 }, invoicePaidMinor: 0 } });
 const response = (body: unknown, ok = true) => ({ ok, json: async () => body });
 const turns = async () => { for (let n = 0; n < 12; n++) await Promise.resolve(); };
-function mount(patientId = 1) {
+function mount(patientId = 1, hasActive = true) {
   const frame: Frame = { slots: [], cursor: 0, pending: [], layout: [] };
   let tree: ReactElement;
   const props = { patientId, patientName: "Synthetic", base: "YER" as const, canCollect: true, visits: [],
-    summary: { openVisit: { id: 10, arrivedAt: "2026-10-09T09:00:00Z", status: "in_chair", chair: 1 }, lastVisit: null, plannedVisits: [] } as unknown as WorkflowSummary,
+    summary: { openVisit: hasActive ? { id: 10, arrivedAt: "2026-10-09T09:00:00Z", status: "in_chair", chair: 1 } : null, lastVisit: null, plannedVisits: [] } as unknown as WorkflowSummary,
     onVisitStarted: vi.fn(), onChanged: vi.fn() };
   const render = (afterLayout?: (tree: ReactElement) => void) => { runtime.frame = frame; frame.cursor = 0;
     const owner = TodayVisitTab(props) as ReactElement;
@@ -103,6 +103,66 @@ describe("TodayVisitTab canonical financial read lifetime", () => {
     expect(f.text()).not.toContain("لا مبلغ مطلوب لهذه الزيارة");
     expect(f.text()).not.toContain("لا رصيد سابق"); f.unmount();
   });
+  it("keeps today usable when the verified old checkout has no monetary projection", async () => {
+    const fetcher = vi.fn((url: string) => Promise.resolve(response(url.includes("/workflow") ? workflow()
+      : { patientId: 1, visitId: 9, signedToday: false, signedAt: "2026-10-08T10:00:00Z" })));
+    vi.stubGlobal("fetch", fetcher);
+    const f = mount();
+    f.props.summary.lastVisit = { id: 9, date: "2026-10-08", treatmentDone: null, proceduresSummary: null, nextPlan: null };
+    f.render(); await turns();
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "/api/patients/1/workflow", "/api/visits/9/walkout", "/api/patients/1/workflow",
+    ]);
+    const markup = f.text();
+    expect(markup).not.toContain("تعذّر التحقق من الأرصدة");
+    expect(markup).not.toContain("لا مبلغ مطلوب لهذه الزيارة");
+    expect(markup).not.toContain("شبّاك ما بعد الزيارة");
+    f.unmount();
+  });
+
+  it("keeps the current account verified if optional restoration fails, but never opens that checkout", async () => {
+    const fetcher = vi.fn((url: string) => Promise.resolve(url.includes("/workflow")
+      ? response(workflow()) : response(null, false)));
+    vi.stubGlobal("fetch", fetcher);
+    const f = mount();
+    f.props.summary.lastVisit = { id: 9, date: "2026-10-08", treatmentDone: null, proceduresSummary: null, nextPlan: null };
+    f.render(); await turns();
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "/api/patients/1/workflow", "/api/visits/9/walkout", "/api/patients/1/workflow",
+    ]);
+    const markup = f.text();
+    expect(markup).toContain("تعذّر فتح ملخّص الزيارة السابقة");
+    expect(markup).not.toContain("تعذّر التحقق من الأرصدة");
+    expect(markup).not.toContain("لا مبلغ مطلوب لهذه الزيارة");
+    expect(markup).not.toContain("شبّاك ما بعد الزيارة");
+    f.unmount();
+  });
+
+  it.each([false, true])("keeps the error when the optional restore cannot fall back (active visit: %s)", async (hasActive) => {
+    const fetcher = vi.fn((url: string) => Promise.resolve(url.includes("/workflow") && !hasActive
+      ? response(workflow()) : response(null, false)));
+    vi.stubGlobal("fetch", fetcher);
+    const f = mount(1, hasActive);
+    f.props.summary.lastVisit = { id: 9, date: "2026-10-08", treatmentDone: null, proceduresSummary: null, nextPlan: null };
+    f.render(); await turns();
+    expect(fetcher.mock.calls.filter(([url]) => url.includes("/workflow"))).toHaveLength(hasActive ? 2 : 1);
+    expect(f.text()).toContain("تعذّر التحقق من الأرصدة");
+    expect(f.text()).not.toContain("تعذّر فتح ملخّص الزيارة السابقة");
+    expect(f.text()).not.toContain("لا مبلغ مطلوب لهذه الزيارة");
+    f.unmount();
+  });
+
+  it("does not accept a fallback response for a different active visit", async () => {
+    vi.stubGlobal("fetch", vi.fn((url: string) => Promise.resolve(url.includes("/workflow")
+      ? response({ ...workflow(), openVisit: { id: 11 } }) : response(null, false))));
+    const f = mount();
+    f.props.summary.lastVisit = { id: 9, date: "2026-10-08", treatmentDone: null, proceduresSummary: null, nextPlan: null };
+    f.render(); await turns();
+    expect(f.text()).toContain("تعذّر التحقق من الأرصدة");
+    expect(f.text()).not.toContain("تعذّر فتح ملخّص الزيارة السابقة");
+    f.unmount();
+  });
+
   it("rejects a late pre-collection response after a newer collection refresh", async () => {
     const pending: ((v: unknown) => void)[] = [];
     vi.stubGlobal("fetch", vi.fn((url: string) => url.includes("/workflow") ? Promise.resolve(response(workflow()))

@@ -13,13 +13,13 @@ import { MONEY_UNCERTAIN } from "../../lib/money-attempt";
  */
 let browser: Browser;
 let h: Awaited<ReturnType<typeof harness>>;
-const patientId = 98781, visitId = 98782;
+const patientId = 98781, visitId = 98782, activeVisitId = 98788;
 const patient = { id: patientId, patientNumber: "SYNTHETIC-WALKOUT-98781", fullName: "مريض مغادرة اصطناعي",
   phone: null, altPhone: null, gender: "unknown", birthYear: null, birthDate: null, address: null,
   medicalAlert: null, note: null, createdAt: "2026-10-09T08:00:00Z", photoDocumentId: null, flags: [], email: null, preferredChannel: null };
 const money = (balanceMinor: number) => ({ balanceMinor, invoicedMinor: 0, paidMinor: 0, openingMinor: balanceMinor,
   agreedMinor: 999999, treatmentDoneMinor: 0, remainingTreatmentMinor: 999999, approvedAgreements: null, classicInstallments: { count: 1, totalMinor: 999999, paidMinor: 0, remainingMinor: 999999 } });
-const workflow = () => ({ patient, openVisit: null,
+const workflow = () => ({ patient, openVisit: null as null | { id: number; status: string; chair: number; arrivedAt: string; plannedTitle: null },
   lastVisit: { id: visitId, date: "2026-10-09", treatmentDone: "شدّة موثقة", proceduresSummary: null, nextPlan: null },
   nextAppointment: null, activePlans: [], plannedVisits: [], counts: { visits: 1, openLabOrders: 0, documents: 0, orthoCase: false },
   financial: { ...money(180000), byCurrency: { YER: money(180000), SAR: money(2300), USD: money(0) } },
@@ -52,7 +52,9 @@ describe("built patient walkout verifies balances for reception", () => {
     const heldWalkoutGate = new Promise<void>((resolve) => { releaseHeldWalkoutReads = resolve; });
     let foreignCurrency: "SAR" | "USD" | null = null;
     const paymentAttempts: { body: Record<string, unknown>; key: string | undefined }[] = [];
-    let fault: "none" | "http500" | "json" | "null" | "empty" | "missing" | "amount" | "foreign" | "hold" = "none";
+    let historicalRead = false, workflowAfterHistory = 0;
+    let activeVisit = false, optionalFailureReads = 0, currentBalanceReadsAfterFailure = 0;
+    let fault: "none" | "optionalDenied" | "historical" | "http500" | "json" | "null" | "empty" | "missing" | "amount" | "foreign" | "hold" = "none";
     const routes = await guardBrowserRoutes(context, baseUrl, unexpected, async (route) => {
       const request = route.request(), url = new URL(request.url()), path = url.pathname, method = request.method();
       if (url.origin !== baseUrl) { unexpected.push(`${method} ${url.origin}${path}`); await route.abort(); return; }
@@ -72,7 +74,12 @@ describe("built patient walkout verifies balances for reception", () => {
       }
       if (!["GET", "HEAD", "OPTIONS"].includes(method)) { writes.push(`${method} ${path}`); await json(route, {}, 409); return; }
       if (path === `/api/patients/${patientId}/workflow`) {
+        if (historicalRead) workflowAfterHistory++;
         const body = workflow();
+        if (activeVisit) {
+          body.openVisit = { id: activeVisitId, status: "in_chair", chair: 2, arrivedAt: "2026-10-09T10:00:00Z", plannedTitle: null };
+          if (optionalFailureReads > 0) currentBalanceReadsAfterFailure++;
+        }
         if (foreignCurrency) {
           body.financial = { ...money(0), byCurrency: { YER: money(0), SAR: money(0), USD: money(0) } };
           body.financial.byCurrency[foreignCurrency] = money(2300);
@@ -119,9 +126,15 @@ describe("built patient walkout verifies balances for reception", () => {
           await json(route, walkout());
           return;
         }
+        if (fault === "optionalDenied") { optionalFailureReads++; await json(route, {}, 403); return; }
         if (fault === "http500") { await json(route, {}, 500); return; }
         if (fault === "json") { await route.fulfill({ status: 200, contentType: "application/json", body: "{" }); return; }
         if (fault === "null") { await json(route, null); return; }
+        if (fault === "historical") {
+          historicalRead = true;
+          await json(route, { patientId, visitId, signedToday: false, signedAt: "2026-10-09T09:00:00Z" });
+          return;
+        }
         const body = walkout();
         if (paidInvoice) {
           (body as { invoice: unknown }).invoice = { id: 98784, number: "SYN-PAID", netMinor: 5000, currency: "SAR" };
@@ -145,7 +158,8 @@ describe("built patient walkout verifies balances for reception", () => {
         if (fault === "amount") (body.checkout.current as { YER: unknown }).YER = "0";
         if (fault === "foreign") body.patientId++;
         await json(route, body);
-      } else if (path === `/api/patients/${patientId}/historical-documents`) await json(route, { documents: [] });
+      } else if (path === `/api/visits/${activeVisitId}/clinical` && activeVisit) await json(route, {}, 403);
+      else if (path === `/api/patients/${patientId}/historical-documents`) await json(route, { documents: [] });
       else if (path === `/api/patients/${patientId}/debt-repayments`) await json(route, { patientId, arrangements: [], targets: [] });
       else if (path === "/api/visits/readiness") await json(route, { visit: null });
       else if (path === "/api/visits") await json(route, []);
@@ -184,6 +198,32 @@ describe("built patient walkout verifies balances for reception", () => {
         await state.getByRole("button", { name: "إعادة التحقق من الأرصدة" }).click();
         await expect.poll(() => checkout.innerText()).toContain(formatMoney(180000, "YER"));
       }
+      activeVisit = true;
+      fault = "optionalDenied";
+      await page.reload({ waitUntil: "domcontentloaded" });
+      const optional = page.getByRole("status").filter({ hasText: "تعذّر فتح ملخّص الزيارة السابقة." });
+      await optional.waitFor();
+      await page.getByRole("region", { name: "زيارة اليوم" }).getByText("على الكرسي رقم 2").waitFor();
+      expect(currentBalanceReadsAfterFailure).toBeGreaterThan(0);
+      expect(await page.getByTestId("checkout-financial-read").count()).toBe(0);
+      expect(await checkout.count()).toBe(0);
+      expect(await page.getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).count()).toBe(0);
+      expect(await page.locator("body").innerText()).not.toContain("لا مبلغ مطلوب لهذه الزيارة");
+      const readsBeforeRetry = optionalFailureReads;
+      await optional.getByRole("button", { name: "إعادة المحاولة" }).click();
+      await expect.poll(() => optionalFailureReads).toBeGreaterThan(readsBeforeRetry);
+      await optional.waitFor();
+      expect(await checkout.count()).toBe(0);
+      verify();
+      activeVisit = false;
+
+      fault = "historical";
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await expect.poll(() => workflowAfterHistory).toBeGreaterThan(0);
+      await page.getByTestId("checkout-financial-read").waitFor({ state: "detached" });
+      expect(await checkout.count()).toBe(0);
+      expect(await page.getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).count()).toBe(0);
+      fault = "none";
       // Hold the real restore read deterministically. Until its response arrives,
       // absence of verified money must not expose a payment target or infer zero.
       try {

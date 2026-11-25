@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { workflowBalanceRows, hasWalkoutFinancials } from "../lib/walkout-financial-read";
+import { workflowBalanceRows, hasWalkoutFinancials, isHistoricalWalkoutReference } from "../lib/walkout-financial-read";
 const workflow = () => ({ patient: { id: 1 }, canSeeFinancial: true,
   financial: { byCurrency: { YER: { balanceMinor: 180000 }, SAR: { balanceMinor: 2300 }, USD: { balanceMinor: -100 } } } });
 describe("financial transport integrity", () => {
@@ -30,4 +30,15 @@ describe("financial transport integrity", () => {
     expect(hasWalkoutFinancials({ ...value, checkout: { ...value.checkout, previous: {} } }, 1, 10)).toBe(false);
     expect(hasWalkoutFinancials({ ...value, invoice: { id: 2, currency: "EUR", netMinor: 0 } }, 1, 10)).toBe(false);
   });
+});
+
+it("recognizes an exact signed historical checkout before reading its monetary fields", () => {
+  const historical = { patientId: 1, visitId: 10, signedAt: "2026-11-16T10:00:00Z", signedToday: false };
+  expect(isHistoricalWalkoutReference(historical, 1, 10)).toBe(true);
+  expect(hasWalkoutFinancials(historical, 1, 10)).toBe(false);
+  expect(isHistoricalWalkoutReference(historical, 2, 10)).toBe(false);
+  expect(isHistoricalWalkoutReference(historical, 1, 11)).toBe(false);
+  expect(isHistoricalWalkoutReference({ ...historical, signedToday: true }, 1, 10)).toBe(false);
+  expect(isHistoricalWalkoutReference({ ...historical, signedToday: undefined }, 1, 10)).toBe(false);
+  expect(isHistoricalWalkoutReference({ ...historical, signedAt: null }, 1, 10)).toBe(false);
 });
