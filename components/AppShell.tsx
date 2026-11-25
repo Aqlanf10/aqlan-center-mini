@@ -15,6 +15,7 @@ import { AiStaffChatModal } from "./AiStaffChatModal";
 import { playNewMessageChime, playUrgentChime } from "./Chat";
 import { roleCan } from "@/lib/settings-permissions";
 import { isGatedRole, pageVisibleToRole } from "@/lib/role-routes";
+import { useOrthoPermissions } from "./ortho/useOrthoPermissions";
 
 /**
  * قشرة البرنامج — تنقّل واحد لكل الشاشات مع شريط علوي ذكي وإجراءات سريعة عالمية.
@@ -67,9 +68,12 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
   const { session, logout } = useSessionActions();
 
   const restricted = isGatedRole(session?.role);
+  const bareForPerms = BARE_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  const orthoPerms = useOrthoPermissions({ enabled: Boolean(session) && !bareForPerms });
   const nav = NAV.filter((item) => {
     // (P2-1) الكاشير والمحاسب: القائمة هي قائمة السماح نفسها التي يحرسها الباب.
     if (restricted && !pageVisibleToRole(session?.role, item.href)) return false;
+    if (item.href === "/ortho" && !orthoPerms.loading && !orthoPerms.moduleVisible) return false;
     if (item.needs === "settings") return roleCan(session?.role, "settings.view");
     if (item.needs === "admin") return isAdmin(session?.role);
     if (item.needs === "money") return canHandleMoney(session?.role);

@@ -27,7 +27,8 @@ import { ClinicalVisit } from "@/components/ClinicalVisit";
 import { PatientPlans } from "@/components/PatientPlans";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
-import { PatientOrtho } from "@/components/PatientOrtho";
+import { AdvancedOrthoWorkspace } from "@/components/ortho/AdvancedOrthoWorkspace";
+import { useOrthoPermissions } from "@/components/ortho/useOrthoPermissions";
 import { SPECIALTY_LABEL } from "@/lib/appointment-services";
 import { PatientEndo } from "@/components/PatientEndo";
 import { AssessmentBanner } from "@/components/AssessmentBanner";
@@ -131,6 +132,14 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const router = useRouter();
   const session = useSession();
   const admin = isAdmin(session?.role);
+  const orthoPerms = useOrthoPermissions({ enabled: Boolean(session), patientId: Number(id) || null });
+  const visibleTreatmentSubtabs = useMemo(
+    () =>
+      !orthoPerms.loading && !orthoPerms.moduleVisible
+        ? TREATMENT_SUBTABS.filter((t) => t.id !== "ortho")
+        : TREATMENT_SUBTABS,
+    [orthoPerms.loading, orthoPerms.moduleVisible],
+  );
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
 
@@ -1185,12 +1194,12 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                   if (!setTreatmentSubTab(event.target.value as TreatmentSubTab)) event.currentTarget.value = treatmentSubTab;
                 }}
                 className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-sm font-bold text-navy-900">
-                {TREATMENT_SUBTABS.map((section) => <option key={section.id} value={section.id}>{section.title}</option>)}
+                {visibleTreatmentSubtabs.map((section) => <option key={section.id} value={section.id}>{section.title}</option>)}
               </select>
             </label>
 
             <div className="hidden flex-wrap gap-1 sm:flex" aria-label="أقسام العلاج">
-              {TREATMENT_SUBTABS.map((subTab) => {
+              {visibleTreatmentSubtabs.map((subTab) => {
                 const isSelected = treatmentSubTab === subTab.id;
                 let badgeContent: React.ReactNode = null;
                 if (subTab.id === "ortho" && summary?.counts.orthoCase) {
@@ -1254,7 +1263,18 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />
               <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="orthodontics" />
-              <PatientOrtho onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} onOpenAccount={summary?.canSeeFinancial ? openExistingAccount : undefined} patientId={patient.id} context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)} onContextChange={(context) => openClinicalContext(context, "ortho")} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
+              <AdvancedOrthoWorkspace
+                patientId={patient.id}
+                patientName={patient.fullName}
+                patientCode={patient.patientNumber ?? ""}
+                hasActiveOrthoCase={Boolean(summary?.counts.orthoCase)}
+                onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined}
+                onOpenAccount={summary?.canSeeFinancial ? openExistingAccount : undefined}
+                context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)}
+                onContextChange={(context) => openClinicalContext(context, "ortho")}
+                onClinicalChange={refreshWorkflow}
+                onNavigationGuardChange={trackOrthoGuard}
+              />
             </section>
           )}
 

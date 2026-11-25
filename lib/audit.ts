@@ -96,6 +96,7 @@ export type AuditAction =
   | "ortho.case_create" | "visit.create"
   | "ortho.strategy_revision" | "ortho.assessment.append"
   | "ortho.privacy_policy_update" | "ortho.access_denied"
+  | "ortho.workspace_update" | "ortho.presentation_export" | "ortho.ai_query"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
@@ -378,6 +379,9 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.billing_decision": "قرار فوترة شدّة خارج العقد",
   "ortho.privacy_policy_update": "تعديل سياسة الخصوصية والصلاحيات لوحدة التقويم",
   "ortho.access_denied": "رفض وصول غير مصرح به في وحدة التقويم",
+  "ortho.workspace_update": "تحديث ملف مساحة عمل التقويم",
+  "ortho.presentation_export": "تصدير أو طباعة عرض حالة تقويم (Case Presentation)",
+  "ortho.ai_query": "استعلام عبر AQLAN AI Assistant",
   "appointment.create": "حجز موعد",
   "appointment.capacity_override": "تجاوز منع السعة",
   "appointment.reschedule": "نقل موعد",

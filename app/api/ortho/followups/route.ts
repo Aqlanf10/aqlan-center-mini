@@ -5,24 +5,18 @@ import {
 import { classifyFollowups, groupByBucket, BUCKET_ORDER } from "@/lib/ortho-followup";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
+import { evaluateOrthoPermission, NO_STORE_HEADERS, orthoForbiddenResponse } from "@/lib/ortho-privacy-server";
 
 export const dynamic = "force-dynamic";
 
-/**
- * مركز متابعة التقويم.
- *
- * قائمة يومية للاستقبال والطبيب معًا: كل حالةٍ تقويمٍ جارية في قوائمها — اليوم،
- * غدًا، هذا الأسبوع، بدون موعد قادم، تجاوزوا موعدهم، لم يحضروا، والمتأخرات
- * بالأسابيع، وحالات التثبيت. التصنيف نفسه في `lib/ortho-followup.ts` الخالصة،
- * وهنا القاعدةُ والجلسة وحسب.
- *
- * عزل الطبيب (§٣٩): الطبيب يرى حالات مرضاه وحدهم ما لم يمنحه المدير «عرض جميع
- * المرضى» — والفلترة في الخادم لا في الشاشة، والاستقبال والإدارة يريان الكل.
- */
 export async function GET() {
   const session = await requireSession();
   if (!session) {
-    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
+    return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE_HEADERS });
+  }
+  const accessCheck = await evaluateOrthoPermission(session, { section: "followup" });
+  if (!accessCheck.allowed) {
+    return orthoForbiddenResponse("وحدة متابعة التقويم مخفية أو غير مصرّح بها لحسابك.", { reason: accessCheck.reason });
   }
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   try {
@@ -45,8 +39,8 @@ export async function GET() {
       count: groups.get(bucket)?.length ?? 0,
       rows: groups.get(bucket) ?? [],
     }));
-    return NextResponse.json({ today, buckets });
+    return NextResponse.json({ today, buckets }, { headers: NO_STORE_HEADERS });
   } catch {
-    return NextResponse.json({ message: "تعذّر تحميل لوحة متابعة التقويم." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر تحميل لوحة متابعة التقويم." }, { status: 500, headers: NO_STORE_HEADERS });
   }
 }
