@@ -26,7 +26,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.portal.mockResolvedValue(null);
   mocks.staff.mockResolvedValue({ userId: 7, username: "doctor", role: "doctor", partyId: 7 });
-  mocks.user.mockResolvedValue({ id: 7, isActive: true, partyId: 7, permissions: { canViewXrays: true } });
+  mocks.user.mockResolvedValue({ id: 7, username: "doctor", role: "doctor", isActive: true, partyId: 7, permissions: { canViewXrays: true } });
   mocks.owns.mockResolvedValue(false);
   mocks.visits.mockResolvedValue([]);
   mocks.document.mockResolvedValue({ document: { patientId: 42, removedAt: null, title: "synthetic", mimeType: "image/png" }, storageKey: "test" });
@@ -45,7 +45,7 @@ describe("حدود بيانات المرضى", () => {
     }
   });
   it("يسمح بقراءة الزيارة للطبيب المصرح له بجميع المرضى", async () => {
-    mocks.user.mockResolvedValue({ id: 7, isActive: true, permissions: { canViewAllPatients: true } });
+    mocks.user.mockResolvedValue({ id: 7, username: "doctor", role: "doctor", isActive: true, permissions: { canViewAllPatients: true } });
     expect((await clinicalGet(new Request('http://localhost/api/visits/1/clinical'), {params:Promise.resolve({id:'1'})})).status).toBe(200);
   });
   it("يرفض البحث العام بالهاتف ومتابعة التذكرة دون جلسة قبل قراءة البيانات", async () => {
@@ -89,12 +89,12 @@ describe("حدود بيانات المرضى", () => {
   it("يعرض المستند للمالك المصرح له فقط", async () => {
     mocks.owns.mockResolvedValue(true);
     expect((await documentGet(new Request("http://localhost/api/documents/1"), { params: Promise.resolve({ id: "1" }) })).status).toBe(200);
-    mocks.user.mockResolvedValue({ isActive: true, partyId: 7, permissions: { canViewXrays: false, canViewAllPatients: true } });
+    mocks.user.mockResolvedValue({ id: 7, username: "doctor", role: "doctor", isActive: true, partyId: 7, permissions: { canViewXrays: false, canViewAllPatients: true } });
     expect((await documentGet(new Request("http://localhost/api/documents/1"), { params: Promise.resolve({ id: "1" }) })).status).toBe(403);
   });
   it("الطبيب غير المرتبط وفشل قراءة الصلاحيات لا يفتحان ملفًا", async () => {
     const session = await mocks.staff();
-    mocks.user.mockResolvedValue({ isActive: true, partyId: null, permissions: {} });
+    mocks.user.mockResolvedValue({ id: 7, username: "doctor", role: "doctor", isActive: true, partyId: null, permissions: {} });
     expect(await canAccessPatient(session, 42)).toBe(false);
     mocks.user.mockRejectedValue(new Error("offline"));
     expect(await canAccessPatient(session, 42)).toBe(false);
