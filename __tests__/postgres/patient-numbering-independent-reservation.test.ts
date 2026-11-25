@@ -87,6 +87,37 @@ describe("independent numbering reservation: real PostgreSQL, synthetic only", (
     expect(await read(binding.lineage)).toBe("7031");
   });
 
+  it("burns a committed reservation if the COMMIT acknowledgement is lost", async () => {
+    const binding = await seed("synthetic_lineage_commit_loss", "7029");
+    // Forward every SQL operation to real PostgreSQL. Lose only the response
+    // after PostgreSQL has successfully committed; no fake watermark writes.
+    const lostResponsePool = {
+      async connect() {
+        const client = await pool.connect();
+        return {
+          async query(sql: string, args?: unknown[]) {
+            const result = await client.query(sql, args);
+            if (sql === "COMMIT") {
+              expect(result.command).toBe("COMMIT");
+              throw new Error("synthetic lost commit acknowledgement");
+            }
+            return result;
+          },
+          release(discard?: boolean) { client.release(discard); },
+        };
+      },
+    } as unknown as Pick<Pool, "connect">;
+    const lost = createIndependentPgReservationBackend(lostResponsePool, schema);
+    expect(await reserveRestoredNumber(archive, binding, lost))
+      .toEqual({ ok: false, reason: "watermark-reservation-unconfirmed" });
+    // A separate connection sees the committed burn even though the caller
+    // got no number; an independent retry must skip it.
+    expect(await read(binding.lineage)).toBe("7030");
+    expect(await reserveRestoredNumber(archive, binding, other))
+      .toEqual({ ok: true, reserved: "7031", prefix: "P" });
+    expect(await read(binding.lineage)).toBe("7031");
+  });
+
   it("rejects the retired generation and preserves the watermark on replacement", async () => {
     const binding = await seed("synthetic_lineage_generation", "7029");
     expect((await reserveRestoredNumber(archive,binding,backend)).ok).toBe(true);
