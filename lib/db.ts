@@ -5530,7 +5530,7 @@ export async function mergeDuplicatePatient(
 export async function updatePatient(
   id: number,
   input: Partial<PatientInput>,
-  options?: { reconcileYearOnlyBirthDate?: boolean },
+  options?: { reconcileYearOnlyBirthDate?: boolean; expectedFlags?: string[] },
 ): Promise<Patient | null> {
   await ensureSchema();
   // التحديث الجزئي بعلَم لكل حقل: `COALESCE` وحده لا يفرّق بين «لم يُرسَل» و«أُرسل
@@ -5558,7 +5558,7 @@ export async function updatePatient(
        email             = CASE WHEN $28::boolean THEN $29::text ELSE email             END,
        preferred_channel = CASE WHEN $30::boolean THEN $31::text ELSE preferred_channel END,
        flags             = CASE WHEN $32::boolean THEN COALESCE($33::text[], '{}') ELSE flags END
-     WHERE id = $1
+     WHERE id = $1 AND ($35::text[] IS NULL OR flags = $35::text[])
      RETURNING ${PATIENT_COLUMNS}`,
     [
       id,
@@ -5579,7 +5579,7 @@ export async function updatePatient(
       has("email"), has("email") ? input.email : null,
       has("preferredChannel"), has("preferredChannel") ? input.preferredChannel : null,
       has("flags"), has("flags") ? input.flags : null,
-      options?.reconcileYearOnlyBirthDate === true,
+      options?.reconcileYearOnlyBirthDate === true, options?.expectedFlags ?? null,
     ],
   );
   return rows[0] ? toPatient(rows[0]) : null;
@@ -23221,7 +23221,7 @@ export type OrthoPlanLinkResult =
 export async function linkOrthoCasePlan(input: {
   caseId: number; planId: number | null; actor: string; actorRole: string | null;
 }): Promise<OrthoPlanLinkResult> {
-  if (input.actorRole !== "admin" && input.actorRole !== "doctor") {
+  if (input.actorRole !== "admin" && input.actorRole !== "doctor" && input.actorRole !== "reception") {
     return { ok: false, status: 403, message: "غير مصرّح لك بتعديل رابط الاتفاق المالي." };
   }
   await ensureSchema();

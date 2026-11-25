@@ -25,6 +25,7 @@ import { ReceptionCollectionAccount } from "@/components/patient/ReceptionCollec
 import { PatientLedger } from "@/components/PatientLedger";
 import { LegacyHistory } from "@/components/LegacyHistory";
 import { ClinicalVisit } from "@/components/ClinicalVisit";
+import { ReceptionAgreementActions } from "@/components/ReceptionAgreementActions";
 import { PatientPlans } from "@/components/PatientPlans";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
@@ -1281,20 +1282,24 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             </section>
           )}
 
-          {treatmentSubTab === "plans" && (
+          {treatmentSubTab === "plans" && (session?.role === "reception"
+            ? <ReceptionAgreementActions key={JSON.stringify([contextAuthority, patient.id, "approval"])} patientId={patient.id} view="approval" />
+            : (
             <section aria-label="خطة العلاج">
               <PatientPlans onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} patientId={patient.id} context={clinicalContext.context} onOpenClinicalContext={openClinicalContext} onNavigationGuardChange={trackPlansGuard} />
             </section>
-          )}
+          ))}
 
-          {treatmentSubTab === "ortho" && (
+          {treatmentSubTab === "ortho" && (session?.role === "reception"
+            ? <ReceptionAgreementActions key={JSON.stringify([contextAuthority, patient.id, "links"])} patientId={patient.id} view="links" />
+            : (
             <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />
               <LegacyCaseBanner cases={summary?.legacyCases ?? []} specialty="orthodontics" />
               <PatientOrtho onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined} onOpenAccount={summary?.canSeeFinancial ? openExistingAccount : undefined} patientId={patient.id} context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)} onContextChange={(context) => openClinicalContext(context, "ortho")} onClinicalChange={refreshWorkflow} onNavigationGuardChange={trackOrthoGuard} />
             </section>
-          )}
+          ))}
 
           {treatmentSubTab === "lab" && (
             <section aria-label="طلبات المعمل والتركيبات">

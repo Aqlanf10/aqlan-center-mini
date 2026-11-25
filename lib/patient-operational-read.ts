@@ -13,7 +13,7 @@ export async function readOperationalPatient(patientId: number, role: Operationa
     gender, birth_year AS "birthYear", created_at AS "createdAt",
     ${assistant ? 'medical_alert AS "medicalAlert"' : `alt_phone AS "altPhone", email, address, birth_date::text AS "birthDate",
       guardian_name AS "guardianName", guardian_phone AS "guardianPhone", referral_source AS "referralSource",
-      referred_by AS "referredBy", preferred_channel AS "preferredChannel"`}
+      referred_by AS "referredBy", preferred_channel AS "preferredChannel", p.flags`}
     FROM patients p WHERE p.id = $1 ${assistant ? `AND EXISTS (SELECT 1 FROM visits v WHERE v.patient_id=p.id
       AND (v.arrived_at AT TIME ZONE $2)::date = $3::date)` : ""}`,
     assistant ? [patientId, CLINIC_TIME_ZONE, clinicDateString(new Date(), CLINIC_TIME_ZONE)] : [patientId]);

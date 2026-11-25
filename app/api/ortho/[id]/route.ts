@@ -106,7 +106,8 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
   const source = (body ?? {}) as Record<string, unknown>;
 
-  if (session.role !== "admin" && session.role !== "doctor") {
+  const deskLink = session.role === "reception" && Object.keys(source).length === 1 && Object.hasOwn(source, "planId");
+  if (!deskLink && session.role !== "admin" && session.role !== "doctor") {
     return forbidden("تعديل حالة التقويم السريرية للطبيب المخوّل أو الإدارة فقط.");
   }
   // Malformed JSON must not be interpreted as a clinical action or leak a 500.
@@ -114,17 +115,15 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const found = await getOrthoCase(caseId, today);
-  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
-  if (!(await canAccessPatient(session, found.patientId))) {
-    return forbidden("غير مصرّح لك بتعديل هذه الحالة.");
-  }
-
   try {
+    // The desk command needs only the identifiers validated under the link writer's locks.
+    const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+    const found = deskLink ? null : await getOrthoCase(caseId, today);
+    if (!deskLink && !found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
+    if (found && !(await canAccessPatient(session, found.patientId))) return forbidden("غير مصرّح لك بتعديل هذه الحالة.");
     /* (P1-B) ربط الحالة باتفاقها المالي أو فكّه — يغيّر مصدر فوترة الشدّات القادمة، فلمن يملك الخطط. */
     if ("planId" in source) {
-      if (session.role === "doctor" && !(await canAccessPatient(session, found.patientId, "canEditPlans"))) {
+      if (session.role === "doctor" && (!found || !(await canAccessPatient(session, found.patientId, "canEditPlans")))) {
         return forbidden("غير مصرّح لك بتعديل خطط العلاج.");
       }
       const raw = source.planId;

@@ -9,7 +9,7 @@ import {
   doctorOwnsPatient, patientHasVisitToday,
   findUserByUsername,
   getPatient, getPatientFile,
-  getSettings,
+  getSettings, ensureSchema, getPool,
   recordAudit,
   updatePatient,
 } from "@/lib/db";
@@ -86,6 +86,25 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json(patient ? { patient, visits: [], appointments: [] } : { message: "الملف غير متاح." },
       { status: patient ? 200 : 404, headers: { "Cache-Control": "private, no-store" } });
   }
+  if (projections.length === 1 && ["agreement-approval", "agreement-links"].includes(projections[0])) {
+    const headers = { "Cache-Control": "private, no-store" };
+    if (session.role !== "reception") return NextResponse.json({ message: "هذا العرض مخصص للاستقبال." }, { status: 403, headers });
+    await ensureSchema();
+    if (projections[0] === "agreement-links") {
+      const { rows: links } = await getPool().query(`SELECT c.id, c.plan_id AS "planId" FROM ortho_cases c
+        JOIN treatment_plans t ON t.id=c.plan_id AND t.patient_id=c.patient_id
+        WHERE c.patient_id=$1 AND c.status IN ('active','retention')
+          AND (c.baseline_kind IS DISTINCT FROM 'legacy' OR c.legacy_financial_mode='installments')
+        ORDER BY c.id`, [id]);
+      return NextResponse.json({ links, plans: [] }, { headers });
+    }
+    const { rows } = await getPool().query(`SELECT p.id, p.total_minor AS "totalMinor", p.base_currency AS currency
+      FROM treatment_plans p WHERE p.patient_id=$1 AND p.status='active' AND p.consent_at IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM approved_agreement_principals a WHERE a.plan_id=p.id)
+        AND NOT EXISTS (SELECT 1 FROM legacy_treatment_agreements a JOIN plan_items i ON a.plan_item_id=i.id WHERE i.plan_id=p.id)
+      ORDER BY p.id`, [id]);
+    return NextResponse.json({ plans: rows.map(row => ({ ...row, totalMinor: Number(row.totalMinor) })), links: [] }, { headers });
+  }
   if (projectionRequested) {
     return patientAppointmentsResponse(_request, session, rawId);
   }
@@ -137,11 +156,16 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const source = (body ?? {}) as Record<string, unknown>;
   const reception = session.role === "reception";
   const noStore = { "Cache-Control": "private, no-store" };
+  const expectedFlags = source.expectedFlags;
+  if (expectedFlags !== undefined && (!Array.isArray(source.flags) || !Array.isArray(expectedFlags)
+    || !expectedFlags.every((flag) => typeof flag === "string"))) {
+    return NextResponse.json({ message: "تعذّر التحقق من الأعلام الحالية." }, { status: 400, headers: noStore });
+  }
   if (reception) {
     if (!body || typeof body !== "object" || Array.isArray(body) || !Object.keys(source).length) {
       return NextResponse.json({ message: "أرسل بيانات إدارية للتعديل." }, { status: 400, headers: noStore });
     }
-    if (Object.keys(source).some((key) => !isPatientAdministrativePatchField(key))) {
+    if (Object.keys(source).some((key) => key !== "expectedFlags" && !isPatientAdministrativePatchField(key))) {
       return NextResponse.json({ message: "هذا الحقل غير مصرح للاستقبال بتعديله." }, { status: 403, headers: noStore });
     }
   }
@@ -212,8 +236,12 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         && (provided(key) || (key === "birthYear" && provided("birthDate") && validation.value.birthDate !== null))))
       : validated;
     const yearOnly = reception && provided("birthYear") && !provided("birthDate");
-    const updated = yearOnly ? await updatePatient(id, writes, { reconcileYearOnlyBirthDate: true })
+    const updated = yearOnly || expectedFlags !== undefined
+      ? await updatePatient(id, writes, { ...(yearOnly && { reconcileYearOnlyBirthDate: true }), expectedFlags })
       : await updatePatient(id, writes);
+    if (!updated && expectedFlags !== undefined) {
+      return NextResponse.json({ message: "تغيّرت أعلام المريض. أعد فتح الملف قبل التعديل." }, { status: 409, headers: noStore });
+    }
     if (!updated) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
     // Audit only what this request can have changed, not a concurrent clinician's update.
     const auditFields = reception

@@ -39,7 +39,7 @@ const dateText = (iso: string) => new Date(iso).toLocaleDateString("ar-YE-u-nu-l
 /** شارات الأعلام — للترويسة وأي شاشة تعرض المريض. */
 export function PatientFlagChips({ flags }: { flags: readonly string[] | undefined }) {
   const list = parseFlagList(useSetting("patients.flags"));
-  if (!flags || flags.length === 0) return null;
+  if (!Array.isArray(flags) || !flags.length || !flags.every((flag) => typeof flag === "string")) return null;
   return (
     <>
       {flags.map((flag) => (
@@ -83,14 +83,14 @@ export function PatientContactPanel({ patient, canEdit, onAdministrativeChange, 
 
   useEffect(() => { void loadConsent(); }, [loadConsent]);
 
-  const patch = async (body: Record<string, unknown>) => {
+  const patch = async (body: Record<string, unknown>, expectedFlags?: string[]) => {
     if (!canEdit || busy || pendingPatch.current) return;
     const request = new AbortController();
     pendingPatch.current = request;
     setBusy(true);
     try {
       const response = await fetch(`/api/patients/${patient.id}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: request.signal,
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(expectedFlags ? { ...body, expectedFlags } : body), signal: request.signal,
       });
       const payload = await response.json().catch(() => ({}));
       if (request.signal.aborted || pendingPatch.current !== request) return;
@@ -113,9 +113,10 @@ export function PatientContactPanel({ patient, canEdit, onAdministrativeChange, 
     }
   };
 
+  const flags = Array.isArray(patient.flags) && patient.flags.every((item) => typeof item === "string") ? patient.flags : null;
   const toggleFlag = (flag: string) => {
-    const current = patient.flags ?? [];
-    void patch({ flags: current.includes(flag) ? current.filter((item) => item !== flag) : [...current, flag] });
+    if (!flags) return;
+    void patch({ flags: flags.includes(flag) ? flags.filter((item) => item !== flag) : [...flags, flag] }, flags);
   };
 
   const recordConsent = async (channel: ConsentChannel, granted: boolean) => {
@@ -137,7 +138,7 @@ export function PatientContactPanel({ patient, canEdit, onAdministrativeChange, 
   };
 
   // الأعلام المعروضة للاختيار: قائمة الإعداد + ما على المريض وخرج منها (ليُزال إن شاء).
-  const flagOptions = Array.from(new Set([...flagList, ...(patient.flags ?? [])]));
+  const flagOptions = flags ? Array.from(new Set([...flagList, ...flags])) : [];
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs" aria-label="الهوية والتواصل">
@@ -157,7 +158,7 @@ export function PatientContactPanel({ patient, canEdit, onAdministrativeChange, 
         <p className="mb-1.5 text-xs font-bold text-slate-600">الأعلام</p>
         <div className="flex flex-wrap gap-1.5">
           {flagOptions.map((flag) => {
-            const active = (patient.flags ?? []).includes(flag);
+            const active = flags?.includes(flag);
             return (
               <button key={flag} type="button" disabled={!canEdit || busy} onClick={() => toggleFlag(flag)} aria-pressed={active}
                 className={`rounded-lg border px-2 py-1 text-xs font-bold transition disabled:cursor-default ${
@@ -166,7 +167,7 @@ export function PatientContactPanel({ patient, canEdit, onAdministrativeChange, 
               </button>
             );
           })}
-          {flagOptions.length === 0 ? <span className="text-xs text-slate-400">لا أعلام في الإعدادات.</span> : null}
+          {!flags ? <span role="status" className="text-xs text-amber-800">تعذّر تحميل أعلام المريض. أعد فتح الملف لتعديلها.</span> : flagOptions.length === 0 ? <span className="text-xs text-slate-400">لا أعلام في الإعدادات.</span> : null}
         </div>
       </div>
 

@@ -70,7 +70,8 @@ it("selects desk demographics without clinical fields and scopes assistant reads
     altPhone: null, birthYear: null, address: null, medicalAlert: "SYNTHETIC PRIVATE ALERT", note: "SYNTHETIC CLINICAL NOTE" });
   const desk = await readOperationalPatient(patient.id, "reception");
   expect(desk).toMatchObject({ id: patient.id, patientNumber: patient.patientNumber, fullName: patient.fullName });
-  for (const key of ["medicalAlert", "note", "flags", "photoDocumentId"]) expect(desk).not.toHaveProperty(key);
+  expect(desk?.flags).toEqual([]);
+  for (const key of ["medicalAlert", "note", "nationalId", "photoDocumentId"]) expect(desk).not.toHaveProperty(key);
   expect(await readOperationalPatient(patient.id, "assistant")).toBeNull();
   const workflow = await readOperationalWorkflow(patient.id, "reception", clinicDateString(new Date(), CLINIC_TIME_ZONE));
   expect(workflow?.patient.id).toBe(patient.id);

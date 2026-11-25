@@ -63,8 +63,8 @@ describe("P0 orthodontic clinical mutation role boundary (synthetic-only)", () =
   );
 
   it.each([
-    { planId: 101 },
-    { planId: null },
+    { planId: 101, phase: "working" },
+    { planId: null, note: "Synthetic" },
     { phase: "working" },
     { retainer: "essix" },
     { status: "completed" },
@@ -79,6 +79,13 @@ describe("P0 orthodontic clinical mutation role boundary (synthetic-only)", () =
   });
 
 
+
+  it.each([101, null])("preserves the standalone legacy desk link command %s", async (planId) => {
+    expect((await call("PATCH", { planId })).status).toBe(200);
+    expect(getOrthoCase).not.toHaveBeenCalled();
+    expect(linkOrthoCasePlan).toHaveBeenCalledWith({ caseId: 41, planId, actorRole: "reception", actor: "synthetic-reception" });
+    noClinicalWrites();
+  });
 
   it.each(["doctor", "admin"] as const)("preserves patient-scoped %s tightening", async (role) => {
     useRole(role);

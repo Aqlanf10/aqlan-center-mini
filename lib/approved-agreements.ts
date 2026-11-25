@@ -57,8 +57,9 @@ export async function approveAgreement(input:{planId:number;expectedTotalMinor:n
     ||input.source.historicalPaidMinor>=input.expectedTotalMinor))fail("راجع المدفوع التاريخي والمتبقي الافتتاحي.");
   const hash=debtRequestHash({purpose:"approve-agreement-v1",...input,session:{id:input.session.userId,username:input.session.username}});
   return transaction(async client=>{
-    if ((await revalidateSessionInTransaction(input.session, client))?.role !== "admin") {
-      throw new DebtRepaymentError("unauthorized", "اعتماد أصل الدين يتطلب صلاحية الإدارة.");
+    await assertDebtSession(client, input.session);
+    if (input.source.kind !== "new" && (await revalidateSessionInTransaction(input.session, client))?.role !== "admin") {
+      throw new DebtRepaymentError("unauthorized", "مطابقة أصل قديم للإدارة فقط.");
     }
     const owner=(await client.query<{patient_id:number}>("SELECT patient_id FROM treatment_plans WHERE id=$1",[input.planId])).rows[0];
     if(!owner)throw new DebtRepaymentError("missing","الخطة غير موجودة.");

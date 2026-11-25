@@ -104,3 +104,42 @@ it.each(["invoice","opening"] as const)("direct approved %s HTTP targets reject 
  const over=await authedMutation("/api/payments",h.sessions.cashier,"POST",body("301"),{"Idempotency-Key":`direct-over-${planId}`});expect(over.status).toBe(400);
  expect((await db.query("SELECT count(*)::int AS count FROM payments WHERE patient_id=$1",[patientId])).rows[0].count).toBe(0);
 });
+
+it("preserves desk approval and agreement links independently of collection and historical matching", async () => {
+  const { patientId, planId } = await fixture();
+  const session = h.sessions.reception;
+  const context = await browser.newContext({ locale: "ar-YE", serviceWorkers: "block" });
+  const [name, ...value] = session.cookie.split("=");
+  await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+  const page = await context.newPage();
+  try {
+    const view = page.waitForResponse(r => r.url().endsWith("?projection=agreement-approval"));
+    await page.goto(`${baseUrl}/patients/${patientId}?tab=plans`, { waitUntil: "domcontentloaded" });
+    expect(await (await view).json()).toEqual({ plans: [{ id: planId, totalMinor: 150000, currency: "USD" }], links: [] });
+    await page.getByRole("button", { name: "اعتماد أصل الاتفاق المالي" }).click();
+    expect(await page.getByLabel("مصدر الأصل").locator("option").count()).toBe(1);
+    await page.getByLabel("سبب الاعتماد أو دليل المطابقة").fill("Synthetic desk approval");
+    const approval = page.waitForResponse(r => r.url().endsWith("/financial-approval") && r.request().method() === "POST");
+    await page.getByRole("button", { name: "تأكيد المبلغ والمصدر واعتماد الالتزام" }).click();
+    expect((await approval).status()).toBe(201);
+    expect((await authedMutation(`/api/plans/${planId}`, session, "POST", JSON.stringify({ amount: "500", currency: "USD" }),
+      { "Idempotency-Key": `desk-no-collection-${planId}` })).status).toBe(403);
+    const { rows: [ortho] } = await db.query("INSERT INTO ortho_cases(patient_id,created_by) VALUES($1,'synthetic') RETURNING id", [patientId]);
+    expect((await authedMutation(`/api/ortho/${ortho.id}`, session, "PATCH", JSON.stringify({ planId }))).status).toBe(200);
+    const links = page.waitForResponse(r => r.url().endsWith("?projection=agreement-links"));
+    await page.goto(`${baseUrl}/patients/${patientId}?tab=ortho`, { waitUntil: "domcontentloaded" });
+    expect(await (await links).json()).toEqual({ links: [{ id: ortho.id, planId }], plans: [] });
+    const unlink = page.waitForResponse(r => r.url().endsWith(`/ortho/${ortho.id}`) && r.request().method() === "PATCH");
+    await page.getByRole("button", { name: "فكّ الربط" }).click();
+    expect((await unlink).status()).toBe(200);
+    expect((await db.query("SELECT plan_id FROM ortho_cases WHERE id=$1", [ortho.id])).rows[0].plan_id).toBeNull();
+    await grantReceptionCollection(h, patientId);
+    for (const source of [{ kind: "invoice", invoiceId: 1 }, { kind: "opening", historicalPaidMinor: 0 }]) {
+      const result = await authedMutation(`/api/plans/${planId}/financial-approval`, session, "POST",
+        JSON.stringify({ expectedTotalMinor: 150000, currency: "USD", source, reason: "Synthetic historical review" }),
+        { "Idempotency-Key": `desk-old-${source.kind}-${planId}` });
+      expect(result.status).toBe(403);
+    }
+    expect((await db.query("SELECT count(*)::int AS n FROM payments WHERE patient_id=$1", [patientId])).rows[0].n).toBe(0);
+  } finally { await context.close(); }
+});
