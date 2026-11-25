@@ -9,6 +9,7 @@ import { isAdmin } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, isDocumentKind, validateUpload } from "@/lib/storage";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { evaluateOrthoPermission, NO_STORE_HEADERS, orthoForbiddenResponse } from "@/lib/ortho-privacy-server";
 import { bodyErrorResponse, readBoundedFormData } from "@/lib/http-body";
 import { UPLOAD_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { contentMatchesMimeType, SIGNATURE_MISMATCH_MESSAGE } from "@/lib/magic-bytes";
@@ -46,19 +47,31 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   /* صلاحيات الوكيل المساعد + عزل V2: الطبيب بلا صلاحية الأشعة ممنوع، ومن يملكها
      لا يرى إلا أشعة مرضاه — الفحص في الخادم لا في الشاشة. */
   if (!(await canAccessPatient(session, patientId, "canViewXrays"))) {
-    return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403 });
+    return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403, headers: NO_STORE_HEADERS });
   }
 
   try {
     const storage = await storageStatus();
-    return NextResponse.json({
-      documents: await listPatientDocuments(patientId, isAdmin(session.role)),
-      // الشاشة تحتاج أن تعرف قبل أن يختار المستخدم ملفًّا — لا بعد أن يرفعه فيفشل.
-      storageReady: storage.ready,
-      storageMessage: storage.ready ? null : storage.message,
-    });
+    const allDocs = await listPatientDocuments(patientId, isAdmin(session.role));
+    const orthoPhotoGate = await evaluateOrthoPermission(
+      session,
+      { permission: "photos.view", field: "previousPhotos" },
+      { patientId },
+    );
+    const documents = orthoPhotoGate.allowed
+      ? allDocs
+      : allDocs.filter((doc) => doc.orthoCaseId == null && doc.adjustmentId == null && doc.photoStage == null);
+    return NextResponse.json(
+      {
+        documents,
+        // الشاشة تحتاج أن تعرف قبل أن يختار المستخدم ملفًّا — لا بعد أن يرفعه فيفشل.
+        storageReady: storage.ready,
+        storageMessage: storage.ready ? null : storage.message,
+      },
+      { headers: NO_STORE_HEADERS },
+    );
   } catch {
-    return NextResponse.json({ message: "تعذّر تحميل المستندات." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر تحميل المستندات." }, { status: 500, headers: NO_STORE_HEADERS });
   }
 }
 
@@ -68,10 +81,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
 
-  /* صلاحيات الوكيل المساعد + عزل V2: رفع الأشعة بابٌ يغلقه المدير، والعزل قائم
-     حتى على المسموح له — الكتابة أضيق من القراءة دائمًا. */
-  if (!(await canAccessPatient(session, patientId, "canUploadXrays"))) {
-    return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403 });
+  /* صلاحيات الوكيل المساعد + عزل V2 + صلاحيات الإدخال الأعمى لوحدة التقويم:
+     يمكن للمالك منح المساعد صلاحية التقاط/رفع صور الشدّة لمرضى اليوم دون السماح له برؤية الصور السابقة. */
+  const canLegacyUpload = await canAccessPatient(session, patientId, "canUploadXrays");
+  const canBasePatient = canLegacyUpload ? true : await canAccessPatient(session, patientId);
+  const blindOrthoUploadGate = !canLegacyUpload && canBasePatient
+    ? await evaluateOrthoPermission(
+        session,
+        { anyOfPermissions: ["photos.capture", "photos.upload"] },
+        { patientId },
+      )
+    : null;
+  if (!canLegacyUpload && !blindOrthoUploadGate?.allowed) {
+    return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403, headers: NO_STORE_HEADERS });
   }
 
   const storage = await storageStatus();
@@ -142,6 +164,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const photoView = typeof rawView === "string" && /^[a-z_]{3,30}$/.test(rawView)
     ? rawView.slice(0, 30) : null;
 
+  const isOrthoUpload = Boolean(orthoCaseId != null || adjustmentId != null || photoStage != null);
+  if (blindOrthoUploadGate && !isOrthoUpload) {
+    return orthoForbiddenResponse("صلاحية الإدخال الممنوحة مقتصرة على صور وحدة التقويم فقط.");
+  }
+  let orthoUploadAccess = blindOrthoUploadGate?.access ?? null;
+  if (isOrthoUpload) {
+    const orthoGate = await evaluateOrthoPermission(
+      session,
+      { anyOfPermissions: ["photos.capture", "photos.upload"] },
+      { patientId, orthoCaseId },
+    );
+    if (!orthoGate.allowed) {
+      return orthoForbiddenResponse("غير مصرّح لك بالتقاط أو رفع صور وحدة التقويم لهذه الحالة.");
+    }
+    orthoUploadAccess = orthoGate.access;
+  }
+
   try {
     await validateDocumentAssociations({ patientId, visitId, orthoCaseId, adjustmentId });
     const bytes = Buffer.from(await file.arrayBuffer());
@@ -189,7 +228,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       actor: session.username,
       actorRole: session.role,
     });
-    return NextResponse.json(document, { status: 201 });
+    if (isOrthoUpload && orthoUploadAccess && !orthoUploadAccess.permissions["photos.view"]) {
+      return NextResponse.json(
+        {
+          id: document.id,
+          title: document.title,
+          photoStage: document.photoStage,
+          photoView: document.photoView,
+          orthoCaseId: document.orthoCaseId,
+          adjustmentId: document.adjustmentId,
+          blindReceipt: true,
+        },
+        { status: 201, headers: NO_STORE_HEADERS },
+      );
+    }
+    return NextResponse.json(document, { status: 201, headers: NO_STORE_HEADERS });
   } catch (error) {
     if (error instanceof DocumentAssociationError) {
       return NextResponse.json({ message: error.message }, { status: 400 });

@@ -158,6 +158,11 @@ const ASSISTANT_RULES: Rule[] = [
   { path: "/api/visits/[id]/clinical", methods: ["GET", "HEAD", "POST"] },
   { path: "/api/patients/[id]" },
   { path: "/api/patients/[id]/workflow" },
+  // صلاحيات وحدة التقويم للمساعد (بناءً على سياسة الخصوصية التفصيلية في الخادم):
+  // قراءة صلاحياته الذاتية، وإدخال صور الشدّة/تسجيل الشدّة عند التفويض الصريح (دون استعراض الصور السابقة).
+  { path: "/api/ortho/my-permissions", methods: ["GET", "HEAD"] },
+  { path: "/api/ortho/[id]", methods: ["POST"] },
+  { path: "/api/patients/[id]/documents", methods: ["POST"] },
 ];
 
 function matches(rulePath: string, pathname: string): boolean {

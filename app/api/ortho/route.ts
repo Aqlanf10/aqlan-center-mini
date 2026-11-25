@@ -7,6 +7,13 @@ import {
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import {
+  checkOrthoRequirement,
+  evaluateOrthoPermission,
+  NO_STORE_HEADERS,
+  orthoForbiddenResponse,
+} from "@/lib/ortho-privacy-server";
+import { resolveOrthoAccess } from "@/lib/ortho-privacy";
 
 export const dynamic = "force-dynamic";
 
@@ -39,11 +46,23 @@ export async function GET(request: Request) {
   }
 
   try {
+    const moduleGate = await evaluateOrthoPermission(
+      session,
+      { permission: "records.read" },
+      { patientId },
+    );
+    if (!moduleGate.allowed || !moduleGate.policy || !moduleGate.subject) {
+      return orthoForbiddenResponse("وحدة التقويم غير مصرح لك بعرضها أو قراءة سجلاتها.", { cases: [] });
+    }
+    const loadedPolicy = moduleGate.policy;
+    const loadedSubject = moduleGate.subject;
+    const nowMs = Date.now();
+
     const patientAccess = new Map<number, boolean>();
     const photoAccess = new Map<number, boolean>();
     if (patientId !== null) {
       if (!(await canAccessPatient(session, patientId))) {
-        return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على حالات هذا المريض." }, { status: 403 });
+        return NextResponse.json({ message: "غير مصرّح لك بالاطلاع على حالات هذا المريض." }, { status: 403, headers: NO_STORE_HEADERS });
       }
       patientAccess.set(patientId, true);
     }
@@ -54,9 +73,23 @@ export async function GET(request: Request) {
     const patientIds = [...new Set(cases.map((row) => row.patientId))];
     for (let offset = 0; offset < patientIds.length; offset += ACCESS_BATCH_SIZE) {
       await Promise.all(patientIds.slice(offset, offset + ACCESS_BATCH_SIZE).map(async (id) => {
-        const allowed = patientAccess.get(id) ?? await canAccessPatient(session, id);
-        patientAccess.set(id, allowed);
-        if (allowed) photoAccess.set(id, await canAccessPatient(session, id, "canViewXrays"));
+        const baseAllowed = patientAccess.get(id) ?? await canAccessPatient(session, id);
+        if (!baseAllowed) {
+          patientAccess.set(id, false);
+          return;
+        }
+        const resolved = resolveOrthoAccess(loadedPolicy, loadedSubject, { patientId: id }, nowMs);
+        const verdict = checkOrthoRequirement(resolved, { permission: "records.read" });
+        patientAccess.set(id, verdict.allowed);
+        if (verdict.allowed) {
+          const legacyXray = await canAccessPatient(session, id, "canViewXrays");
+          const canSeePhotos = Boolean(
+            legacyXray &&
+            resolved.permissions["photos.view"] &&
+            resolved.fields.previousPhotos,
+          );
+          photoAccess.set(id, canSeePhotos);
+        }
       }));
     }
     const visibleCases = cases.filter((row) => patientAccess.get(row.patientId) === true).map((row) => ({
@@ -67,9 +100,9 @@ export async function GET(request: Request) {
         photos: photoAccess.get(row.patientId) === true ? entry.photos : [],
       })),
     }));
-    return NextResponse.json({ cases: visibleCases, today });
+    return NextResponse.json({ cases: visibleCases, today }, { headers: NO_STORE_HEADERS });
   } catch {
-    return NextResponse.json({ message: "تعذّر تحميل حالات التقويم." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر تحميل حالات التقويم." }, { status: 500, headers: NO_STORE_HEADERS });
   }
 }
 
@@ -88,7 +121,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اختر المريض أولًا." }, { status: 400 });
   }
   if (!(await canAccessPatient(session, patientId))) {
-    return NextResponse.json({ message: "غير مصرّح لك بفتح حالة تقويم لهذا المريض." }, { status: 403 });
+    return NextResponse.json({ message: "غير مصرّح لك بفتح حالة تقويم لهذا المريض." }, { status: 403, headers: NO_STORE_HEADERS });
+  }
+  const createGate = await evaluateOrthoPermission(
+    session,
+    { anyOfPermissions: ["records.create", "records.blind_create"] },
+    { patientId },
+  );
+  if (!createGate.allowed) {
+    return orthoForbiddenResponse("غير مصرّح لك بإنشاء حالة تقويم جديدة لهذا المريض.");
   }
 
   const appliance = typeof source.appliance === "string" && APPLIANCES.includes(source.appliance)

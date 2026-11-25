@@ -9,6 +9,7 @@ import { isElasticClass, PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { evaluateOrthoPermission, NO_STORE_HEADERS, orthoForbiddenResponse } from "@/lib/ortho-privacy-server";
 
 export const dynamic = "force-dynamic";
 
@@ -35,9 +36,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const found = await getOrthoCase(caseId, today);
-  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
+  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404, headers: NO_STORE_HEADERS });
   if (!(await canAccessPatient(session, found.patientId))) {
     return forbidden("غير مصرّح لك بتسجيل شدّة لهذه الحالة.");
+  }
+  const sessionGate = await evaluateOrthoPermission(
+    session,
+    { anyOfPermissions: ["sessions.record", "records.blind_create"] },
+    { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
+  );
+  if (!sessionGate.allowed) {
+    return orthoForbiddenResponse("غير مصرّح لك بتسجيل شدّة لهذه الحالة.");
   }
 
   let body: unknown;
@@ -95,9 +104,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const found = await getOrthoCase(caseId, today);
-  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
+  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404, headers: NO_STORE_HEADERS });
   if (!(await canAccessPatient(session, found.patientId))) {
     return forbidden("غير مصرّح لك بتعديل هذه الحالة.");
+  }
+  const editGate = await evaluateOrthoPermission(
+    session,
+    { anyOfPermissions: ["records.edit", "plan.approve", "sessions.approve"] },
+    { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
+  );
+  if (!editGate.allowed) {
+    return orthoForbiddenResponse("غير مصرّح لك بتعديل حالة التقويم هذه.");
   }
 
   let body: unknown;
@@ -177,14 +194,30 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const found = await getOrthoCase(caseId, today);
-  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
+  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404, headers: NO_STORE_HEADERS });
   if (!(await canAccessPatient(session, found.patientId))) {
     return forbidden("غير مصرّح لك بالاطلاع على هذه الحالة.");
   }
-  const photosVisible = await canAccessPatient(session, found.patientId, "canViewXrays");
-  return NextResponse.json({
-    ...found,
-    photosVisible,
-    adjustments: found.adjustments.map((entry) => ({ ...entry, photos: photosVisible ? entry.photos : [] })),
-  });
+  const readGate = await evaluateOrthoPermission(
+    session,
+    { permission: "records.read" },
+    { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
+  );
+  if (!readGate.allowed) {
+    return orthoForbiddenResponse("غير مصرّح لك بعرض تفاصيل هذه الحالة التقويمية.");
+  }
+  const legacyXray = await canAccessPatient(session, found.patientId, "canViewXrays");
+  const photosVisible = Boolean(
+    legacyXray &&
+    readGate.access?.permissions["photos.view"] &&
+    readGate.access?.fields.previousPhotos,
+  );
+  return NextResponse.json(
+    {
+      ...found,
+      photosVisible,
+      adjustments: found.adjustments.map((entry) => ({ ...entry, photos: photosVisible ? entry.photos : [] })),
+    },
+    { headers: NO_STORE_HEADERS },
+  );
 }

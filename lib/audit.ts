@@ -95,6 +95,7 @@ export type AuditAction =
   | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
   | "ortho.case_create" | "visit.create"
   | "ortho.strategy_revision" | "ortho.assessment.append"
+  | "ortho.privacy_policy_update" | "ortho.access_denied"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* تجاوز منع السعة — فعلٌ مستقلّ يُستخرج وحده: «كم مرّة تجاوزنا الشهر الماضي
@@ -375,6 +376,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.adjustment": "تسجيل شدّة تقويم",
   "ortho.plan_link": "ربط حالة التقويم باتفاقها المالي",
   "ortho.billing_decision": "قرار فوترة شدّة خارج العقد",
+  "ortho.privacy_policy_update": "تعديل سياسة الخصوصية والصلاحيات لوحدة التقويم",
+  "ortho.access_denied": "رفض وصول غير مصرح به في وحدة التقويم",
   "appointment.create": "حجز موعد",
   "appointment.capacity_override": "تجاوز منع السعة",
   "appointment.reschedule": "نقل موعد",
@@ -415,6 +418,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "clinic_settings.update", "clinic_settings.reset",
   "clinic_settings.secret.replace", "clinic_settings.secret.remove",
   "user.disable", "doctor.permissions.update", "user.finance-permissions.update", "doctor.commission.update",
+  "ortho.privacy_policy_update", "ortho.access_denied",
   "commission.case_override.set", "commission.case_override.void",
   "backup.download", "export.download", "document.reprint",
   "visit.addendum", "visit.clearance_bypass", "ai.settings.update", "ai.provider.save", "ai.provider.delete",
