@@ -35,6 +35,43 @@ describe("independent PG reservation SQL protocol (mock, no database)", () => {
     expect(f.calls[4].args).toEqual([binding.lineage, "P", "7030", "7029"]);
     expect(f.release).toHaveBeenCalledWith(false);
   });
+  it("allows only one advance attempt per transaction even when callers overlap", async () => {
+    const f = fixture();
+    const result = await f.backend.transaction(binding, async tx => {
+      const witness = await tx.readFresh("P");
+      if (!witness) throw new Error("missing synthetic witness");
+      const results = await Promise.all([tx.advance(witness, 7030n), tx.advance(witness, 7031n)]);
+      await expect(tx.readFresh("P")).rejects.toThrow("Invalid watermark read");
+      expect(await tx.advance(witness, 7032n)).toBe(false);
+      return results;
+    });
+    expect(result).toEqual([true, false]);
+    expect(f.calls.filter(c => c.sql.startsWith("UPDATE"))).toHaveLength(1);
+    expect(f.calls.at(-1)?.sql).toBe("COMMIT");
+  });
+  it("does not retry an unsuccessful CAS in the same transaction", async () => {
+    const f = fixture({ conflict: true });
+    await f.backend.transaction(binding, async tx => {
+      const witness = await tx.readFresh("P");
+      if (!witness) throw new Error("missing synthetic witness");
+      expect(await tx.advance(witness, 7030n)).toBe(false);
+      expect(await tx.advance(witness, 7031n)).toBe(false);
+      await expect(tx.readFresh("P")).rejects.toThrow("Invalid watermark read");
+    });
+    expect(f.calls.filter(c => c.sql.startsWith("UPDATE"))).toHaveLength(1);
+  });
+  it("rejects overlapping reads without changing the selected witness", async () => {
+    const f = fixture();
+    await f.backend.transaction(binding, async tx => {
+      const first = tx.readFresh("P");
+      await expect(tx.readFresh("Q")).rejects.toThrow("Invalid watermark read");
+      const witness = await first;
+      if (!witness) throw new Error("missing synthetic witness");
+      expect(witness.prefix).toBe("P");
+      expect(await tx.advance(witness, 7030n)).toBe(true);
+    });
+    expect(f.calls.filter(c => c.sql.includes("SELECT reserved_through"))).toHaveLength(1);
+  });
   it("rejects stale generation before touching watermark", async () => {
     const f = fixture({ generation: "synthetic_generation_001" });
     expect(await reserveRestoredNumber(archive, binding, f.backend)).toEqual({ ok: false, reason: "watermark-reservation-unconfirmed" });
