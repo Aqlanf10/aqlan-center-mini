@@ -32,9 +32,14 @@ export async function reserveRestoredNumber(
 ): Promise<RestoreReservationResult> {
   if (!backend) return { ok: false, reason: "independent-reservation-unavailable" };
   try {
-    return await backend.transaction<RestoreReservationResult>(binding, async tx => {
-      const witness = await tx.readFresh(archive.prefix);
-      const plan = planRestoredNumberingFloor(archive, binding, witness);
+    // Capture the trusted primitive-only inputs before the first asynchronous
+    // boundary. Waiting for an authority lock must not change which archive
+    // evidence, prefix or admitted generation this reservation evaluates.
+    const snapshot: PrefixSnapshot = Object.freeze({ ...archive });
+    const expected: RestoreNumberingBinding = Object.freeze({ ...binding });
+    return await backend.transaction<RestoreReservationResult>(expected, async tx => {
+      const witness = await tx.readFresh(snapshot.prefix);
+      const plan = planRestoredNumberingFloor(snapshot, expected, witness);
       if (!plan.ok) return plan;
       if (!witness || !await tx.advance(witness, BigInt(plan.next))) {
         return { ok: false, reason: "watermark-reservation-conflict" };
