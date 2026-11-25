@@ -40,6 +40,11 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role !== "admin" && session.role !== "doctor") {
+    return NextResponse.json({ message: "غير مصرّح لك بعرض المستندات السريرية." }, {
+      status: 403, headers: { "Cache-Control": "private, no-store" },
+    });
+  }
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
 
@@ -56,7 +61,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       // الشاشة تحتاج أن تعرف قبل أن يختار المستخدم ملفًّا — لا بعد أن يرفعه فيفشل.
       storageReady: storage.ready,
       storageMessage: storage.ready ? null : storage.message,
-    });
+    }, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل المستندات." }, { status: 500 });
   }
@@ -189,7 +194,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       actor: session.username,
       actorRole: session.role,
     });
-    return NextResponse.json(document, { status: 201 });
+    // Reuse the #551 upload-only receipt policy: never return saved metadata to reception.
+    return NextResponse.json(session.role === "reception" ? { uploaded: true } : document, {
+      status: 201, headers: { "Cache-Control": "private, no-store" },
+    });
   } catch (error) {
     if (error instanceof DocumentAssociationError) {
       return NextResponse.json({ message: error.message }, { status: 400 });
