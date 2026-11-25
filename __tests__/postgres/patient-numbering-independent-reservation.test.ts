@@ -98,6 +98,28 @@ describe("independent numbering reservation: real PostgreSQL, synthetic only", (
       .toEqual({ok:true,reserved:"7031",prefix:"P"});
   });
 
+  it("holds generation admission until the reservation commits across separate pools", async () => {
+    const binding = await seed("synthetic_lineage_fence", "7029");
+    await backend.transaction(binding, async tx => {
+      const witness = await tx.readFresh("P");
+      if (!witness) throw new Error("missing synthetic witness");
+      expect(await tx.advance(witness, 7030n)).toBe(true);
+      // A separate connection cannot acquire the admission row while this
+      // reservation is uncommitted. NOWAIT makes the witness deterministic.
+      await expect(secondPool.query(
+        `SELECT generation FROM ${admission} WHERE lineage=$1 FOR UPDATE NOWAIT`,
+        [binding.lineage],
+      )).rejects.toMatchObject({ code: "55P03" });
+    });
+    expect(await read(binding.lineage)).toBe("7030");
+    await secondPool.query(`UPDATE ${admission} SET generation=$2 WHERE lineage=$1`,
+      [binding.lineage, nextGeneration]);
+    expect(await reserveRestoredNumber(archive, binding, backend))
+      .toEqual({ ok: false, reason: "watermark-reservation-unconfirmed" });
+    expect(await reserveRestoredNumber(archive, { ...binding, generation: nextGeneration }, other))
+      .toEqual({ ok: true, reserved: "7031", prefix: "P" });
+  });
+
   it("fails closed if the authority row is absent or behind the archive", async () => {
     const absent = { lineage: "synthetic_lineage_missing", generation };
     expect((await reserveRestoredNumber(archive,absent,backend)).ok).toBe(false);
