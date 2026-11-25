@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionPayload } from "../lib/auth";
+import { canAccessPatient } from "../lib/patient-access";
 import { restrictedRouteAllowed } from "../lib/role-routes";
 import { parseDoctorPermissions } from "../lib/doctor-permissions";
 
@@ -355,5 +356,37 @@ describe("GET patient-file scope revalidation", () => {
     mocks.user.mockResolvedValue(currentDoctor());
     expect((await read()).status).toBe(200);
     expect(mocks.owns).toHaveBeenCalledExactlyOnceWith(7, patient.id);
+  });
+});
+
+describe("shared doctor patient access authority", () => {
+  it.each([
+    { id: 11 }, { username: "other-synthetic-doctor" },
+    { role: "reception" }, { isActive: false },
+  ])("refuses mismatched account even with an explicit all-patient grant: %j", async (change) => {
+    mocks.user.mockResolvedValue({ ...currentDoctor({ canViewAllPatients: true, canViewXrays: true }), ...change });
+    expect(await canAccessPatient(session, patient.id, "canViewXrays")).toBe(false);
+    expect(mocks.owns).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("refuses invalid current doctor party ID: %s", async (partyId) => {
+    mocks.user.mockResolvedValue({ ...currentDoctor({ canViewXrays: true }), partyId });
+    expect(await canAccessPatient(session, patient.id, "canViewXrays")).toBe(false);
+    expect(mocks.owns).not.toHaveBeenCalled();
+  });
+
+  it("requires the detailed clinical-media grant even for an all-patient doctor", async () => {
+    mocks.user.mockResolvedValue(currentDoctor({ canViewAllPatients: true }));
+    expect(await canAccessPatient(session, patient.id, "canViewXrays")).toBe(false);
+    expect(mocks.owns).not.toHaveBeenCalled();
+  });
+
+  it("preserves owned-patient access and explicit all-patient access for the current doctor", async () => {
+    mocks.user.mockResolvedValue(currentDoctor({ canViewXrays: true }));
+    expect(await canAccessPatient(session, patient.id, "canViewXrays")).toBe(true);
+    expect(mocks.owns).toHaveBeenCalledExactlyOnceWith(7, patient.id);
+    mocks.user.mockResolvedValue({ ...currentDoctor({ canViewAllPatients: true, canViewXrays: true }), partyId: null });
+    expect(await canAccessPatient(session, patient.id, "canViewXrays")).toBe(true);
+    expect(mocks.owns).toHaveBeenCalledTimes(1);
   });
 });
