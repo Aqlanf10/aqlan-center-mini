@@ -1,4 +1,8 @@
+"use client";
+
+import { useSession } from "@/components/SessionProvider";
 import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
+import { canPrintShiftReport } from "@/lib/shift-print-permissions";
 
 /**
  * (P1-3) حالة إقفال الوردية كما هي — لا «مقفل ومطابق» لكل وردية مقفلة.
@@ -17,6 +21,7 @@ export interface ShiftCloseInfo {
 }
 
 export function ShiftCloseStatus({ shift, compact = false }: { shift: ShiftCloseInfo; compact?: boolean }) {
+  const session = useSession();
   if (shift.status === "open") {
     return (
       <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
@@ -57,14 +62,16 @@ export function ShiftCloseStatus({ shift, compact = false }: { shift: ShiftClose
       {!compact && off.length > 0 && shift.differenceReason ? (
         <span className="text-[10px] text-slate-500">السبب: {shift.differenceReason}</span>
       ) : null}
-      <a
-        href={`/print/shift/${shift.id}`}
-        target="_blank"
-        rel="noopener"
-        className="text-[10px] font-bold text-brand-blue hover:underline"
-      >
-        تقرير الإقفال
-      </a>
+      {canPrintShiftReport(session?.role) ? (
+        <a
+          href={`/print/shift/${shift.id}`}
+          target="_blank"
+          rel="noopener"
+          className="text-[10px] font-bold text-brand-blue hover:underline"
+        >
+          تقرير الإقفال
+        </a>
+      ) : null}
     </span>
   );
 }
