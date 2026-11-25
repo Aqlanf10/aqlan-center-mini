@@ -22943,7 +22943,7 @@ const orthoArchesSiteText = (arches: string | null): string | null =>
  * تمويل الجلسات يتبع بندها الصريح. واحدةٌ فقط تُجسَر؛ أكثر منها أو نطاقٌ مختلف يرفض دون كتابة (المستدعي يتراجع).
  */
 async function bridgeOrthoShell(client: DbClient, input: {
-  patientId: number; orthoCaseId: number; arches: Arches; actor: string;
+  patientId: number; orthoCaseId: number; arches: Arches; actor: string; expectedAssessmentCaseId?: number;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   const { rows: shells } = await client.query<{ id: number; site: string | null; origin: string; legacy: boolean }>(
     `SELECT id, site, origin,
@@ -22955,6 +22955,10 @@ async function bridgeOrthoShell(client: DbClient, input: {
         AND status IN ('active', 'waiting')
       ORDER BY id FOR UPDATE`, [input.patientId]);
   const expectedSite = orthoArchesSiteText(input.arches);
+  if (input.expectedAssessmentCaseId !== undefined && (shells.length !== 1
+    || shells[0].id !== input.expectedAssessmentCaseId || shells[0].origin !== "invoice" || shells[0].legacy)) {
+    return { ok: false, message: "تغيّرت حالة التقويم الأولية. راجعها قبل إعادة محاولة الحفظ." };
+  }
   if (shells.length > 1 || (shells.length === 1 && shells[0].site !== expectedSite && shells[0].site !== input.arches)) {
     return { ok: false, message: "راجع حالة التقويم الأولية وموضعها؛ لا تُنشأ حالة أخرى أو تُجسَر بنطاق مختلف." };
   }
@@ -22976,6 +22980,7 @@ async function bridgeOrthoShell(client: DbClient, input: {
 
 export async function createOrthoCase(input: {
   patientId: number;
+  expectedAssessmentCaseId?: number;
   appliance: Appliance;
   arches: Arches;
   slot: SlotSize;
@@ -23014,6 +23019,7 @@ export async function createOrthoCase(input: {
     );
     const bridge = await bridgeOrthoShell(client, {
       patientId: input.patientId, orthoCaseId: rows[0].id, arches: input.arches, actor: input.createdBy,
+      expectedAssessmentCaseId: input.expectedAssessmentCaseId,
     });
     if (!bridge.ok) { await client.query("ROLLBACK"); return { ok: false, message: bridge.message }; }
     await client.query("COMMIT");
