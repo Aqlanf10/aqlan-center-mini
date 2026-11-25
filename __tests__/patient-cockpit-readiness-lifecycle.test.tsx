@@ -293,6 +293,28 @@ describe("cockpit only commands from known current readiness", () => {
     await mounted(); const target = entry(); click(target); click(target); await settle();
     expect(writes()).toHaveLength(1); expect(writes()[0][0]).toBe("/api/visits/301"); expect(JSON.parse(String(writes()[0][1].body))).toEqual({ action: "seat", chair: 1 }); expect(props.onChanged).toHaveBeenCalledTimes(1);
   });
+  it.each(["waiting", "called", "in_chair", "done"] as const)(
+    "only offers readiness acknowledgment before seating (%s)", async (status) => {
+      const seat = status === "in_chair" ? 1 : null;
+      ready = response({ visit: visit({ status, chair: seat }) });
+      chairs = response([chair({ status, chair: seat })]);
+      await mounted();
+      expect(!!button("أقِرّ الجاهزية")).toBe(status === "waiting" || status === "called");
+      if (status === "in_chair") expect(text(render())).toContain("على الكرسي 1");
+      expect(writes()).toHaveLength(0);
+    },
+  );
+  it("does not acknowledge readiness when the same visit was just seated at another terminal", async () => {
+    await mounted();
+    const clear = button("أقِرّ الجاهزية");
+    expect(clear).toBeDefined();
+    ready = response({ visit: visit({ status: "in_chair", chair: 1, seatedAt: "2026-10-04T06:00:01Z" }) });
+    chairs = response([chair({ status: "in_chair", chair: 1 })]);
+    click(clear); await settle();
+    expect(writes()).toHaveLength(0);
+    expect(button("أقِرّ الجاهزية")).toBeUndefined();
+    expect(entry()).toBeUndefined();
+  });
   it("valid clearance still uses the existing clear PATCH", async () => {
     await mounted(); click(button("أقِرّ الجاهزية")); await settle(); expect(writes()).toHaveLength(1);
     expect(JSON.parse(String(writes()[0][1].body))).toEqual({ action: "clear" }); expect(text(render())).toContain("جاهز ✓");
