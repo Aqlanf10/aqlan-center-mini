@@ -44,32 +44,43 @@ export function createIndependentPgReservationBackend(
           throw new Error("Generation not admitted");
         }
         let read: IndependentNumberingWatermark | null = null;
-        let advanced = false;
+        let advanceAttempted = false;
+        let inFlight = false;
         const result = await work({
           async readFresh(prefix) {
-            if (!active || advanced || !/^[A-Z]$/.test(prefix)) throw new Error("Invalid watermark read");
-            const rows = (await client.query<{ reserved_through: string }>(
-              `SELECT reserved_through::text FROM ${watermarks}
-                WHERE lineage=$1 AND prefix=$2 FOR UPDATE`, [lineage, prefix])).rows;
-            if (rows.length !== 1 || !/^(0|[1-9][0-9]{0,17})$/.test(rows[0].reserved_through)) {
-              read = null;
-              return null;
-            }
-            read = Object.freeze({ lineage, generation, prefix, reservedThrough: BigInt(rows[0].reserved_through) });
-            return read;
+            if (!active || inFlight || advanceAttempted || !/^[A-Z]$/.test(prefix)) throw new Error("Invalid watermark read");
+            inFlight = true;
+            try {
+              const rows = (await client.query<{ reserved_through: string }>(
+                `SELECT reserved_through::text FROM ${watermarks}
+                  WHERE lineage=$1 AND prefix=$2 FOR UPDATE`, [lineage, prefix])).rows;
+              if (rows.length !== 1 || !/^(0|[1-9][0-9]{0,17})$/.test(rows[0].reserved_through)) {
+                read = null;
+                return null;
+              }
+              read = Object.freeze({ lineage, generation, prefix, reservedThrough: BigInt(rows[0].reserved_through) });
+              return read;
+            } finally { inFlight = false; }
           },
           async advance(previous, next) {
-            if (!active || advanced || !read || previous !== read || typeof next !== "bigint"
+            if (!active || inFlight || advanceAttempted || !read || previous !== read || typeof next !== "bigint"
               || next <= read.reservedThrough || next > PATIENT_NUMBER_MAX) return false;
-            const update = await client.query(
-              `UPDATE ${watermarks} SET reserved_through=$3::bigint
-                WHERE lineage=$1 AND prefix=$2 AND reserved_through=$4::bigint`,
-              [lineage, read.prefix, next.toString(), read.reservedThrough.toString()]);
-            advanced = update.rowCount === 1;
-            if (update.rowCount !== 0 && !advanced) throw new Error("Invalid watermark cardinality");
-            return advanced;
+            // Consume the attempt before yielding to the SQL driver. A second
+            // asynchronous caller cannot advance the same transaction again.
+            advanceAttempted = true;
+            inFlight = true;
+            try {
+              const update = await client.query(
+                `UPDATE ${watermarks} SET reserved_through=$3::bigint
+                  WHERE lineage=$1 AND prefix=$2 AND reserved_through=$4::bigint`,
+                [lineage, read.prefix, next.toString(), read.reservedThrough.toString()]);
+              const advanced = update.rowCount === 1;
+              if (update.rowCount !== 0 && !advanced) throw new Error("Invalid watermark cardinality");
+              return advanced;
+            } finally { inFlight = false; }
           },
         });
+        if (inFlight) throw new Error("Unawaited authority operation");
         active = false;
         commitAttempted = true;
         const committed = await client.query("COMMIT");
