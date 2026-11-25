@@ -96,6 +96,8 @@ export default async function PatientDossierPage({
   const { id: rawId } = await params;
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
+  // Full clinical dossier: administrative intake and receipt printing do not grant clinical print access.
+  if (session.role !== "admin" && session.role !== "doctor") notFound();
   if (!(await canAccessPatient(session, id))) notFound();
   const showFinance = await canAccessPatient(session, id, "canViewPatientPayments");
 
