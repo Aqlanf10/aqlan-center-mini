@@ -98,6 +98,16 @@ async function latestWrite(page: Page, path: string) {
   await expect.poll(async () => (await writes(page)).filter((one) => one.path === path).length).toBeGreaterThan(0);
   return (await writes(page)).filter((one) => one.path === path).at(-1)!;
 }
+async function respondBooking(page: Page, booking: Awaited<ReturnType<typeof latestWrite>>) {
+  const input = booking.submitted as { patientId: number; date: string; time: string };
+  await page.evaluate(({ id, input }) => window.__patientOrthoFixture.respond(id, {
+    id: 933101, patientId: input.patientId, doctorId: 935101, doctorName: "Synthetic responsible doctor",
+    scheduledDate: input.date, scheduledTime: input.time,
+  }, 201), { id: booking.id, input });
+}
+async function waitResponsibleDoctor(page: Page) {
+  await expect.poll(() => panel(page).textContent()).toContain("الطبيب المسؤول: Synthetic responsible doctor");
+}
 async function fields(page: Page) {
   return panel(page).locator("input:not([type=file]),textarea,select").evaluateAll((elements) => elements.map((element) => ({
     label: element.getAttribute("aria-label"), value: (element as HTMLInputElement).value,
@@ -575,9 +585,9 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       await booking.evaluate((button) => button.dispatchEvent(new MouseEvent("click", { bubbles: true })));
       expect((await writes(f.page)).filter((one) => one.path === "/api/appointments")).toHaveLength(0);
       await refresh(f.page); await grant(f.page); await booking.click();
-      await allow(f.page, "POST", "/api/appointments"); await submitTwice(panel(f.page).locator("form"));
+      await waitResponsibleDoctor(f.page); await allow(f.page, "POST", "/api/appointments"); await submitTwice(panel(f.page).locator("form"));
       const appointment = await latestWrite(f.page, "/api/appointments");
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, { id: 933101 }), appointment.id);
+      await respondBooking(f.page, appointment);
       await expect.poll(() => panel(f.page).locator('a[href*="wa.me"]').count()).toBe(1);
       expect(await panel(f.page).locator('a[href*="wa.me"]').getAttribute("href")).toContain("700000001");
       await refresh(f.page); ids = await pair(f.page);
@@ -694,10 +704,10 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
     const f = await open();
     try {
       const form = await prepareBooking(f.page); await captureCallback(form, "booking-before-success", "onSubmit");
-      await allow(f.page, "POST", "/api/appointments"); await submitTwice(form);
+      await waitResponsibleDoctor(f.page); await allow(f.page, "POST", "/api/appointments"); await submitTwice(form);
       const booking = await latestWrite(f.page, "/api/appointments");
       expect(booking.submitted).toMatchObject({ patientId, date: "2026-11-23", time: "17:45" });
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, { id: 933101 }), booking.id);
+      await respondBooking(f.page, booking);
       await expect.poll(() => panel(f.page).textContent()).toContain("تم حجز الجلسة القادمة بنجاح");
       const reminder = await panel(f.page).locator('a[href*="wa.me"]').getAttribute("href");
       await replayCallback(f.page, "booking-before-success");
@@ -728,10 +738,10 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
         .toMatchObject({ prop: "onSubmit", tag: "FORM", connected: false, replays: 2 });
       // The fresh view still works. Rejecting the stale closure must not lock
       // out this retained draft or its newly mounted submit handler.
-      await allow(f.page, "POST", "/api/appointments"); await submitTwice(form);
+      await waitResponsibleDoctor(f.page); await allow(f.page, "POST", "/api/appointments"); await submitTwice(form);
       const booking = await latestWrite(f.page, "/api/appointments");
       expect(booking.submitted).toMatchObject({ patientId, date: "2026-11-23", time: "17:45" });
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, { id: 933101 }), booking.id);
+      await respondBooking(f.page, booking);
       await expect.poll(() => panel(f.page).textContent()).toContain("تم حجز الجلسة القادمة بنجاح");
       expect((await writes(f.page)).filter((one) => one.path === "/api/appointments")).toHaveLength(1); await f.assertIsolated();
     } finally { await f.context.close(); }
@@ -746,9 +756,9 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       await refresh(f.page); await grant(f.page); expect(await fields(f.page)).toEqual(draft);
       expect(await panel(f.page).getByLabel("تاريخ الجلسة القادمة", { exact: true }).inputValue()).toBe("2026-11-23");
       expect(await panel(f.page).getByLabel("وقت الجلسة القادمة", { exact: true }).inputValue()).toBe("17:45");
-      await allow(f.page, "POST", "/api/appointments"); await submitTwice(form);
+      await waitResponsibleDoctor(f.page); await allow(f.page, "POST", "/api/appointments"); await submitTwice(form);
       const booking = await latestWrite(f.page, "/api/appointments");
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, { id: 933101 }), booking.id);
+      await respondBooking(f.page, booking);
       await expect.poll(() => panel(f.page).textContent()).toContain("تم حجز الجلسة القادمة بنجاح");
       const reminder = await panel(f.page).locator('a[href*="wa.me"]').getAttribute("href");
       expect(reminder).toContain("700000001");
@@ -790,10 +800,10 @@ describe("PatientOrtho paired grants and opaque local drafts in real React", () 
       await panel(f.page).getByLabel("وقت الجلسة القادمة", { exact: true }).fill("17:45");
       const draft = await fields(f.page); await ordinaryFailure(f.page); await retry(f.page); await grant(f.page, { unsigned: true });
       expect(await fields(f.page)).toEqual(draft);
-      await allow(f.page, "POST", "/api/appointments"); await submitTwice(panel(f.page).locator("form"));
+      await waitResponsibleDoctor(f.page); await allow(f.page, "POST", "/api/appointments"); await submitTwice(panel(f.page).locator("form"));
       const booking = await latestWrite(f.page, "/api/appointments");
       expect(booking.submitted).toMatchObject({ patientId, date: "2026-11-23", time: "17:45", durationMinutes: 15, appointmentType: "follow_up" });
-      await f.page.evaluate((id) => window.__patientOrthoFixture.respond(id, { id: 933101 }), booking.id);
+      await respondBooking(f.page, booking);
       await expect.poll(() => panel(f.page).textContent()).toContain("تم حجز الجلسة القادمة بنجاح");
       await ordinaryFailure(f.page); await retry(f.page); await grant(f.page, { unsigned: true });
       expect(await panel(f.page).textContent()).toContain("تم حجز الجلسة القادمة بنجاح");

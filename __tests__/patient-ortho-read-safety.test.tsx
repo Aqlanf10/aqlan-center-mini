@@ -207,6 +207,12 @@ async function drain() { for (let index = 0; index < 30; index++) await Promise.
 async function flush() { for (let round = 0; round < 4; round++) { await drain(); render(); } }
 const reads = () => requests.filter((one) => one.method === "GET");
 const writes = () => requests.filter((one) => one.method !== "GET");
+const returnFingerprint = "a".repeat(64);
+function bookingReceipt(request: Pending) {
+  const input = JSON.parse(String(request.init!.body));
+  return { id: 901, patientId: input.patientId, doctorId: 71, doctorName: "Synthetic responsible doctor",
+    scheduledDate: input.date, scheduledTime: input.time };
+}
 function pair() {
   const ortho = reads().filter((one) => one.url.startsWith("/api/ortho?")).at(-1);
   const patient = reads().filter((one) => /^\/api\/patients\/\d+$/.test(one.url)).at(-1);
@@ -246,6 +252,11 @@ beforeEach(() => {
   fetchMock.mockImplementation((url, init) => {
     const method = init?.method ?? "GET";
     if (method === "GET" && url === "/api/parties?kind=doctor") return Promise.resolve({ ok: true, status: 200, json: async () => [{ id: 71, name: "Synthetic responsible doctor" }] });
+    const preview = /^\/api\/ortho\/(\d+)\/return-booking\?patientId=(\d+)&adjustmentId=(\d+)$/.exec(url);
+    if (method === "GET" && preview) return Promise.resolve({ ok: true, status: 200, json: async () => ({
+      ok: true, caseId: Number(preview[1]), patientId: Number(preview[2]), adjustmentId: Number(preview[3]),
+      doctorId: 71, doctorName: "Synthetic responsible doctor", fingerprint: returnFingerprint,
+    }) });
     const isRead = method === "GET" && (/^\/api\/ortho\?patientId=(19|20)$/.test(url) || /^\/api\/patients\/(19|20)$/.test(url));
     const isWrite = ["POST", "PATCH"].includes(method) && ["/api/ortho", "/api/ortho/41", "/api/ortho/baseline",
       "/api/appointments", "/api/visits/61/clinical", "/api/patients/19/documents", "/api/patients/20/documents"].includes(url);
@@ -407,8 +418,8 @@ describe("PatientOrtho owner-bound navigation guard (source gate, UNRUN)", () =>
     click(button("📅 حجز الموعد المقترح الآن")); edit("تاريخ الجلسة القادمة", "2026-12-12"); edit("وقت الجلسة القادمة", "17:45");
     expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).toHaveBeenLastCalledWith(dirtyWarning);
     confirmLeave.mockClear();
-    const booking = submit(); expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
-    respond(writes()[1], {}); await booking; await flush();
+    await flush(); const booking = submit(); expect(currentNavigation().guard()).toBe(false); expect(confirmLeave).not.toHaveBeenCalled();
+    respond(writes()[1], bookingReceipt(writes()[1]), 201); await booking; await flush();
     expect(text(render())).toContain("تم حجز الجلسة القادمة بنجاح");
     expect(currentNavigation().guard()).toBe(true); expect(confirmLeave).not.toHaveBeenCalled(); expect(writes()).toHaveLength(2);
   });
@@ -864,12 +875,12 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
   it("a captured booking submit cannot replay after confirmed success before or after rendering", async () => {
     await mount(); adjustment(); const saving = submit(); respond(writes()[0], { id: 81 }); await saving; await flush(); await grant();
     click(button("📅 حجز الموعد المقترح الآن")); edit("تاريخ الجلسة القادمة", "2026-12-12"); edit("وقت الجلسة القادمة", "17:45");
-    const oldForm = form(); const booking = submit(oldForm); expect(writes()).toHaveLength(2);
-    respond(writes()[1], {}); await booking;
+    await flush(); const oldForm = form(); const booking = submit(oldForm); expect(writes()).toHaveLength(2);
+    respond(writes()[1], bookingReceipt(writes()[1]), 201); await booking;
     await submit(oldForm); await flush(); expect(writes()).toHaveLength(2);
     expect(text(render())).toContain("تم حجز الجلسة القادمة بنجاح");
     await submit(oldForm); expect(writes()).toHaveLength(2);
-    expect(JSON.parse(String(writes()[1].init!.body))).toMatchObject({ patientId: 19, date: "2026-12-12", time: "17:45", durationMinutes: 15 });
+    expect(JSON.parse(String(writes()[1].init!.body))).toMatchObject({ patientId: 19, date: "2026-12-12", time: "17:45", durationMinutes: 15, orthoReturn: { caseId: 41, adjustmentId: 81, fingerprint: returnFingerprint } });
   });
 
   it("Back retires the captured booking form and inputs synchronously and across reopening", async () => {
@@ -883,7 +894,7 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     (oldDate.props.onChange as (event: unknown) => void)({ target: { value: "2027-01-01" } }); render();
     expect(control("تاريخ الجلسة القادمة").props.value).toBe("2026-12-12");
     expect(control("وقت الجلسة القادمة").props.value).toBe("17:45"); expect(writes()).toHaveLength(1);
-    const current = submit(); expect(writes()).toHaveLength(2); respond(writes()[1], {}, 409); await current; await flush();
+    await flush(); const current = submit(); expect(writes()).toHaveLength(2); respond(writes()[1], {}, 409); await current; await flush();
     expect(hooks.retiredWrites).toBe(0);
   });
 
@@ -891,7 +902,7 @@ describe("PatientOrtho parent grants and opaque form lifetimes (source gate, UNR
     await mount(); adjustment(); const saving = submit(); respond(writes()[0], { id: 81, visitId: 61 }); await saving; await flush(); await grant();
     click(button("📅 حجز الموعد المقترح الآن")); edit("تاريخ الجلسة القادمة", "2026-12-12"); edit("وقت الجلسة القادمة", "17:45");
     const oldForm = form(); const oldDate = control("تاريخ الجلسة القادمة"); const beforeFields = fields();
-    if (booked) { const booking = submit(); respond(writes()[1], {}); await booking; await flush(); }
+    if (booked) { await flush(); const booking = submit(); respond(writes()[1], bookingReceipt(writes()[1]), 201); await booking; await flush(); }
     const oldLink = elements(render()).find((node) => node.type === "a" && String(node.props.href).includes("wa.me"))?.props.href;
     if (booked) expect(oldLink).toBeTypeOf("string");
     const count = writes().length; refresh(); await grant(true);

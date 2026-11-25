@@ -8,6 +8,8 @@ import { labReadinessFor, type LabReadinessItem } from "@/lib/lab-readiness";
 import { clinicDateString, type Appointment } from "@/lib/schedule";
 import { bookAppointment } from "@/lib/book-appointment";
 import { requireSession } from "@/lib/session";
+import { ORTHO_RETURN_REVIEW_CODE, ORTHO_RETURN_REVIEW_MESSAGE, readOrthoReturnBooking } from "@/lib/ortho-adjustment-booking-contract";
+import { canBookOrthoAdjustmentReturn } from "@/lib/ortho-adjustment-booking-authority";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +80,10 @@ export async function POST(request: Request) {
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded; return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 }); }
 
   const source = (body ?? {}) as Record<string, unknown>;
+  const orthoReturn = readOrthoReturnBooking(source.orthoReturn);
+  if (Object.hasOwn(source, "orthoReturn") && !orthoReturn) {
+    return NextResponse.json({ message: ORTHO_RETURN_REVIEW_MESSAGE, code: ORTHO_RETURN_REVIEW_CODE }, { status: 400 });
+  }
   const text = (key: string, max: number): string | null => {
     const value = source[key];
     return typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
@@ -100,6 +106,7 @@ export async function POST(request: Request) {
       serviceId: integer("serviceId"),
       appointmentType: text("appointmentType", 60),
       bookingIntent: source.bookingIntent === "ortho_follow_up" ? "ortho_follow_up" : undefined,
+      ...(orthoReturn ? { orthoReturn } : {}),
       note: text("note", 300),
       doctorId: integer("doctorId"),
       chairNo: source.chairNo == null || source.chairNo === "" ? null : Number(source.chairNo),
@@ -111,12 +118,12 @@ export async function POST(request: Request) {
       doctorPartyId: actor?.partyId ?? (typeof session.partyId === "number" ? session.partyId : null),
       canOverrideCapacity: actor?.permissions?.canOverrideCapacity === true,
       channel: "ui",
-    });
+    }, orthoReturn ? (client, patientId) => canBookOrthoAdjustmentReturn(session, patientId, client) : undefined);
 
     if (!result.ok) {
       return result.status === 409
         ? NextResponse.json(result.conflict, { status: 409 })
-        : NextResponse.json({ message: result.message }, { status: 400 });
+        : NextResponse.json({ message: result.message, ...(result.code ? { code: result.code } : {}) }, { status: 400 });
     }
     /* تنبيهٌ لا خطأ: الموعد حُجز، والاستقبال تُخبَر لتتأكّد قبل أن تَعِد المريض. */
     return NextResponse.json(

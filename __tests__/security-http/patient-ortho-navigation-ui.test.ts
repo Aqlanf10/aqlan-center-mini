@@ -100,6 +100,11 @@ async function fixture(width: number) {
     }
     const patientId = Number(url.searchParams.get("patientId"));
     const knownPatient = patientId === h.seeded.patientAId || patientId === h.seeded.patientBId;
+    if (method === "GET" && /^\/api\/ortho\/\d+\/return-booking$/.test(url.pathname)
+      && knownPatient) {
+      await route.fulfill({ status: 404, contentType: "application/json", body: "{}" });
+      return;
+    }
     if (method === "GET" && url.pathname === "/api/ortho" && knownPatient) {
       expect([...url.searchParams.entries()]).toEqual([["patientId", String(patientId)]]);
       reads.set(patientId, (reads.get(patientId) ?? 0) + 1);

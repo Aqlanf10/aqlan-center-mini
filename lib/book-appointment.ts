@@ -14,6 +14,8 @@ import { isAdmin } from "./roles";
 import { FOLLOWUP_SERVICE_REVIEW_MESSAGE, isPeriodicFollowupService } from "./ortho-booking-intent";
 import { APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE, lockBookableAppointmentDoctor } from "./appointment-doctor";
 import type { Role } from "./roles";
+import { readOrthoAdjustmentBookingContext } from "./ortho-adjustment-booking-context";
+import { ORTHO_RETURN_REVIEW_CODE, ORTHO_RETURN_REVIEW_MESSAGE, type OrthoReturnBooking } from "./ortho-adjustment-booking-contract";
 import {
   getAppointment, insertAppointmentOnClient, lockAppointmentServiceForBooking, moveAppointmentOnClient, recordAudit,
   writeAppointmentAcrossDays, writeAppointmentInDay, type DbClient,
@@ -52,6 +54,7 @@ export interface BookAppointmentInput {
   appointmentType?: string | null;
   /** Restricts the untouched board proposal; never grants extra booking authority. */
   bookingIntent?: "ortho_follow_up" | null;
+  orthoReturn?: OrthoReturnBooking | null;
   note?: string | null;
   doctorId?: number | null;
   /** كرسيٌّ بعينه، أو `null` = «لم يُخصَّص» — وهو يستهلك طاقةً عامة لا ينفيها. */
@@ -94,7 +97,7 @@ export type BookingResult =
       /** تنبيهٌ لا خطأ — الحجز تمّ والمستخدم يُخبَر ليتأكّد قبل أن يَعِد المريض. */
       warning: string | null;
     }
-  | { ok: false; status: 400; message: string }
+  | { ok: false; status: 400; message: string; code?: string }
   | { ok: false; status: 409; conflict: BookingConflict };
 
 /** صلاحية التجاوز تُشتقّ من المستخدم لا من القناة — والوكيل الذكي قناة. */
@@ -307,7 +310,10 @@ export async function judgeBookingInDay(input: {
  */
 export async function bookAppointment(
   input: BookAppointmentInput, actor: BookingActor,
+  authorizeOrthoReturn?: (client: DbClient, patientId: number) => Promise<boolean>,
 ): Promise<BookingResult> {
+  const refuseReturn = () => ({ ok: false, status: 400, message: ORTHO_RETURN_REVIEW_MESSAGE, code: ORTHO_RETURN_REVIEW_CODE } as const);
+  if (input.orthoReturn && (!authorizeOrthoReturn || input.appointmentType !== "follow_up")) return refuseReturn();
   const patientId = Number(input.patientId);
   if (!Number.isInteger(patientId) || patientId <= 0) {
     return { ok: false, status: 400, message: "اختر المريض أولًا." };
@@ -357,7 +363,7 @@ export async function bookAppointment(
   }
 
   /* الطبيب يحجز لنفسه؛ وغيرُه يحدّد الطبيب صراحةً. */
-  const doctorId = actor.role === "doctor" && typeof actor.doctorPartyId === "number"
+  let doctorId = actor.role === "doctor" && typeof actor.doctorPartyId === "number"
     && actor.doctorPartyId > 0
     ? actor.doctorPartyId
     : (Number.isInteger(Number(input.doctorId)) && Number(input.doctorId) > 0
@@ -367,8 +373,8 @@ export async function bookAppointment(
   const overrideReason = (input.overrideReason ?? "").trim().slice(0, 300);
   const state: {
     verdict: CapacityVerdict | null; overridden: boolean;
-    followupServiceRejected: boolean; doctorRejected: boolean;
-  } = { verdict: null, overridden: false, followupServiceRejected: false, doctorRejected: false };
+    followupServiceRejected: boolean; doctorRejected: boolean; orthoReturnRejected: boolean;
+  } = { verdict: null, overridden: false, followupServiceRejected: false, doctorRejected: false, orthoReturnRejected: false };
 
   const result = await writeAppointmentInDay({
     date: input.date,
@@ -385,6 +391,25 @@ export async function bookAppointment(
         // Keep an explicit duration; otherwise use the current locked default.
         durationMinutes = Number.isFinite(requested) && requested > 0
           ? Math.round(requested) : service.defaultDurationMinutes;
+      }
+      if (input.orthoReturn) {
+        try {
+          if (!await authorizeOrthoReturn!(client, patientId)) {
+            state.orthoReturnRejected = true;
+            return { ok: false as const, conflict: null };
+          }
+          const current = await readOrthoAdjustmentBookingContext(client, { patientId, ...input.orthoReturn }, true);
+          if (!current.ok || current.fingerprint !== input.orthoReturn.fingerprint) {
+            state.orthoReturnRejected = true;
+            return { ok: false as const, conflict: null };
+          }
+          doctorId = current.doctorId;
+        } catch (error) {
+          // An ownership witness was busy; controlled refusal with no write.
+          if ((error as { code?: string }).code !== "55P03") throw error;
+          state.orthoReturnRejected = true;
+          return { ok: false as const, conflict: null };
+        }
       }
       if (!await lockBookableAppointmentDoctor(client, doctorId)) {
         state.doctorRejected = true;
@@ -424,6 +449,7 @@ export async function bookAppointment(
   });
 
   if (!result.ok) {
+    if (state.orthoReturnRejected) return refuseReturn();
     if (state.followupServiceRejected) return { ok: false, status: 400, message: FOLLOWUP_SERVICE_REVIEW_MESSAGE };
     if (state.doctorRejected) return { ok: false, status: 400, message: APPOINTMENT_DOCTOR_UNAVAILABLE_MESSAGE };
     return { ok: false, status: 409, conflict: result.conflict as BookingConflict };

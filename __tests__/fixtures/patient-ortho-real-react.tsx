@@ -67,6 +67,13 @@ window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response>
   if (url.origin === location.origin && method === "GET" && path === "/api/parties?kind=doctor") {
     return Promise.resolve({ ok: true, status: 200, json: async () => [{ id: 935101, name: "Synthetic responsible doctor" }] } as Response);
   }
+  const preview = /^\/api\/ortho\/(\d+)\/return-booking\?patientId=(93910[12])&adjustmentId=(\d+)$/.exec(path);
+  if (url.origin === location.origin && method === "GET" && preview) {
+    return Promise.resolve({ ok: true, status: 200, json: async () => ({
+      ok: true, caseId: Number(preview[1]), patientId: Number(preview[2]), adjustmentId: Number(preview[3]),
+      doctorId: 935101, doctorName: "Synthetic responsible doctor", fingerprint: "a".repeat(64),
+    }) } as Response);
+  }
   const permit = permits.find((one) => one.method === method && one.path === path && one.remaining > 0);
   if (url.origin !== location.origin || (!parentRead && !permit)) {
     unexpected.push(`${method} ${url.origin}${path}`);
