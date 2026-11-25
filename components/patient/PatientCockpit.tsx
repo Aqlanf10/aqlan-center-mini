@@ -52,7 +52,7 @@ export function PatientCockpit({
   safety?: ReactNode;
 }) {
   const chairCount = useChairCount();
-  const { visit, alerts, readiness, chairsState, coherent, canOperate, active, freeChairs, selectedChair,
+  const { visit, alerts, readiness, chairsState, coherent, canAcknowledgeReadiness, active, freeChairs, selectedChair,
     busy, message, canEnterChair, setChair, reload, clear, enterChair } = usePatientCockpitReadiness({
     patientId, patientName, patientPhone, fallbackAlert, confirmedAlert, summary, chairCount, onChanged,
   });
@@ -128,7 +128,7 @@ export function PatientCockpit({
         <div className={`${compact ? "w-full" : "ms-auto"} flex flex-wrap items-center gap-1.5`}>
           {compact ? primaryAction : null}
           {compact ? secondaryActions : null}
-          {canOperate && active && !visit?.cleared && visit?.checklist !== null ? (
+          {canAcknowledgeReadiness ? (
             <button type="button" onClick={() => void clear()} disabled={busy}
               title={(visit?.checklist ?? []).map((item) => item.label).join("\n")}
               className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-800 disabled:opacity-40">

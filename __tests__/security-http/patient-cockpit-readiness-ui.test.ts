@@ -88,6 +88,7 @@ describe("patient cockpit readiness on the built RTL patient file", () => {
       // Debt and absent clearance do not create new client-side policy holds.
       expect(await cockpit(page).innerText()).toContain("عليه");
       expect(await cockpit(page).innerText()).not.toContain("جاهز ✓");
+      expect(await cockpit(page).getByRole("button", { name: /أقِرّ الجاهزية/ }).isVisible()).toBe(true);
       await noHorizontalOverflow(page);
       await page.screenshot({ path: `.settings-ui-artifacts/patient-cockpit-readiness-${width}.png`, fullPage: true });
       await entry(page).click();
@@ -95,6 +96,8 @@ describe("patient cockpit readiness on the built RTL patient file", () => {
       expect(mutations[0]).toEqual({ url: `/api/visits/${visitId}`, body: { action: "seat", chair: 1 } });
       await expect.poll(() => cockpit(page).innerText()).toContain("على الكرسي 1");
       expect(await entry(page).count()).toBe(0);
+      expect(await cockpit(page).getByRole("button", { name: /أقِرّ الجاهزية/ }).count()).toBe(0);
+      expect(await cockpit(page).innerText()).toContain(alert);
       expect(mutations).toHaveLength(1); expect(errors).toEqual([]);
       expect((await db.query("SELECT status FROM visits WHERE id=$1", [visitId])).rows[0].status).toBe("waiting");
     } finally { release(); await context.close(); }

@@ -60,6 +60,14 @@ function availableChairs(rows: readonly ChairVisit[], visit: CockpitVisit | null
   return free;
 }
 
+function isPreChair(visit: CockpitVisit | null): visit is CockpitVisit {
+  return visit !== null && visit.signedAt === null && (visit.status === "waiting" || visit.status === "called");
+}
+
+function mayAcknowledgeReadiness(visit: CockpitVisit | null): visit is CockpitVisit {
+  return isPreChair(visit) && visit.cleared === null && visit.checklist !== null;
+}
+
 function coherentVisit(snapshot: Snapshot, patientId: number): boolean {
   if (snapshot.readiness !== "ready" || snapshot.chairsState !== "ready") return false;
   const activeRows = snapshot.chairs.filter((row) => row.patientId === patientId && row.status !== "done");
@@ -225,8 +233,8 @@ export function usePatientCockpitReadiness({ patientId, patientName, patientPhon
   const selectedChair = chairChoice?.scope === scope && freeChairs.includes(chairChoice.chair) ? chairChoice.chair : freeChairs[0] ?? null;
   // Workflow's openVisit can be from an earlier day or a stale parent read. It
   // invalidates this hook's scope but cannot overrule the two current endpoints.
-  const canEnterChair = canOperate && coherent && (visit === null
-    || (visit.signedAt === null && ["waiting", "called"].includes(visit.status)));
+  const canEnterChair = canOperate && coherent && (visit === null || isPreChair(visit));
+  const canAcknowledgeReadiness = canOperate && mayAcknowledgeReadiness(visit);
   const active = readiness === "ready" && visit !== null && visit.signedAt === null && visit.status !== "done";
   const denied = deniedScopes.has(alertScope) || current?.denied === true;
   const grantedSources = cachedAlerts?.scope === alertScope ? cachedAlerts.sources : null;
@@ -237,7 +245,7 @@ export function usePatientCockpitReadiness({ patientId, patientName, patientPhon
   const run = async (kind: "clear" | "seat") => {
     const expectedVisit = visit?.visitId ?? null; const requestedChair = selectedChair;
     if (!canOperate || !alive() || pending.has(patientId)
-      || (kind === "clear" ? !active || !visit || visit.checklist === null : !canEnterChair || requestedChair === null)) return;
+      || (kind === "clear" ? !canAcknowledgeReadiness : !canEnterChair || requestedChair === null)) return;
     const operation = Symbol(); pending.set(patientId, operation); setBusy(true); setMessage(null);
     const ownedGeneration = actionGeneration.current;
     const actionAlive = () => alive() && actionGeneration.current === ownedGeneration;
@@ -254,7 +262,7 @@ export function usePatientCockpitReadiness({ patientId, patientName, patientPhon
         showMessage({ tone: "warn", text: "تغيّرت الزيارة؛ راجع الحالة الجديدة قبل إعادة الإجراء." }); return;
       }
       if (kind === "clear") {
-        if (!fresh.visit || fresh.visit.checklist === null) return;
+        if (!mayAcknowledgeReadiness(fresh.visit)) return;
         const response = await fetch(`/api/visits/${fresh.visit.visitId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "clear" }) });
         if (!actionAlive()) return;
         rejectDenied(response);
@@ -263,7 +271,7 @@ export function usePatientCockpitReadiness({ patientId, patientName, patientPhon
         if (!response.ok) throw new Error(payload?.message ?? "تعذّر إقرار الجاهزية.");
         showMessage({ tone: "ok", text: "حُفظ إقرار المراجعة؛ تُحدّث الحالة من الخادم." });
       } else {
-        if (!coherentVisit(fresh, patientId) || requestedChair === null || (fresh.visit && !["waiting", "called"].includes(fresh.visit.status))
+        if (!coherentVisit(fresh, patientId) || requestedChair === null || (fresh.visit !== null && !isPreChair(fresh.visit))
           || !availableChairs(fresh.chairs, fresh.visit, chairCount).includes(requestedChair)) {
           showMessage({ tone: "warn", text: "تغيّرت الزيارة أو حالة الكرسي؛ راجع الحالة الجديدة قبل إعادة الإجراء." }); return;
         }
@@ -280,7 +288,7 @@ export function usePatientCockpitReadiness({ patientId, patientName, patientPhon
           const verified = await reload();
           if (!actionAlive()) return;
           if (!verified || !coherentVisit(verified, patientId) || verified.visit?.visitId !== visitId
-            || verified.visit.signedAt !== null || !["waiting", "called"].includes(verified.visit.status)
+            || !isPreChair(verified.visit)
             || !availableChairs(verified.chairs, verified.visit, chairCount).includes(requestedChair)) {
             const value: Message = { tone: "warn", text: "سُجّل الوصول، لكن إدخال الكرسي لم يتأكد؛ راجع زيارة اليوم قبل المتابعة." };
             arrivalNotices.set(alertScope, { value, at: Date.now() }); showMessage(value);
@@ -314,7 +322,7 @@ export function usePatientCockpitReadiness({ patientId, patientName, patientPhon
       settledListeners.forEach((settled) => settled());
     }
   };
-  return { visit, alerts, readiness, chairsState, coherent, canOperate, active, freeChairs, selectedChair, busy: busy || pending.has(patientId),
+  return { visit, alerts, readiness, chairsState, coherent, canAcknowledgeReadiness, active, freeChairs, selectedChair, busy: busy || pending.has(patientId),
     message: message?.scope === scope ? message.value : null,
     canEnterChair, setChair: (chair: number) => setChairChoice({ scope, chair }), reload,
     clear: () => run("clear"), enterChair: () => run("seat") };
