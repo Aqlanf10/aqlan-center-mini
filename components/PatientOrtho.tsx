@@ -614,6 +614,8 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
           patientPhone={patient?.phone ?? null}
           draftKey={`next:${saved.adjustmentId}`} contactReady={owner.contact}
           caseId={saved.caseId}
+          responsibleDoctorId={cases.find((c) => c.id === saved.caseId)?.responsibleDoctorId ?? null}
+          responsibleDoctorName={cases.find((c) => c.id === saved.caseId)?.responsibleDoctorName ?? null}
           doneOn={saved.doneOn}
           nextWeeks={saved.nextWeeks}
           photosUploaded={saved.photosUploaded}
@@ -1281,11 +1283,12 @@ function SignTodayVisitCard({ visitId, patientId, onError, onUncertain, onSigned
 }
 
 function NextAppointmentCard({
-  patientId, patientName, patientPhone, caseId, doneOn, nextWeeks,
+  patientId, patientName, patientPhone, caseId, responsibleDoctorId, responsibleDoctorName, doneOn, nextWeeks,
   photosUploaded, onDismiss, onError, draftKey, contactReady,
 }: {
   patientId: number; patientName: string; patientPhone: string | null;
-  caseId: number; doneOn: string; nextWeeks: number; photosUploaded: number;
+  caseId: number; responsibleDoctorId?: number | null; responsibleDoctorName?: string | null;
+  doneOn: string; nextWeeks: number; photosUploaded: number;
   draftKey: string; contactReady: boolean;
   onDismiss: () => void; onError: (message: string | null) => void;
 }) {
@@ -1335,6 +1338,7 @@ function NextAppointmentCard({
         body: JSON.stringify({
           patientId, date, time, durationMinutes: 15,
           appointmentType: "follow_up",
+          ...(responsibleDoctorId ? { doctorId: responsibleDoctorId } : {}),
           note: "جلسة شدّ تقويم — من كابينة التقويم",
         }),
       });
@@ -1370,6 +1374,7 @@ function NextAppointmentCard({
       ) : null}
       <p className="mb-2 text-xs text-emerald-800">
         {friendlyDateLong(booked?.date ?? suggested)} — متابعة تقويم وشد · 15 دقيقة
+        {responsibleDoctorName ? ` · الطبيب: ${responsibleDoctorName}` : ""}
         {booked ? ` · الساعة ${friendlyTime(booked.time)}` : ""}
       </p>
 

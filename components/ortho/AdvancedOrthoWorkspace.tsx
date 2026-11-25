@@ -344,6 +344,7 @@ export function AdvancedOrthoWorkspace({
           patientName={patientName}
           patientCode={patientCode}
           canEdit={canEdit}
+          canOpenSessions={perms.canSection("sessions")}
           onNavigateTab={setActiveTab}
         />
       )}

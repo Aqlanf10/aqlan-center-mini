@@ -42,12 +42,14 @@ export function OrthoOverviewTab({
   patientName,
   patientCode,
   canEdit,
+  canOpenSessions = true,
   onNavigateTab,
 }: {
   record: OrthoWorkspaceRecord;
   patientName: string;
   patientCode: string;
   canEdit: boolean;
+  canOpenSessions?: boolean;
   onNavigateTab: (tab: OrthoWorkspaceTabId) => void;
 }) {
   const completeness = computeOrthoWorkspaceCompleteness(record);
@@ -126,13 +128,15 @@ export function OrthoOverviewTab({
                 {patientName} {patientCode ? `· ملف رقم ${patientCode}` : ""}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => onNavigateTab("sessions")}
-              className="rounded-lg bg-navy-800 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-navy-900"
-            >
-              الانتقال إلى الشدّات اليومية ←
-            </button>
+            {canOpenSessions ? (
+              <button
+                type="button"
+                onClick={() => onNavigateTab("sessions")}
+                className="rounded-lg bg-navy-800 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-navy-900"
+              >
+                الانتقال إلى الشدّات اليومية ←
+              </button>
+            ) : null}
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 text-xs">
