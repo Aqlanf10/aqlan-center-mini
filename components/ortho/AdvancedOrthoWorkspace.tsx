@@ -24,6 +24,7 @@ import {
   OrthoRetentionTab,
 } from "./OrthoDiagnosisPlanRetentionTabs";
 import { OrthoScientificAnalysisTab } from "./OrthoScientificAnalysisTab";
+import { OrthoReportsPresentationTab } from "./OrthoReportsPresentationTab";
 import { useSession } from "@/components/SessionProvider";
 
 export interface AdvancedOrthoWorkspaceProps {
@@ -455,9 +456,16 @@ export function AdvancedOrthoWorkspace({
             onChange: handleRecordChange,
           })
         ) : (
-          <div className="rounded-xl border border-slate-200 bg-white p-6 text-xs text-slate-600">
-            وحدة التقارير وعرض الحالة (Case Presentation PPTX/PDF).
-          </div>
+          <OrthoReportsPresentationTab
+            patientId={patientId}
+            patientName={patientName}
+            patientCode={patientCode}
+            record={record}
+            canCreatePresentation={perms.can("presentation.create")}
+            canExport={perms.can("reports.export")}
+            canPrint={perms.can("reports.print")}
+            onChange={handleRecordChange}
+          />
         )
       )}
 
