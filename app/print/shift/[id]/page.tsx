@@ -30,7 +30,8 @@ function clockOf(iso: string): { date: string; time: string } {
 
 export default async function ShiftCloseReportPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
-  if (!session || !canViewMoney(session.role)) notFound();
+  // Reception may print a scoped patient receipt, never the clinic-wide Z report.
+  if (!session || session.role === "reception" || !canViewMoney(session.role)) notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);
