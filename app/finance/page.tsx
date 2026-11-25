@@ -38,6 +38,7 @@ import type { LabDeliveryRisk } from "@/lib/lab-reconciliation";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import { financeAccessFor } from "@/lib/finance-permissions";
 import { useLabBalanceOverview } from "@/components/finance/useLabBalanceOverview";
+import { receptionSettlementTargets } from "@/lib/reception-settlement-targets";
 
 interface Feed {
   /** Resolved server zone; optional for compatibility with an older shift feed. */
@@ -121,6 +122,7 @@ interface SelectedCollectPatient {
   currency?: Currency;
   invoices?: CollectInvoiceTarget[];
   plans?: CollectPlanTarget[];
+  openings?: { currency: Currency; dueMinor: number }[];
   presetInvoice?: { id: number; baseCurrency: Currency } | null;
 }
 
@@ -161,10 +163,8 @@ function ReceptionCollection() {
       const invoices = (data.invoices as CollectInvoiceTarget[]).filter(
         (invoice) => invoice.status === "open" && isCurrency(invoice.baseCurrency),
       );
-      const plans = (data.plans as CollectPlanTarget[]).filter(
-        (plan) => plan.status === "active" && isCurrency(plan.baseCurrency),
-      );
-      setSelected({ id: patient.id, name: patient.name, invoices, plans });
+      const { plans, openings } = receptionSettlementTargets(data);
+      setSelected({ id: patient.id, name: patient.name, invoices, plans, openings });
     } catch {
       if (generation === request.current) setError("تعذّر تحميل حساب المريض. أعد المحاولة.");
     } finally {
@@ -189,7 +189,8 @@ function ReceptionCollection() {
       {selected ? <CollectPaymentModal patientId={selected.id} patientName={selected.name}
         isOpen onClose={() => setSelected(null)}
         onSuccess={(id) => { setSelected(null); setReceiptId(id); }}
-        invoices={selected.invoices ?? []} plans={selected.plans ?? []} /> : null}
+        invoices={selected.invoices ?? []} plans={selected.plans ?? []}
+        openings={selected.openings ?? []} /> : null}
     </main>
   );
 }
