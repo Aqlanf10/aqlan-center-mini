@@ -1081,7 +1081,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
       />
 
       {/* تبويبات داخل ملف المريض */}
-      <div className={`${compactWorkspace ? "mb-2 flex-nowrap overflow-x-auto gap-1" : "mb-4 flex-wrap gap-1.5"} flex items-center border-b border-slate-200 pb-2`} aria-label="أقسام ملف المريض">
+      <div className={`${compactWorkspace ? "mb-2 gap-1" : "mb-4 gap-1.5"} flex min-w-0 flex-wrap items-center border-b border-slate-200 pb-2`} aria-label="أقسام ملف المريض">
         {TABS.map(([key, title, icon]) => {
           if (key === "prescriptions" && !canViewPrescriptionHistory) return null;
           const isSelected = tab === key;

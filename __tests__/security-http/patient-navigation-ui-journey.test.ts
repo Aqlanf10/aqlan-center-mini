@@ -456,6 +456,22 @@ describe.runIf(process.env.CI === "true" && process.env.GITHUB_ACTIONS === "true
           await save.click({ trial: true });
           await page.evaluate(() => window.scrollTo(0, 0));
           await noOverflow();
+          const patientTabs = page.locator('[aria-label="أقسام ملف المريض"]');
+          const visibleTabGeometry = await patientTabs.evaluate((strip) => {
+            const { left, right } = strip.getBoundingClientRect();
+            const files = strip.querySelector('[data-testid="patient-tab-files"]');
+            return {
+              hasFiles: files !== null,
+              overflow: strip.scrollWidth - strip.clientWidth,
+              clipped: Array.from(strip.querySelectorAll("button")).filter((button) => {
+                const bounds = button.getBoundingClientRect();
+                return bounds.left < left - 1 || bounds.right > right + 1;
+              }).length,
+            };
+          });
+          expect(visibleTabGeometry.hasFiles).toBe(true);
+          expect(visibleTabGeometry.overflow).toBeLessThanOrEqual(1);
+          expect(visibleTabGeometry.clipped).toBe(0);
           await page.screenshot({ path: `.settings-ui-artifacts/patient-compact-today-${variant}-${width}.png`, fullPage: true });
           await page.getByTestId("patient-tab-treatment").click();
           await selected(page, "patient-subtab-endo");
