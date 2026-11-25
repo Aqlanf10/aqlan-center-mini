@@ -89,21 +89,26 @@ describe("preview refusals equal the save's refusals", () => {
 describe("needs-assessment, next action and ortho bridging", () => {
   it("the invoice's ortho case needs assessment until the doctor opens the ortho case, which bridges it", async () => {
     const patient = await newPatient("UI-ORTHO");
-    const created = await create(patient, [line(ortho, "ortho", 30_000_000, null, null, "both")]);
+    const created = await create(patient, [line(ortho, "ortho", 30_000_000, null, null, "lower")]);
     if (!created.ok) throw new Error("create");
     const cases = await listPatientCases(patient);
     expect(cases.filter((c) => c.needsAssessment).map((c) => c.specialty)).toEqual(["orthodontics"]);
     const summary = await patientWorkflow(patient, "2026-10-06");
     expect(summary.assessmentCases).toEqual([expect.objectContaining({ specialty: "orthodontics" })]);
 
-    const opened = await createOrthoCase({
-      patientId: patient, appliance: "fixed_metal", arches: "both", slot: "022", bracketSystem: null,
-      startDate: "2026-10-06", plannedMonths: 18, planId: null, note: null, createdBy: "dr",
-    });
+    const caseId = created.links[0].caseId!;
+    const intake = { patientId: patient, appliance: "fixed_metal", arches: "lower", slot: "022",
+      bracketSystem: null, startDate: "2026-10-06", plannedMonths: 18, planId: null, note: null, createdBy: "dr" } as const;
+    expect(await createOrthoCase({ ...intake, expectedAssessmentCaseId: caseId + 1 })).toMatchObject({ ok: false });
+    expect(await createOrthoCase({ ...intake, arches: "both", expectedAssessmentCaseId: caseId })).toMatchObject({ ok: false });
+    expect(await q(`SELECT id FROM ortho_cases WHERE patient_id = $1`, [patient])).toEqual([]);
+    expect(await q(`SELECT id, ortho_case_id FROM clinical_cases WHERE patient_id = $1`, [patient]))
+      .toEqual([{ id: caseId, ortho_case_id: null }]);
+    const opened = await createOrthoCase({ ...intake, expectedAssessmentCaseId: caseId });
     expect(opened.ok).toBe(true);
     if (!opened.ok) return;
-    const [kase] = await q<{ ortho_case_id: number; title: string }>(`SELECT ortho_case_id, title FROM clinical_cases WHERE patient_id = $1`, [patient]);
-    expect(kase).toEqual({ ortho_case_id: opened.id, title: "تقويم الأسنان" });
+    const [kase] = await q<{ ortho_case_id: number; title: string }>(`SELECT id, ortho_case_id, title FROM clinical_cases WHERE patient_id = $1`, [patient]);
+    expect(kase).toEqual({ id: caseId, ortho_case_id: opened.id, title: "تقويم الأسنان" });
     expect((await listPatientCases(patient)).some((c) => c.needsAssessment)).toBe(false);
     expect((await patientWorkflow(patient, "2026-10-06")).assessmentCases).toEqual([]);
     const funded = await q<{ funded: boolean }>(`SELECT ${db.ORTHO_CASE_FUNDED_SQL} AS funded FROM ortho_cases c WHERE c.id = $1`, [opened.id]);

@@ -84,7 +84,7 @@ describe("INV-LINK D — invoice-first journey", () => {
     await page.getByRole("button", { name: "علاج جديد", exact: true }).click();
     await page.getByLabel("الخدمة", { exact: true }).selectOption(String(serviceId));
     await page.getByTestId("invoice-provider-0").selectOption(String(doctorId));
-    await page.getByTestId("invoice-row-0").getByLabel("نطاق العلاج",{exact:true}).selectOption("both");
+    await page.getByTestId("invoice-row-0").getByLabel("نطاق العلاج",{exact:true}).selectOption("lower");
     const preview = page.getByTestId("invoice-clinical-preview-0");
     await preview.filter({ hasText: "سيتم إنشاء حالة أولية تحتاج تقييم الطبيب" }).waitFor({state:"attached"});
     if(!await preview.isVisible())await preview.locator("..").locator("summary").click();
@@ -100,6 +100,27 @@ describe("INV-LINK D — invoice-first journey", () => {
     expect(cases).toEqual([{ specialty: "orthodontics", origin: "invoice" }]);
     await context.close();
   });
+
+  it("doctor on a phone: preselects the invoice jaw and refuses the wrong jaw without writing", async () => {
+    const { context, page } = await open("doctorA", `/patients/${patientId}`, 390);
+    try {
+      await page.getByRole("button", { name: /بدء التقييم السريري — تقويم/ }).click();
+      await page.locator('[data-testid="patient-ortho-workspace"][data-read-state="ready"]').waitFor();
+      await page.getByRole("button", { name: "+ فتح حالة تقويم جديدة", exact: true }).click();
+      const linkedScope = page.getByTestId("ortho-invoice-arches");
+      await linkedScope.waitFor();
+      expect(await linkedScope.innerText()).toContain("الفك السفلي");
+      const select = page.getByLabel("الفكّان المعالَجان", { exact: true });
+      expect(await select.inputValue()).toBe("lower");
+      await select.selectOption("both");
+      await page.getByRole("alert").filter({ hasText: "النطاق المختار لا يطابق الحالة الأولية" }).waitFor();
+      expect(await page.getByRole("button", { name: "افتح الحالة", exact: true }).isDisabled()).toBe(true);
+      expect((await db.query("SELECT id FROM ortho_cases WHERE patient_id = $1", [patientId])).rows).toEqual([]);
+      expect((await db.query("SELECT id FROM invoices WHERE patient_id = $1", [patientId])).rows).toHaveLength(1);
+    } finally {
+      await context.close();
+    }
+  }, 120_000);
 
   it("doctor: the next action is the clinical assessment and the ortho tab shows the pending case", async () => {
     const { context, page } = await open("doctorA", `/patients/${patientId}`);
@@ -126,7 +147,16 @@ describe("INV-LINK D — invoice-first journey", () => {
       window.addEventListener("focus", () => { state.count++; });
     });
     await page.getByRole("button", { name: "+ فتح حالة تقويم جديدة", exact: true }).click();
-    await page.getByLabel("الفكّان المعالَجان", { exact: true }).selectOption("both");
+    const linkedScope = page.getByTestId("ortho-invoice-arches");
+    await linkedScope.waitFor();
+    expect(await linkedScope.innerText()).toContain("الفك السفلي");
+    const scopeSelect = page.getByLabel("الفكّان المعالَجان", { exact: true });
+    expect(await scopeSelect.inputValue()).toBe("lower");
+    await scopeSelect.selectOption("both");
+    expect(await page.getByRole("button", { name: "افتح الحالة", exact: true }).isDisabled()).toBe(true);
+    await scopeSelect.selectOption("lower");
+    const [previous] = (await db.query<{ id: number }>(`SELECT id FROM clinical_cases WHERE patient_id = $1`, [patientId])).rows;
+    expect((await db.query(`SELECT id FROM ortho_cases WHERE patient_id = $1`, [patientId])).rows).toEqual([]);
     const refreshedWorkflow = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/patients/${patientId}/workflow`
       && response.request().method() === "GET");
     await page.getByRole("button", { name: "افتح الحالة", exact: true }).click();
@@ -136,9 +166,11 @@ describe("INV-LINK D — invoice-first journey", () => {
     expect(workflow.patient.id).toBe(patientId);
     expect(workflow.assessmentCases).toEqual([]);
     // Canonical persistence is checked independently of the banner's read path.
-    const bridged = await db.query<{ ortho_case_id: number }>(
-      `SELECT ortho_case_id FROM clinical_cases WHERE patient_id = $1 AND origin = 'invoice' AND specialty = 'orthodontics'`, [patientId]);
-    expect(bridged.rows).toHaveLength(1); expect(bridged.rows[0].ortho_case_id).toBeGreaterThan(0);
+    const bridged = await db.query<{ id: number; ortho_case_id: number }>(
+      `SELECT id, ortho_case_id FROM clinical_cases WHERE patient_id = $1 AND origin = 'invoice' AND specialty = 'orthodontics'`, [patientId]);
+    expect(bridged.rows).toEqual([{ id: previous.id, ortho_case_id: expect.any(Number) }]);
+    expect((await db.query(`SELECT arches FROM ortho_cases WHERE id = $1`, [bridged.rows[0].ortho_case_id])).rows)
+      .toEqual([{ arches: "lower" }]);
     await banner.waitFor({ state: "detached" });
     expect(await workspace!.evaluate((element) => element.isConnected)).toBe(true);
     expect(navigations).toBe(0);

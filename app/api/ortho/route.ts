@@ -91,6 +91,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "غير مصرّح لك بفتح حالة تقويم لهذا المريض." }, { status: 403 });
   }
 
+  const expectedAssessmentCaseId = source.expectedAssessmentCaseId;
+  if (expectedAssessmentCaseId !== undefined && (typeof expectedAssessmentCaseId !== "number"
+    || !Number.isSafeInteger(expectedAssessmentCaseId) || expectedAssessmentCaseId <= 0
+    || typeof source.arches !== "string" || !ARCHES.includes(source.arches))) {
+    return NextResponse.json({ message: "تحقّق من الحالة الأولية ونطاقها قبل الحفظ." }, { status: 400 });
+  }
+  if (expectedAssessmentCaseId !== undefined && session.role !== "doctor" && session.role !== "admin") {
+    return NextResponse.json({ message: "ربط الحالة الأولية متاح للطبيب أو الإدارة." }, { status: 403 });
+  }
+
   const appliance = typeof source.appliance === "string" && APPLIANCES.includes(source.appliance)
     ? source.appliance : "fixed_metal";
   const arches = typeof source.arches === "string" && ARCHES.includes(source.arches)
@@ -111,6 +121,7 @@ export async function POST(request: Request) {
   try {
     const created = await createOrthoCase({
       patientId,
+      ...(expectedAssessmentCaseId === undefined ? {} : { expectedAssessmentCaseId }),
       appliance: appliance as never,
       arches: arches as never,
       slot: slot as never,
