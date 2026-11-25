@@ -6,7 +6,7 @@ vi.mock('../lib/db',()=>({doctorOwnsPatient:deps.owner,findUserByUsername:deps.u
 import { canAccessPatient } from '../lib/patient-access';
 const session={userId:3,username:'synthetic-doctor',role:'doctor',partyId:9,expiresAt:Date.now()+60_000} as SessionPayload;
 const client={} as DbClient;
-beforeEach(()=>{vi.clearAllMocks();deps.user.mockResolvedValue({isActive:true,partyId:9,permissions:{}});deps.owner.mockResolvedValue(true);});
+beforeEach(()=>{vi.clearAllMocks();deps.user.mockResolvedValue({id:3,username:'synthetic-doctor',role:'doctor',isActive:true,partyId:9,permissions:{}});deps.owner.mockResolvedValue(true);});
 it('preserves existing ownership call shapes without opting into NOWAIT',async()=>{
   expect(await canAccessPatient(session,7)).toBe(true);expect(deps.owner).toHaveBeenLastCalledWith(9,7);
   expect(await canAccessPatient(session,7,undefined,client)).toBe(true);expect(deps.owner).toHaveBeenLastCalledWith(9,7,client);
