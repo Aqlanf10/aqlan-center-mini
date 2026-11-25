@@ -15,7 +15,14 @@
  */
 export function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";
-  const text = String(value);
+  const raw = String(value);
+  // Spreadsheet programs can interpret a quoted CSV cell as a formula.
+  // Preserve canonical negative numbers (including PostgreSQL numeric strings),
+  // but force formula-like text into a literal cell before CSV escaping.
+  const negativeNumber = /^-\d+(?:\.\d+)?$/.test(raw);
+  const dangerousText = /^[\s\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f]*[=+\-@\uff1d\uff0b\uff0d\uff20]/u.test(raw)
+    || /^[\t\r\n]/.test(raw);
+  const text = dangerousText && !negativeNumber ? "'" + raw : raw;
   if (!/[",\n\r]/.test(text)) return text;
   return `"${text.replace(/"/g, '""')}"`;
 }
