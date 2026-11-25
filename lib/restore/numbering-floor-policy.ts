@@ -37,6 +37,14 @@ export function planRestoredNumberingFloor(
     || (archive.pendingNext !== null && (!bounded(archive.pendingNext) || archive.pendingNext === 0n))) {
     return { ok: false, reason: "invalid-snapshot" };
   }
+  // Runtime evidence can cross a database/serialization boundary. A truthy
+  // string such as "false" is not proof that historical reconciliation ran.
+  if (archive.historyComplete !== true) {
+    return { ok: false, reason: "history-unverified" };
+  }
+  if (typeof archive.revision !== "string" || archive.revision.trim().length === 0) {
+    return { ok: false, reason: "invalid-snapshot" };
+  }
   // A supposedly authoritative external record must cover every consumed
   // archive number. Do not conceal stale evidence by merely taking max().
   if (witness.reservedThrough < archive.allocatedThrough
