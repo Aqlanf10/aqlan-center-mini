@@ -19,6 +19,11 @@ import {
   suggestPhotoStage, type PhotoStage, type PhotoView, type StagePhoto,
 } from "@/lib/ortho-photos";
 import {
+  buildTighteningPhotoNote, parseTighteningPhotoMeta, PHOTO_TIMING_LABEL, type PhotoTiming,
+} from "@/lib/ortho-tightening-media";
+import { TighteningCameraStudio } from "./ortho/TighteningCameraStudio";
+import { TighteningCompareModal } from "./ortho/TighteningCompareModal";
+import {
   friendlyDateLong, friendlyTime, orthoSessionBookedText, toWhatsAppNumber,
 } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
@@ -126,8 +131,11 @@ function daysText(days: number): string {
 
 interface QueuedPhoto {
   file: File;
+  derivedFile?: File | null;
   preview: string;
   view: PhotoView | "";
+  timing?: PhotoTiming;
+  note?: string;
 }
 
 interface SavedAdjustment {
@@ -428,6 +436,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
   const canRecordBaseline = session?.role === "doctor" || session?.role === "admin";
   const [adjusting, setAdjusting] = useState<number | null>(null);
   const [saved, setSaved] = useState<SavedAdjustment | null>(null);
+  const [compareSessionTarget, setCompareSessionTarget] = useState<{ caseId: number; sessionId: number } | null>(null);
   const [confirmedSignVisitId, setConfirmedSignVisitId] = useState<number | null>(null);
   const [onboardingRevision, setOnboardingRevision] = useState(0);
   const [, redrawMutation] = useState(0);
@@ -929,9 +938,20 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                       ) : null}
                       {row.adjustments.length > 0 ? (
                         <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                          <h4 className="mb-3 text-xs font-extrabold text-navy-900">
-                            سجل الشدّات السابقة وألبومات الجلسات ({row.adjustments.length})
-                          </h4>
+                          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                            <h4 className="text-xs font-extrabold text-navy-900">
+                              سجل الشدّات السابقة وألبومات الجلسات ({row.adjustments.length})
+                            </h4>
+                            {row.photosVisible !== false && row.adjustments.some((a) => a.photos.length > 0) ? (
+                              <button
+                                type="button"
+                                onClick={() => setCompareSessionTarget({ caseId: row.id, sessionId: row.adjustments[0].id })}
+                                className="rounded-lg border border-brand-blue/30 bg-brand-blue/5 px-2.5 py-1 text-[11px] font-bold text-brand-blue hover:bg-brand-blue/10"
+                              >
+                                مقارنة صور الشدّات
+                              </button>
+                            ) : null}
+                          </div>
                           <ul className="space-y-2">
                             {row.adjustments.map((entry, index) => (
                               <li key={entry.id} className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
@@ -959,36 +979,66 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                                 {/* صور الجلسة */}
                                 {row.photosVisible !== false && entry.photos.length > 0 ? (
                                   <div className="mt-2.5 grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-                                    {entry.photos.map((photo) => (
-                                      <a
-                                        key={photo.id}
-                                        href={`/api/documents/${photo.id}`}
-                                        target="_blank"
-                                        rel="noopener"
-                                        className="group relative block overflow-hidden rounded-xl bg-slate-900 border border-slate-200"
-                                      >
-                                        {photo.isImage ? (
-                                          <img
-                                            src={`/api/documents/${photo.id}`}
-                                            alt={photo.title}
-                                            loading="lazy"
-                                            className="h-20 w-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
-                                          />
-                                        ) : (
-                                          <div className="flex h-20 items-center justify-center text-2xl">📄</div>
-                                        )}
-                                        {photo.photoView && photo.photoView in PHOTO_VIEW_LABEL ? (
-                                          <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[9px] font-bold text-white">
-                                            {PHOTO_VIEW_LABEL[photo.photoView as PhotoView]}
-                                          </span>
-                                        ) : null}
-                                      </a>
-                                    ))}
+                                    {entry.photos.map((photo) => {
+                                      const photoMeta = parseTighteningPhotoMeta((photo as { note?: string | null }).note);
+                                      return (
+                                        <a
+                                          key={photo.id}
+                                          href={`/api/documents/${photo.id}`}
+                                          target="_blank"
+                                          rel="noopener"
+                                          className="group relative block overflow-hidden rounded-xl bg-slate-900 border border-slate-200"
+                                        >
+                                          {photo.isImage ? (
+                                            <img
+                                              src={`/api/documents/${photo.id}`}
+                                              alt={photo.title}
+                                              loading="lazy"
+                                              className="h-20 w-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
+                                            />
+                                          ) : (
+                                            <div className="flex h-20 items-center justify-center text-2xl">📄</div>
+                                          )}
+                                          {photoMeta.timing ? (
+                                            <span className="absolute top-1 left-1 rounded bg-brand-blue/85 px-1 py-0.5 text-[8px] font-bold text-white">
+                                              {PHOTO_TIMING_LABEL[photoMeta.timing]}
+                                            </span>
+                                          ) : null}
+                                          {photo.photoView && photo.photoView in PHOTO_VIEW_LABEL ? (
+                                            <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 py-0.5 text-[9px] font-bold text-white">
+                                              {PHOTO_VIEW_LABEL[photo.photoView as PhotoView]}
+                                            </span>
+                                          ) : null}
+                                        </a>
+                                      );
+                                    })}
                                   </div>
                                 ) : null}
                               </li>
                             ))}
                           </ul>
+
+                          {compareSessionTarget?.caseId === row.id ? (
+                            <TighteningCompareModal
+                              open
+                              initialCurrentId={compareSessionTarget.sessionId}
+                              sessions={row.adjustments.map((entry, idx) => ({
+                                id: entry.id,
+                                sessionNumber: row.adjustments.length - idx,
+                                doneOn: entry.doneOn,
+                                recordedBy: entry.recordedBy,
+                                upperWire: entry.upperWire,
+                                lowerWire: entry.lowerWire,
+                                photos: entry.photos.map((p) => ({
+                                  id: p.id,
+                                  title: p.title,
+                                  photoView: p.photoView,
+                                  note: (p as { note?: string | null }).note ?? null,
+                                })),
+                              }))}
+                              onClose={() => setCompareSessionTarget(null)}
+                            />
+                          ) : null}
                         </div>
                       ) : (
                         <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-xs text-slate-500">
@@ -1535,6 +1585,13 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
   );
   const cameraInput = useRef<HTMLInputElement>(null);
   const galleryInput = useRef<HTMLInputElement>(null);
+  const [liveCameraOpen, setLiveCameraOpen] = useState(false);
+  const [pendingRetry, setPendingRetry] = useState<{
+    adjustmentId: number;
+    visitId: number | null;
+    photos: QueuedPhoto[];
+  } | null>(null);
+  const [retryingPhotos, setRetryingPhotos] = useState(false);
 
   const addFiles = (files: FileList | null) => {
     if (!files || !form.editable() || !mayUpload(form.session)) return;
@@ -1542,9 +1599,92 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
       const preview = URL.createObjectURL(file); form.draft.urls.add(preview);
-      added.push({ file, preview, view: "" });
+      added.push({ file, preview, view: "", timing: "during", note: "" });
     }
     if (added.length > 0) setQueue((current) => [...current, ...added]);
+  };
+
+  const uploadQueuedPhoto = async (
+    photo: QueuedPhoto,
+    adjustmentId: number,
+    operation?: Parameters<typeof form.current>[0],
+  ): Promise<"ok" | "failed" | "aborted"> => {
+    const timing: PhotoTiming = photo.timing ?? "during";
+    const origForm = new FormData();
+    origForm.set("file", photo.file);
+    origForm.set("kind", "photo");
+    origForm.set("title", `صورة جلسة ${friendlyDateLong(doneOn)}`);
+    origForm.set("takenOn", doneOn);
+    origForm.set("orthoCaseId", String(caseRow.id));
+    origForm.set("adjustmentId", String(adjustmentId));
+    origForm.set("photoStage", stage);
+    if (photo.view) origForm.set("photoView", photo.view);
+    const structuredNote = buildTighteningPhotoNote({ timing, note: photo.note, isDerived: false });
+    if (structuredNote) origForm.set("note", structuredNote);
+
+    const origRes = await fetch(`/api/patients/${patientId}/documents`, { method: "POST", body: origForm });
+    if (operation !== undefined && !form.checkHeaders(origRes, operation)) return "aborted";
+    if (!origRes.ok) return "failed";
+
+    if (photo.derivedFile) {
+      const origPayload = await origRes.json().catch(() => null);
+      if (operation !== undefined && !form.current(operation)) return "aborted";
+      const origDocId = Number.isInteger(origPayload?.id) ? Number(origPayload.id) : null;
+      const derivedForm = new FormData();
+      derivedForm.set("file", photo.derivedFile);
+      derivedForm.set("kind", "photo");
+      derivedForm.set("title", `صورة جلسة معدّلة ${friendlyDateLong(doneOn)}`);
+      derivedForm.set("takenOn", doneOn);
+      derivedForm.set("orthoCaseId", String(caseRow.id));
+      derivedForm.set("adjustmentId", String(adjustmentId));
+      derivedForm.set("photoStage", stage);
+      if (photo.view) derivedForm.set("photoView", photo.view);
+      derivedForm.set(
+        "note",
+        buildTighteningPhotoNote({ timing, note: photo.note, isDerived: true, derivedFromDocId: origDocId }),
+      );
+      const derivedRes = await fetch(`/api/patients/${patientId}/documents`, { method: "POST", body: derivedForm });
+      if (operation !== undefined && !form.checkHeaders(derivedRes, operation)) return "aborted";
+      if (!derivedRes.ok) return "failed";
+    }
+    return "ok";
+  };
+
+  const retryFailedUploads = async () => {
+    if (!pendingRetry || retryingPhotos) return;
+    setRetryingPhotos(true);
+    onError(null);
+    let uploaded = 0;
+    const stillFailed: QueuedPhoto[] = [];
+    for (const photo of pendingRetry.photos) {
+      try {
+        const result = await uploadQueuedPhoto(photo, pendingRetry.adjustmentId);
+        if (result === "ok") {
+          uploaded++;
+          form.release(photo.preview);
+        } else {
+          stillFailed.push(photo);
+        }
+      } catch {
+        stillFailed.push(photo);
+      }
+    }
+    setRetryingPhotos(false);
+    if (stillFailed.length === 0) {
+      const doneRetry = pendingRetry;
+      setPendingRetry(null);
+      onSaved({
+        adjustmentId: doneRetry.adjustmentId,
+        caseId: caseRow.id,
+        doneOn,
+        nextWeeks: Number(nextWeeks) || 4,
+        photosUploaded: uploaded,
+        visitId: doneRetry.visitId,
+      });
+    } else {
+      setPendingRetry({ ...pendingRetry, photos: stillFailed });
+      onError(`تم رفع ${uploaded} صورة وتبقّى ${stillFailed.length} صورة — يمكنك إعادة المحاولة دون تكرار الشدّة.`);
+    }
   };
 
   const submit = async (event: React.FormEvent) => {
@@ -1575,7 +1715,9 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         form.uncertain(); onError("تم قبول الطلب دون مرجع شدّة يمكن التحقق منه. راجع السجل قبل أي محاولة جديدة."); return;
       }
       const visitId = Number.isInteger(payload?.visitId) && payload.visitId > 0 ? Number(payload.visitId) : null;
-      let uploaded = 0; let failed = 0;
+      let uploaded = 0;
+      const succeededPhotos: QueuedPhoto[] = [];
+      const failedPhotos: QueuedPhoto[] = [];
       for (const photo of submittedPhotos) {
         if (!form.current(operation)) return;
         // A refresh is not authority to start another command. Preserve the
@@ -1584,26 +1726,25 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
           form.uncertain(); onError("سُجّلت الشدّة؛ توقف رفع الصور حتى مراجعة الصلاحية والسجل. لا تعِد تسجيل الشدّة."); return;
         }
         try {
-          const uploadForm = new FormData();
-          uploadForm.set("file", photo.file);
-          uploadForm.set("kind", "photo");
-          uploadForm.set("title", `صورة جلسة ${friendlyDateLong(doneOn)}`);
-          uploadForm.set("takenOn", doneOn);
-          uploadForm.set("orthoCaseId", String(caseRow.id));
-          uploadForm.set("adjustmentId", String(adjustmentId));
-          uploadForm.set("photoStage", stage);
-          if (photo.view) uploadForm.set("photoView", photo.view);
-          const upload = await fetch(`/api/patients/${patientId}/documents`, { method: "POST", body: uploadForm });
-          if (!form.checkHeaders(upload, operation)) return;
-          if (upload.ok) uploaded++; else failed++;
+          const result = await uploadQueuedPhoto(photo, adjustmentId, operation);
+          if (result === "aborted" || !form.current(operation)) return;
+          if (result === "ok") {
+            uploaded++;
+            succeededPhotos.push(photo);
+          } else {
+            failedPhotos.push(photo);
+          }
         } catch {
           if (!form.current(operation)) return;
-          failed++;
+          failedPhotos.push(photo);
         }
       }
       if (!form.current(operation)) return;
-      if (failed > 0) onError(`رُفعت ${uploaded} صورة وفشل ${failed} — أعد المحاولة من المستندات.`);
-      for (const photo of submittedPhotos) form.release(photo.preview);
+      for (const photo of succeededPhotos) form.release(photo.preview);
+      if (failedPhotos.length > 0) {
+        setPendingRetry({ adjustmentId, visitId, photos: failedPhotos });
+        onError(`رُفعت ${uploaded} صورة وفشل ${failedPhotos.length} — يمكنك إعادة رفع المتبقي أدناه دون تكرار الشدّة.`);
+      }
       form.commit("queue", []);
       onSaved({ adjustmentId, caseId: caseRow.id, doneOn, nextWeeks: Number(nextWeeks) || 4, photosUploaded: uploaded, visitId });
     } catch {
@@ -1725,8 +1866,12 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
+          <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) setLiveCameraOpen(true); }}
+            className="min-w-[10rem] flex-1 rounded-xl bg-brand-navy py-2.5 text-xs font-black text-white hover:opacity-95">
+            🎥 كاميرا حية (هاتف / كمبيوتر / USB)
+          </button>
           <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) cameraInput.current?.click(); }}
-            className="min-w-[10rem] flex-1 rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white hover:bg-navy-900">
+            className="rounded-xl bg-navy-800 px-4 py-2.5 text-xs font-black text-white hover:bg-navy-900">
             📷 التقط بالكاميرا الآن
           </button>
           <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) galleryInput.current?.click(); }}
@@ -1734,6 +1879,41 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
             اختيار من المعرض
           </button>
         </div>
+
+        {pendingRetry && pendingRetry.photos.length > 0 ? (
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300 bg-amber-50 p-2.5 text-[11px] text-amber-950">
+            <span className="font-bold">
+              تم حفظ الشدّة #{pendingRetry.adjustmentId}؛ تبقّت {pendingRetry.photos.length} صورة لم تُرفع بسبب الاتصال.
+            </span>
+            <button
+              type="button"
+              disabled={retryingPhotos}
+              onClick={() => void retryFailedUploads()}
+              className="rounded-lg bg-brand-orange px-3 py-1 font-bold text-white hover:opacity-95 disabled:opacity-50"
+            >
+              {retryingPhotos ? "جاري إعادة الرفع..." : "إعادة رفع الصور المتبقية فقط"}
+            </button>
+          </div>
+        ) : null}
+
+        <TighteningCameraStudio
+          open={liveCameraOpen}
+          onClose={() => setLiveCameraOpen(false)}
+          onConfirm={(captured) => {
+            form.draft.urls.add(captured.previewUrl);
+            setQueue((current) => [
+              ...current,
+              {
+                file: captured.originalFile,
+                derivedFile: captured.derivedFile,
+                preview: captured.previewUrl,
+                view: captured.view,
+                timing: captured.timing,
+                note: captured.note,
+              },
+            ]);
+          }}
+        />
 
         <input ref={cameraInput} type="file" accept="image/*" capture="environment"
           aria-label="كاميرا الجلسة" className="sr-only"
@@ -1754,30 +1934,64 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         </label>
 
         {queue.length > 0 ? (
-          <ul className="mt-2 space-y-1.5">
+          <ul className="mt-2 space-y-2">
             {queue.map((photo, index) => (
-              <li key={photo.preview} className="flex items-center gap-2 rounded-lg bg-slate-50 p-1.5">
-                <img src={photo.preview} alt="صورة الجلسة" className="h-12 w-12 rounded-lg object-cover" />
-                <select value={photo.view}
+              <li key={photo.preview} className="space-y-1.5 rounded-lg bg-slate-50 p-2 border border-slate-100">
+                <div className="flex flex-wrap items-center gap-2">
+                  <img src={photo.preview} alt="صورة الجلسة" className="h-12 w-12 rounded-lg object-cover" />
+                  <select value={photo.view}
+                    onChange={(event) => {
+                      const view = event.target.value as PhotoView | "";
+                      setQueue((current) => current.map((row, rowIndex) =>
+                        rowIndex === index ? { ...row, view } : row));
+                    }}
+                    aria-label="وجه الصورة"
+                    className="min-w-[8rem] flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px]">
+                    <option value="">— وجه الصورة (اختياري) —</option>
+                    {(Object.keys(PHOTO_VIEW_LABEL) as PhotoView[]).map((view) => (
+                      <option key={view} value={view}>{PHOTO_VIEW_LABEL[view]}</option>
+                    ))}
+                  </select>
+                  <select
+                    value={photo.timing ?? "during"}
+                    onChange={(event) => {
+                      const timing = event.target.value as PhotoTiming;
+                      setQueue((current) => current.map((row, rowIndex) =>
+                        rowIndex === index ? { ...row, timing } : row));
+                    }}
+                    aria-label="توقيت الصورة"
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px]"
+                  >
+                    {(["before", "during", "after"] as PhotoTiming[]).map((t) => (
+                      <option key={t} value={t}>{PHOTO_TIMING_LABEL[t]}</option>
+                    ))}
+                  </select>
+                  {photo.derivedFile ? (
+                    <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-bold text-teal-800">
+                      أصل + مشتقة
+                    </span>
+                  ) : null}
+                  <button type="button"
+                    onClick={() => {
+                      if (!form.editable()) return;
+                      form.release(photo.preview);
+                      setQueue((current) => current.filter((_, rowIndex) => rowIndex !== index));
+                    }}
+                    className="text-[11px] font-bold text-red-500">حذف</button>
+                </div>
+                <input
+                  type="text"
+                  value={photo.note ?? ""}
                   onChange={(event) => {
-                    const view = event.target.value as PhotoView | "";
+                    const note = event.target.value;
                     setQueue((current) => current.map((row, rowIndex) =>
-                      rowIndex === index ? { ...row, view } : row));
+                      rowIndex === index ? { ...row, note } : row));
                   }}
-                  aria-label="وجه الصورة"
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px]">
-                  <option value="">— وجه الصورة (اختياري) —</option>
-                  {(Object.keys(PHOTO_VIEW_LABEL) as PhotoView[]).map((view) => (
-                    <option key={view} value={view}>{PHOTO_VIEW_LABEL[view]}</option>
-                  ))}
-                </select>
-                <button type="button"
-                  onClick={() => {
-                    if (!form.editable()) return;
-                    form.release(photo.preview);
-                    setQueue((current) => current.filter((_, rowIndex) => rowIndex !== index));
-                  }}
-                  className="text-[11px] font-bold text-red-500">حذف</button>
+                  aria-label="ملاحظة الصورة"
+                  placeholder="ملاحظة مستقلة لهذه الصورة (اختياري)..."
+                  maxLength={220}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px]"
+                />
               </li>
             ))}
           </ul>

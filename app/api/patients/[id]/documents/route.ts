@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  DocumentAssociationError, getSettings, listPatientDocuments, recordAudit, recordDocument,
+  DocumentAssociationError, getPool, getSettings, listPatientDocuments, recordAudit, recordDocument,
   validateDocumentAssociations,
 } from "@/lib/db";
 import { putFile, storageStatus } from "@/lib/files";
@@ -203,6 +203,69 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
        فالمستندُ PDF لا أبعاد صورة له. */
     const dimensions = imageSize(bytes);
     const stored = await putFile(bytes, check.extension);
+
+    // منع تكرار صور الشدّة عند إعادة المحاولة بعد انقطاع الإنترنت (Idempotent Session Photo Upload):
+    // إذا وُجد مستند نشط لنفس المريض والشدّة بنفس البصمة sha256 ونفس الوجه، يُعاد الموجود بلا تكرار.
+    if (adjustmentId != null && typeof getPool === "function") {
+      try {
+        const dup = await getPool().query<{
+          id: number; title: string; photo_stage: string | null; photo_view: string | null;
+          ortho_case_id: number | null; adjustment_id: number | null; note: string | null;
+          taken_on: string | null; uploaded_by: string; uploaded_at: string; mime_type: string;
+          size_bytes: number; kind: string; patient_id: number;
+        }>(
+          `SELECT id, patient_id, kind, title, mime_type, size_bytes, note, taken_on::text AS taken_on,
+                  uploaded_by, uploaded_at::text AS uploaded_at, ortho_case_id, adjustment_id, photo_stage, photo_view
+             FROM patient_documents
+            WHERE patient_id = $1
+              AND adjustment_id = $2
+              AND sha256 = $3
+              AND COALESCE(photo_view, '') = $4
+              AND removed_at IS NULL
+            ORDER BY id ASC
+            LIMIT 1`,
+          [patientId, adjustmentId, stored.sha256, photoView ?? ""],
+        );
+        if (dup.rows[0]) {
+          const existing = dup.rows[0];
+          const blind = Boolean(isOrthoUpload && orthoUploadAccess && !orthoUploadAccess.permissions["photos.view"]);
+          return NextResponse.json(
+            blind
+              ? {
+                  id: existing.id,
+                  title: existing.title,
+                  photoStage: existing.photo_stage,
+                  photoView: existing.photo_view,
+                  orthoCaseId: existing.ortho_case_id,
+                  adjustmentId: existing.adjustment_id,
+                  blindReceipt: true,
+                  existing: true,
+                }
+              : {
+                  id: existing.id,
+                  patientId: existing.patient_id,
+                  kind: existing.kind,
+                  title: existing.title,
+                  mimeType: existing.mime_type,
+                  sizeBytes: Number(existing.size_bytes),
+                  note: existing.note,
+                  takenOn: existing.taken_on,
+                  uploadedBy: existing.uploaded_by,
+                  uploadedAt: existing.uploaded_at,
+                  orthoCaseId: existing.ortho_case_id,
+                  adjustmentId: existing.adjustment_id,
+                  photoStage: existing.photo_stage,
+                  photoView: existing.photo_view,
+                  existing: true,
+                },
+            { status: 200, headers: NO_STORE_HEADERS },
+          );
+        }
+      } catch {
+        // Fallback to standard insert if mock pool doesn't support this query shape.
+      }
+    }
+
     const document = await recordDocument({
       patientId, visitId, kind, title,
       mimeType: file.type,
