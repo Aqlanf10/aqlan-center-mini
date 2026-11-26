@@ -15,6 +15,7 @@ import { InvoiceTemplateAuthorityError, InvoiceTemplateBusyError, InvoiceTemplat
 import { canHandleMoney, canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { DebtRepaymentError, invoiceDebtRepaymentReceipt } from "@/lib/debt-installments-db";
+import { requestsInvoiceLabWork, unavailableLabWork } from "@/lib/unavailable-lab-work";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+  if (requestsInvoiceLabWork(source)) return NextResponse.json(unavailableLabWork, { status: 409 });
   const templateIntent = source && typeof source === "object" && !Array.isArray(source)
     && source.templateSelection !== null && typeof source.templateSelection === "object" && !Array.isArray(source.templateSelection);
   const catalogIntent = source && typeof source === "object" && !Array.isArray(source) && hasInvoiceCatalogQuote(source);

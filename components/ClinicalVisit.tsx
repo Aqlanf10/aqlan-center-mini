@@ -818,6 +818,8 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
   // Category metadata describes eligible work, never order/procedure provenance.
   const eligibleLabWork = Array.from(new Set(drafts.map((draft) => labWorkForCategory(draft.labCategory))
     .filter((work): work is string => typeof work === "string")));
+  const labTeeth = new Set(drafts.filter(draft => draft.toothCode && typeof labWorkForCategory(draft.labCategory) === "string")
+    .map(draft => draft.toothCode));
   const updateDrafts = (update: (rows: Draft[]) => Draft[]) => {
     // Procedure changes also regenerate treatmentDone.
     if (busy || !currentOwner() || command.current?.owner === owner) return;
@@ -1578,6 +1580,7 @@ export function ClinicalVisit({ visitId, onSigned, autoReview = false, expectedP
 
         {labVisitIsCurrent && !signed && eligibleLabWork.length > 0 ? (
           <p role="note" data-testid="clinical-lab-sign-guidance" className="mt-3 rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs leading-5 text-sky-900">
+            {labTeeth.size > 1 && "إنشاء طلب مختبر واحد لهذه الأسنان من الزيارة غير متاح حاليًا. "}
             عند توقيع الزيارة بعد مراجعتها سريريًا، ينشئ النظام طلب مختبر «لم يُرسل بعد» للعمل المؤهل ({eligibleLabWork.join("، ")}) إذا لم يوجد طلب قائم وفق قواعد النظام. لا توقّع الزيارة لمجرد إنشاء طلب مختبر.
           </p>
         ) : null}

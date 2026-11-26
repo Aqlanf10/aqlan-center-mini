@@ -1,5 +1,6 @@
 "use client";
 
+import { labWorkForCategory } from "@/lib/workflow";
 import { invoiceOfferedPrice, INVOICE_ZERO_CONVERSION_MESSAGE } from "@/lib/invoice-price-quote";
 
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -1331,6 +1332,11 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
   const currentPreview = previewState?.owner === previewOwner ? previewState : null;
   const selectionEvidence = currentPreview?.requestKey === previewKey && currentPreview.status === "ready" ? currentPreview.selections : undefined;
   const currentTemplate = currentPreview?.requestKey === previewKey && currentPreview.status === "ready" ? currentPreview.template ?? null : null;
+  const selectedLabTeeth = new Set([...rows, ...(currentTemplate?.lines ?? [])].flatMap(line => {
+    const category = serviceOf(String(line.serviceId))?.category ?? null;
+    if (typeof labWorkForCategory(category) !== "string") return [];
+    return line.episodeTeeth?.length ? line.episodeTeeth : line.toothCode === null ? [] : [line.toothCode];
+  }));
   const templatePreviewBlocked = !!templateDraft && (!templateCatalogReady || !currentTemplate
     || currentTemplate.lines.some(line => previewForRow(currentPreview, previewKey, currentPreview?.rows?.[line.line]?.key ?? "missing-template-row").status !== "ready"));
   const templateReviewed = !templateDraft || !!currentTemplate && reviewedTemplate?.owner === previewOwner && reviewedTemplate.version === currentTemplate.version;
@@ -1634,6 +1640,11 @@ function InvoiceForm({ patientId, visitId, base, services, onReloadCatalogue, bu
           onClick={() => setSelection({ owner: selectionOwner, existingPlanId: null, itemIds: new Map() })}
           className="min-h-[44px] text-xs font-bold text-sky-800 underline">مسح اختيار الخطة والبنود</button> : null}
       </details> : null}
+      {!historical && selectedLabTeeth.size > 1 ? (
+        <p role="status" data-testid="invoice-lab-group-guidance" className={workspace.moneyNote}>
+          يمكنك حفظ بنود الفاتورة لهذه الأسنان. إنشاء طلب مختبر واحد لها من الفاتورة غير متاح حاليًا.
+        </p>
+      ) : null}
       {splitNotice ? (
         <p role="status" data-testid="invoice-split-notice"
           className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
