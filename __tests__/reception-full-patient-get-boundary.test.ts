@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { appointment } from "./fixtures/patient-appointments";
 
 const deps = vi.hoisted(() => ({
-  session: vi.fn(), file: vi.fn(), access: vi.fn(), read: vi.fn(),
+  session: vi.fn(), assistantFile: vi.fn(), file: vi.fn(), access: vi.fn(), read: vi.fn(),
   query: vi.fn(), debt: vi.fn(),
   user: vi.fn(), owns: vi.fn(), visit: vi.fn(),
 }));
+vi.mock("@/lib/assistant-patient-file", () => ({ getAssistantPatientFile: deps.assistantFile }));
 vi.mock("@/lib/session", () => ({ requireSession: deps.session }));
 vi.mock("@/lib/patient-access", () => ({ canAccessPatient: deps.access }));
 vi.mock("@/lib/patient-appointments-reader", () => ({ readPatientAppointments: deps.read }));
@@ -77,7 +78,7 @@ describe("P0 reception full patient GET boundary (synthetic data only)", () => {
     expect(deps.file).toHaveBeenCalledWith(syntheticId);
   });
 
-  it.each(["assistant", "cashier", "accountant"])(
+  it.each(["cashier", "accountant"])(
     "rejects nonclinical %s full-file access without querying even visit metadata",
     async role => {
       deps.session.mockResolvedValue({ role, username: `synthetic-${role}` });
@@ -93,6 +94,19 @@ describe("P0 reception full patient GET boundary (synthetic data only)", () => {
       expect(deps.read).not.toHaveBeenCalled();
     },
   );
+
+  it("loads only the chairside shell for an assistant with a visit today", async () => {
+    deps.session.mockResolvedValue({ role: "assistant", username: "synthetic-assistant" });
+    const shell = { patient: { id: syntheticId, fullName: "Synthetic Patient" }, visits: [], appointments: [] };
+    deps.assistantFile.mockResolvedValueOnce(shell).mockResolvedValueOnce(null);
+    const response = await get();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await response.json()).toEqual(shell);
+    expect(deps.assistantFile).toHaveBeenCalledWith(syntheticId);
+    expect((await get()).status).toBe(403);
+    expect(deps.file).not.toHaveBeenCalled();
+  });
 
   it("rejects unauthenticated requests without querying patient data", async () => {
     deps.session.mockResolvedValue(null);

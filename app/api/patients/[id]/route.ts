@@ -1,3 +1,4 @@
+import { getAssistantPatientFile } from "@/lib/assistant-patient-file";
 import { receptionRead } from "./reception-read";
 import { NextResponse } from "next/server";
 import { patientAppointmentsResponse } from "@/lib/patient-appointments-response";
@@ -63,11 +64,19 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const id = readId(rawId);
   if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400, headers: privateHeaders });
 
-  // The appointment projection has its own bounded authorization. The full-file
-  // representation is clinical: only authorized doctors and administration.
-  // Refuse all other roles (including today's assistant) before any DB access.
-  // Financial collection remains available through separate patient-scoped APIs.
+  // The clinical assistant uses this same URL for the chairside shell, but
+  // never receives the full record. This reader proves today's scope itself.
   const projectionRequested = query.has("projection");
+  if (!projectionRequested && session.role === "assistant") {
+    try {
+      const shell = await getAssistantPatientFile(id);
+      return NextResponse.json(shell ?? { message: "المساعد السريري يرى مرضى زيارات اليوم وحدهم." },
+        { status: shell ? 200 : 403, headers: privateHeaders });
+    } catch {
+      return NextResponse.json({ message: "تعذّر التحقق من ملف زيارة اليوم." }, { status: 500, headers: privateHeaders });
+    }
+  }
+  // Other roles must use an explicit scope-limited projection.
   if (!projectionRequested && session.role !== "admin" && session.role !== "doctor") {
     return NextResponse.json(
       { message: "الملف السريري الكامل متاح فقط للطبيب المخوّل والإدارة؛ استخدم واجهات المواعيد أو التحصيل المصرّح بها." },

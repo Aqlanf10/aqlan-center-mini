@@ -42,6 +42,7 @@ const moneyFixture = () => ({
   targets:{ invoices:[{id:44,currency:"SAR"}], plans:[], openings:["USD"] },
 });
 const modules = {
+  "@/lib/assistant-patient-file": { getAssistantPatientFile: async () => null },
   "@/lib/reception-patient-account": {readReceptionPatientAccount: async id => {
     assert.equal(id, deskId);
     if (moneyFailure || wrongOwner) throw new Error("Unavailable account");

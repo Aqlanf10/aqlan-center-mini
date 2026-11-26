@@ -1,3 +1,4 @@
+import { canReadExpenseVoucher } from "@/lib/expense-voucher-access";
 import { NextResponse } from "next/server";
 import { getExpense, getSettings, listExpenseAttachments, recordAudit, recordExpenseAttachment } from "@/lib/db";
 import { putFile, storageStatus } from "@/lib/files";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
 /**
  * (P3-6) مرفقات سند الصرف — صورة الإيصال أو فاتورة المورّد.
  *
- * المال للإدارة والاستقبال وحدهما، فالمرفق كذلك. والملفّ يمرّ من الفحوص نفسها التي
+ * يتبع المرفق صلاحية سند الصرف الأب. والملفّ يمرّ من الفحوص نفسها التي
  * تمرّ منها الأشعة: نوعٌ مسموح وحجمٌ من الإعدادات وبصمة محتوى تطابق النوع المعلن.
  * والسجل append-only: المرفق شاهدٌ لا يُبدَّل.
  */
@@ -36,7 +37,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const expenseId = await expenseIdFrom(context);
   if (!expenseId) return NextResponse.json({ message: "رقم السند غير صالح." }, { status: 400 });
   try {
-    return NextResponse.json({ attachments: await listExpenseAttachments(expenseId) });
+    if (session.role === "reception") {
+      const expense = await getExpense(expenseId);
+      if (!expense || !canReadExpenseVoucher(session, expense)) {
+        return NextResponse.json({ message: "سند الصرف غير موجود." }, { status: 404 });
+      }
+    }
+    return NextResponse.json({ attachments: await listExpenseAttachments(expenseId) },
+      { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل المرفقات." }, { status: 500 });
   }
@@ -50,7 +58,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   if (!expenseId) return NextResponse.json({ message: "رقم السند غير صالح." }, { status: 400 });
 
   const expense = await getExpense(expenseId).catch(() => null);
-  if (!expense) return NextResponse.json({ message: "سند الصرف غير موجود." }, { status: 404 });
+  if (!expense || !canReadExpenseVoucher(session, expense)) return NextResponse.json({ message: "سند الصرف غير موجود." }, { status: 404 });
 
   const storage = await storageStatus();
   if (!storage.ready) return NextResponse.json({ message: storage.message }, { status: 503 });
