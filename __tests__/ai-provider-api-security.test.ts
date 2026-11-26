@@ -232,6 +232,33 @@ describe("عمليات المدير المشروعة وعدم تسريب الم�
     expect(mocks.testProviderConnection).toHaveBeenCalledTimes(1);
   });
 
+  it.each([null, [], "saved", 123, { apiKey: null }, { apiKey: 42 }])(
+    "does not test saved credentials on invalid request body %j",
+    async (body) => {
+      const request = new Request("http://localhost/api/settings/ai/providers/openai/test", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const response = await testProvider(request, { params: Promise.resolve({ id: "openai" }) });
+      expect(response.status).toBe(400);
+      expect(mocks.testProviderConnection).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not call the provider when the request body stream cannot be read", async () => {
+    const request = new Request("http://localhost/api/settings/ai/providers/openai/test", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: "{}",
+    });
+    const reader = request.body!.getReader();
+    try {
+      const response = await testProvider(request, { params: Promise.resolve({ id: "openai" }) });
+      expect(response.status).toBe(400);
+      expect(mocks.testProviderConnection).not.toHaveBeenCalled();
+    } finally {
+      reader.releaseLock();
+    }
+  });
+
   it("يسمح للمدير بإجراء اختبار اتصال للمزود", async () => {
     mocks.testProviderConnection.mockResolvedValue({
       ok: true,
