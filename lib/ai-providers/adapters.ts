@@ -477,9 +477,22 @@ export class OpenAiResponsesAdapter implements AIProviderAdapter {
       timeoutMs: 20000,
       fetchImpl,
     }, config);
+    if (!result.ok || result.content.trim() !== "READY") {
+      return {
+        ok: false,
+        message: result.error ?? "لم يُعد المزود علامة التحقق المطلوبة READY.",
+        latencyMs: result.latencyMs,
+      };
+    }
+    // The wire protocol alone is not proof of a direct OpenAI connection.
+    const endpoint = new URL(joinUrl(config.baseUrl, config.apiEndpoint || "/responses"));
+    const directOpenAi = endpoint.origin === "https://api.openai.com"
+      && endpoint.pathname === "/v1/responses" && !endpoint.search;
     return {
-      ok: result.ok,
-      message: result.ok ? `الاتصال ناجح بـ OpenAI — النموذج ${result.model}` : (result.error ?? "فشل الاتصال."),
+      ok: true,
+      message: directOpenAi
+        ? `الاتصال ناجح بـ OpenAI — النموذج ${result.model}`
+        : `نجح اختبار مزود متوافق مع Responses — النموذج ${result.model} (ليس اتصالاً مباشراً بـ OpenAI)`,
       latencyMs: result.latencyMs,
     };
   }
