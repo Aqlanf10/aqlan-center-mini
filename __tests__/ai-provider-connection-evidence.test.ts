@@ -24,7 +24,7 @@ const outcome = { ok: true, message: "synthetic READY", latencyMs: 20 };
 describe("provider connection evidence belongs to saved configuration", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    query.mockResolvedValue({ rows: [row] });
+    query.mockResolvedValue({ rows: [row], rowCount: 1 });
     audit.mockResolvedValue(undefined);
     testConnection.mockResolvedValue(outcome);
     encryptSecret.mockReturnValue("synthetic-temporary-ciphertext");
@@ -49,6 +49,30 @@ describe("provider connection evidence belongs to saved configuration", () => {
     expect(params).toEqual([true, outcome.message, 20, row.id, row.api_key_enc,
       row.protocol_type, row.base_url, row.model, null, null, "{}", 30000, 2048, 0.2]);
     expect(audit.mock.calls[0][0].details).toMatchObject({ usesUnsavedKey: false });
+  });
+
+  it("rejects a stale success when the guarded update affects no row", async () => {
+    query.mockResolvedValueOnce({ rows: [row], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    const result = await testAiProviderConnection(row.id);
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("أعد الاختبار");
+    expect(result.latencyMs).toBe(outcome.latencyMs);
+    expect(audit.mock.calls[0][0].details).toMatchObject({ ok: false });
+  });
+
+  it("uses effective defaults for legacy rows with nullable transport settings", async () => {
+    query.mockResolvedValueOnce({ rows: [{ ...row, timeout_ms: null, max_tokens: null, temperature: null }], rowCount: 1 })
+      .mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    expect(await testAiProviderConnection(row.id)).toEqual(outcome);
+    expect(testConnection.mock.calls[0][0]).toMatchObject({
+      timeoutMs: 30000, maxTokens: 2048, temperature: 0.2,
+    });
+    const [sql, params] = query.mock.calls[1];
+    expect(sql).toContain("COALESCE(timeout_ms, 30000) = $12");
+    expect(sql).toContain("COALESCE(max_tokens, 2048) = $13");
+    expect(sql).toContain("COALESCE(temperature, 0.2) = $14");
+    expect(params.slice(11)).toEqual([30000, 2048, 0.2]);
   });
 
   it("invalidates prior connection evidence when saving configuration", async () => {
