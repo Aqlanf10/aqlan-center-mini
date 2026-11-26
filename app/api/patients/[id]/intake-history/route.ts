@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createIntakeForm, getPatient, listIntakeForms } from "@/lib/db";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { canAccessPatient } from "@/lib/patient-access";
+import { canViewPatientIntakeHistory } from "@/lib/patient-intake-history-roles";
 import { validateIntake } from "@/lib/portal";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { requireSession } from "@/lib/session";
@@ -21,6 +22,15 @@ async function guard(context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) {
     return { error: NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401, headers: NO_STORE }) };
+  }
+  // P0: these forms contain patient-supplied medical conditions, allergies and medicines.
+  // Reception can file external documents, but must not read or add clinical history.
+  // Gate before even consulting the patient ID or querying the database.
+  if (!canViewPatientIntakeHistory(session.role)) {
+    return { error: NextResponse.json(
+      { message: "الاطلاع على الاستمارات الصحية وتوثيقها للطبيب المخوّل والإدارة فقط." },
+      { status: 403, headers: NO_STORE },
+    ) };
   }
   const patientId = Number((await context.params).id);
   if (!Number.isInteger(patientId) || patientId <= 0) {

@@ -31,10 +31,10 @@ const summary: WorkflowSummary = {
   counts: { visits: 0, openLabOrders: 0, documents: 0, orthoCase: false },
   financial: null, alerts: [{ kind: "medical", severity: "danger", text: "تحذير يحتاج المراجعة" }], canSeeFinancial: false,
 };
-function render(patch: Partial<WorkflowSummary> = {}) {
+function render(patch: Partial<WorkflowSummary> = {}, canViewIntakeHistory: boolean | undefined = true) {
   return renderToStaticMarkup(createElement(SummaryTab, {
     summary: { ...summary, ...patch }, patientId: 91, patientName: "مريض اصطناعي", patientNumber: "SYNTH-91", patientPhone: null,
-    base: "YER", onVisitStarted: noop, onChanged: noop, onGoToTab: noop,
+    base: "YER", onVisitStarted: noop, onChanged: noop, onGoToTab: noop, canViewIntakeHistory,
   }));
 }
 function before(html: string, first: string, second: string) {
@@ -178,3 +178,11 @@ describe("restored patient Summary presentation", () => {
   });
 });
 
+
+it("does not mount restricted clinical intake or hide ordinary reception actions", () => {
+  const html = render({}, false);
+  expect(html).not.toContain('data-testid="intake-history"');
+  expect(html).not.toContain("Self-reported medical information");
+  expect(html).toContain('href="/print/patient-card/91"');
+  expect(html).toContain('data-testid="summary-current-work"');
+});

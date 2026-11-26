@@ -78,9 +78,11 @@ export function SummaryTab({
   onChanged,
   onGoToTab,
   workflowIsCurrent,
+  canViewIntakeHistory = false,
 }: {
   summary: WorkflowSummary;
   workflowIsCurrent?: () => boolean;
+  canViewIntakeHistory?: boolean;
   patientId: number;
   patientName: string;
   /** رقم الملف — مفتاح بوّابة المريض نصفه، وبطاقته المطبوعة تحمله كاملًا. */
@@ -289,7 +291,7 @@ export function SummaryTab({
         </ul>
       ) : null}
 
-      <PatientIntakeHistory patientId={patientId} />
+      {canViewIntakeHistory ? <PatientIntakeHistory patientId={patientId} /> : null}
 
       {/*
         * بطاقة الملف ودعوة البوّابة (من مستودع الوكيل الآخر) — هنا حيث تبدأ

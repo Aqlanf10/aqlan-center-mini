@@ -48,6 +48,7 @@ import { VitalsModal } from "@/components/VitalsModal";
 import { MedicalHistoryPanel } from "@/components/MedicalHistoryPanel";
 import { PatientContactPanel, PatientFlagChips } from "@/components/PatientContactPanel";
 import { PatientFamilyPanel } from "@/components/PatientFamilyPanel";
+import { canViewPatientIntakeHistory } from "@/lib/patient-intake-history-roles";
 import { isRestrictedRole } from "@/lib/role-routes";
 import { hasPatientFinancialActivity, type PatientWorkflowFinancialBucket } from "@/lib/patient-agreement-summary";
 import { PatientAppointmentsPanel } from "@/components/patient/PatientAppointmentsPanel";
@@ -1158,6 +1159,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
           ) : null}
           <SummaryTab
             summary={summary ?? retainedSummary}
+            canViewIntakeHistory={canViewPatientIntakeHistory(session?.role)}
             workflowIsCurrent={workflowIsCurrent}
             patientId={patient.id}
             patientName={patient.fullName}
