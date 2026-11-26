@@ -48,4 +48,24 @@ describe('source-only patient numbering policy; no authority or DB mutation',()=
     expect(planPatientNumbering({prefix:'B',next:'1'},fresh('A'),'synthetic-r1').ok).toBe(false);
     expect(plan('1',{...fresh(),allocatedThrough:-1n}).ok).toBe(false);
   });
+  it.each(['false', 1, {}, null, undefined])('rejects nonboolean reconciliation evidence %j', value => {
+    const s = { ...fresh('P'), historyComplete: value } as unknown as PrefixSnapshot;
+    expect(plan('7000', s)).toEqual({ok:false,reason:'history-unverified'});
+  });
+  it.each([['allocatedThrough', '9000'], ['historicalThrough', NaN], ['allocatedThrough', undefined],
+    ['historicalThrough', 9000], ['pendingNext', '7000'], ['pendingNext', undefined]])(
+    'rejects malformed runtime watermark %s=%j', (field, value) => {
+      const s = { ...fresh('P'), [String(field)]: value } as unknown as PrefixSnapshot;
+      expect(plan('7000', s)).toEqual({ok:false,reason:'invalid-snapshot'});
+    });
+  it.each([' ', '', 7, {}])('rejects invalid runtime revision %j even if expected matches', value => {
+    const s = { ...fresh('P'), revision: value } as unknown as PrefixSnapshot;
+    expect(plan('7000', s)).toEqual({ok:false,reason:'stale-preview'});
+  });
+  it('still previews P-07000 then P-07001 without mutating the source snapshot', () => {
+    const s = {...fresh('P'),allocatedThrough:6999n,historicalThrough:42n};
+    expect(plan('7000',s)).toMatchObject({ok:true,preview:'P-07000'});
+    expect(plan('7001',{...s,allocatedThrough:7000n})).toMatchObject({ok:true,preview:'P-07001'});
+    expect(s.allocatedThrough).toBe(6999n);
+  });
 });
