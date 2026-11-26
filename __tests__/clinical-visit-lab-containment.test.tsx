@@ -247,10 +247,11 @@ afterEach(() => { expect(labWrites()).toHaveLength(0); unmount(); vi.unstubAllGl
 describe("contextual lab creation is retired", () => {
   it.each(["operator-A", "line-clinician-B", "unrelated-C", "admin"])("never offers saved-row creation for %s", async (operator) => {
     hooks.username = operator; hooks.role = operator === "admin" ? "admin" : "doctor";
-    stored.procedures = [line(), line(bridge, { id: 98002 }), line(veneer, { id: 98003 })];
+    stored.procedures = [line(crown, { toothCode: 14 }), line(bridge, { id: 98002, toothCode: 46 }), line(veneer, { id: 98003 })];
     await mount();
     assertPassiveLabUi(); expect(writes()).toHaveLength(0);
     expect(elements(render().tree).filter((node) => node.props["data-testid"] === "clinical-lab-sign-guidance")).toHaveLength(1);
+    expect(contents(byTest("clinical-lab-sign-guidance"))).toContain("إنشاء طلب مختبر واحد لهذه الأسنان من الزيارة غير متاح حاليًا");
     expect(contents(byTest("clinical-lab-sign-guidance"))).toContain("تاج، جسر، قشرة (فينير)");
     expect(contents(byTest("clinical-lab-sign-guidance"))).toContain("لا توقّع الزيارة لمجرد إنشاء طلب مختبر");
     expect(contents(byTest("clinical-lab-sign-guidance"))).toContain("إذا لم يوجد طلب قائم وفق قواعد النظام");
@@ -260,6 +261,7 @@ describe("contextual lab creation is retired", () => {
     await mount(); pick(service); pick(service);
     expect(rowCount()).toBe(2); expect(writes()).toHaveLength(0); assertPassiveLabUi();
     expect(hasTest("clinical-lab-sign-guidance")).toBe(true);
+    expect(contents(byTest("clinical-lab-sign-guidance"))).not.toContain("طلب مختبر واحد لهذه الأسنان");
     await invoke(button("احفظ بلا توقيع")); await flush();
     expect(writes()).toHaveLength(1);
     const sent = JSON.parse(String(writes()[0][1].body));
