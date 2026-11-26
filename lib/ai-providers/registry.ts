@@ -496,11 +496,11 @@ export async function testAiProviderConnection(
   };
 
   const adapter = getProviderAdapter(testConfig.protocolType);
-  const outcome = await adapter.testConnection(testConfig, fetchImpl);
+  let outcome = await adapter.testConnection(testConfig, fetchImpl);
 
   // A temporary key can be tested, but its result is not evidence about the saved credential.
   if (!usesUnsavedKey) {
-    await getPool().query(
+    const persisted = await getPool().query(
       `UPDATE ai_providers
        SET last_test_at = NOW(),
            last_test_ok = $1,
@@ -511,12 +511,17 @@ export async function testAiProviderConnection(
          AND api_endpoint IS NOT DISTINCT FROM $9
          AND organization_id IS NOT DISTINCT FROM $10
          AND COALESCE(custom_headers::jsonb, '{}'::jsonb) = $11::jsonb
-         AND timeout_ms = $12 AND max_tokens = $13 AND temperature = $14`,
+         AND COALESCE(timeout_ms, 30000) = $12
+         AND COALESCE(max_tokens, 2048) = $13
+         AND COALESCE(temperature, 0.2) = $14`,
       [outcome.ok, outcome.message, outcome.latencyMs, id, provider.apiKeyEnc,
         provider.protocolType, provider.baseUrl, provider.model, provider.apiEndpoint ?? null,
         provider.organizationId ?? null, JSON.stringify(provider.customHeaders ?? {}),
         provider.timeoutMs, provider.maxTokens, provider.temperature],
     );
+    if (persisted.rowCount !== 1) {
+      outcome = { ok: false, message: "تغيّرت إعدادات المزود أثناء الاختبار؛ أعد الاختبار بالإعدادات الحالية.", latencyMs: outcome.latencyMs };
+    }
   }
 
   await recordAudit({
