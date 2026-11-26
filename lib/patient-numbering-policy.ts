@@ -47,14 +47,19 @@ export function planPatientNumbering(
 ): NumberingPlan {
   const parsed = parseNumberingRequest(request.prefix, request.next);
   if (!parsed) return { ok: false, reason: "invalid-input" };
+  // Runtime callers can cross a serialization boundary; never coerce an
+  // unverified watermark into a valid allocation floor.
   if (snapshot.prefix !== parsed.prefix || !/^[A-Z]$/.test(snapshot.prefix)
+    || typeof snapshot.allocatedThrough !== "bigint" || typeof snapshot.historicalThrough !== "bigint"
+    || (snapshot.pendingNext !== null && typeof snapshot.pendingNext !== "bigint")
     || snapshot.allocatedThrough < 0n || snapshot.historicalThrough < 0n
     || snapshot.allocatedThrough > PATIENT_NUMBER_MAX || snapshot.historicalThrough > PATIENT_NUMBER_MAX
     || (snapshot.pendingNext !== null && (snapshot.pendingNext < 1n || snapshot.pendingNext > PATIENT_NUMBER_MAX))) {
     return { ok: false, reason: "invalid-snapshot" };
   }
-  if (!snapshot.historyComplete) return { ok: false, reason: "history-unverified" };
-  if (!snapshot.revision || snapshot.revision !== expectedRevision) return { ok: false, reason: "stale-preview" };
+  if (snapshot.historyComplete !== true) return { ok: false, reason: "history-unverified" };
+  if (typeof snapshot.revision !== "string" || snapshot.revision.trim().length === 0
+    || snapshot.revision !== expectedRevision) return { ok: false, reason: "stale-preview" };
   const high = snapshot.allocatedThrough > snapshot.historicalThrough ? snapshot.allocatedThrough : snapshot.historicalThrough;
   const next = BigInt(parsed.next);
   if (next <= high || (snapshot.pendingNext !== null && next < snapshot.pendingNext)) {
