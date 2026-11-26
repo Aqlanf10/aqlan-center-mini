@@ -464,7 +464,11 @@ export class OpenAiResponsesAdapter implements AIProviderAdapter {
         .filter((part) => part?.type === "output_text" && typeof part.text === "string")
         .map((part) => part.text ?? "").join("\n").trim();
       if (!content) return fail("أعاد OpenAI ناتجاً فارغاً.");
-      return { ok: true, content, model: typeof payload.model === "string" ? payload.model : config.model, latencyMs: Date.now() - started };
+      // Never present the requested model as verified response metadata.
+      if (typeof payload.model !== "string" || !payload.model.trim()) {
+        return fail("لم يحدد رد OpenAI النموذج الذي نفذ الطلب.");
+      }
+      return { ok: true, content, model: payload.model, latencyMs: Date.now() - started };
     } catch {
       return fail("تعذر الاتصال بـ OpenAI أو انتهت المهلة.");
     }
