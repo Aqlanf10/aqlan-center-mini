@@ -1,3 +1,4 @@
+import { requestsVisitLabWork, unavailableLabWork } from "@/lib/unavailable-lab-work";
 import { InventoryBusy, InventoryTrackingRequired } from "@/lib/inventory-domain/legacy-write-guard";
 import { ClinicalDoctorIdentityConflict } from "@/lib/clinical-doctor-identity";
 import { NextResponse } from "next/server";
@@ -90,6 +91,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (assistant && assistantOutsideToday(visit)) {
       return NextResponse.json({ message: "المساعد السريري يعمل على زيارات اليوم وحدها." }, { status: 403 });
     }
+    if (requestsVisitLabWork(source)) return NextResponse.json(unavailableLabWork, { status: 409 });
     if (action === "addendum") {
       const note = text(source.text, 1000);
       if (!note) return NextResponse.json({ message: "اكتب نصّ الملحق." }, { status: 400 });

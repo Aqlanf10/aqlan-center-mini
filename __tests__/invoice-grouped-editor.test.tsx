@@ -450,6 +450,22 @@ describe("InvoiceForm grouped tooth editing", () => {
     expect(submitted).toMatchObject({ patientId: 901, currency: "YER", existingPlanId: null, idempotencyKey: previewBody.idempotencyKey });
   });
 
+  it("explains the grouped lab limit before saving ordinary work across both arches", async () => {
+    await openForm(); selectService("crown"); confirmTeeth([14]);
+    const guidance = () => elements(renderForm()).filter(one => one.props["data-testid"] === "invoice-lab-group-guidance");
+    expect(guidance()).toHaveLength(0);
+    confirmTeeth([14, 46]);
+    expect(text(node("invoice-lab-group-guidance"))).toContain("إنشاء طلب مختبر واحد لها من الفاتورة غير متاح حاليًا");
+    expect(calls("/api/invoices")).toHaveLength(0);
+    change(input("الطبيب المكلّف بالبند"), "11");
+    await preview();
+    expect(saveButton().props.disabled).toBe(false);
+    click(saveButton()); await flush();
+    const items = body("/api/invoices").items;
+    expect(items.map(item => item.toothCode)).toEqual([14, 46]);
+    for (const item of items) expect(item).not.toHaveProperty("labWork");
+  });
+
   it("splits a tooth for a different doctor and price without changing its clinical episode or remerging", async () => {
     await openForm(); selectService("bridge"); confirmTeeth([31, 32, 33]);
     change(input("الطبيب المكلّف بالبند"), "11");
