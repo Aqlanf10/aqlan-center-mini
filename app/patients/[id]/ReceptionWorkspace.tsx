@@ -14,7 +14,7 @@ import type { CheckoutVisitRequest } from "@/lib/checkout-visit-request";
 import { CLINIC_BASE_CURRENCY, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 
 type Card = { id: number; fullName: string; phone: string | null; patientNumber: string };
-type Money = Awaited<ReturnType<typeof readReceptionPatientAccount>> & {canCollect:boolean};
+type Money = Awaited<ReturnType<typeof readReceptionPatientAccount>> & { canCollect: boolean; openVisitId: number | null };
 const action = "rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold";
 const panel = "space-y-3 rounded-2xl border border-slate-200 bg-white p-4";
 
@@ -115,7 +115,7 @@ function PatientMoney({ patient, checkout, ledgerVersion, accountTab }: { accoun
     {!accountTab && checkout === null && money.schedules.length > 0 && <PatientLedger patientId={patient.id} receptionSchedules onClinicalChange={refresh} />}
     {checkout === "invalid" ? <p role="alert">رقم زيارة التحصيل غير صالح.</p> : typeof checkout === "number" ?
       <TodayVisitTab key={checkout} patientId={patient.id} patientName={patient.fullName} summary={null} visits={[]}
-        base={CLINIC_BASE_CURRENCY} canCollect={money.canCollect} requestedCheckoutVisitId={checkout}
+        base={CLINIC_BASE_CURRENCY} canCollect={money.canCollect} requestedCheckoutVisitId={checkout} currentVisitId={money.openVisitId}
         onVisitStarted={refresh} onChanged={refresh} /> :
       money.canCollect && <>
         <label className="block">تقييد الدفعة <select className={action} value={choice} onChange={e => setChoice(e.target.value)}>
@@ -134,16 +134,47 @@ function PatientMoney({ patient, checkout, ledgerVersion, accountTab }: { accoun
   </section>;
 }
 
-function ReceptionPlannedVisits({ id, version, refresh }: { id: number; version: number; refresh: () => void }) {
-  const bookings = useReceptionRead<{ id: number } & Pick<WorkflowSummary, "today" | "timeZone" | "plannedVisits">>(id, "reception-booking", version, true);
+function ReceptionPlannedVisits({ patient, todayTab, version, refresh }: { patient: Card; todayTab: boolean; version: number; refresh: () => void }) {
+  const id = patient.id;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const sending = useRef(false);
+  const bookings = useReceptionRead<{ id: number; openVisitId: number | null } & Pick<WorkflowSummary, "today" | "timeZone" | "plannedVisits">>(id, "reception-booking", version, true);
+  async function startVisit() {
+    if (sending.current || bookings?.version !== version || bookings.data?.openVisitId !== null) return;
+    sending.current = true;
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/visits", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patientId: id, patientName: patient.fullName, note: "دخول مباشر من ملف المريض" }) });
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        setError(result?.message ?? "تعذّر تسجيل الزيارة.");
+      }
+    } catch {
+      setError("تعذّر تأكيد تسجيل الزيارة.");
+    } finally {
+      refresh();
+      sending.current = false;
+      setBusy(false);
+    }
+  }
   return <>
+    {todayTab && <section className={panel} aria-label="زيارة اليوم">
+      <h2 className="font-bold">زيارة اليوم</h2>
+      {bookings?.data && (bookings.data.openVisitId !== null
+        ? <p>تم تسجيل المريض في زيارة اليوم رقم {bookings.data.openVisitId}.</p>
+        : <button className={action} disabled={busy || bookings.version !== version} onClick={startVisit}>بدء زيارة اليوم</button>)}
+      {error && <p role="alert">{error}</p>}
+    </section>}
     {bookings?.data && <PlannedVisitBooking patientId={id} summary={bookings.data} workflowIsCurrent={() => bookings.version === version}
       onChanged={refresh} />}
     {bookings?.error && <button className={action} onClick={refresh}>إعادة تحميل الجلسات المخططة</button>}
   </>;
 }
 
-export function ReceptionWorkspace({ id, checkout, accountTab }: { id: number; checkout: CheckoutVisitRequest; accountTab: boolean }) {
+export function ReceptionWorkspace({ id, checkout, accountTab, todayTab }: { todayTab: boolean; id: number; checkout: CheckoutVisitRequest; accountTab: boolean }) {
   const [version, setVersion] = useState(0);
   const [booking, setBooking] = useState(false);
   const accountGuard = useRef<(() => boolean) | null>(null);
@@ -160,7 +191,7 @@ export function ReceptionWorkspace({ id, checkout, accountTab }: { id: number; c
     <button className={action} onClick={() => setVersion(value => value + 1)}>إعادة المحاولة</button>
     <a href="/patients">دليل المرضى</a>
   </> : "جارٍ تحميل ملف الاستقبال…"}</main>;
-  return <main dir="rtl" className="mx-auto max-w-4xl space-y-4 p-4">
+  return <main data-testid="patient-workspace" dir="rtl" className="mx-auto max-w-4xl space-y-4 p-4">
     <header className={panel}>
       <a className="text-sm underline" href="/patients">دليل المرضى والتسجيل</a>
       <h1 className="text-xl font-bold">{patient.fullName}</h1>
@@ -168,6 +199,8 @@ export function ReceptionWorkspace({ id, checkout, accountTab }: { id: number; c
       {patient.phone && <p>الهاتف <bdi>{patient.phone}</bdi></p>}
       <button className={action} onClick={() => setBooking(true)}>حجز موعد</button>
     </header>
+    {checkout === null && <a className={action} data-testid="patient-tab-today" href={`/patients/${id}?tab=today`}
+      onClick={event => { if (accountGuard.current?.() === false) event.preventDefault(); }}>زيارة اليوم</a>}
     {accountTab && <a className={action} href={`/patients/${id}?tab=summary`} data-testid="patient-tab-summary"
       onClick={event => { if (accountGuard.current?.() === false) event.preventDefault(); }}>ملخص المريض</a>}
     <PatientMoney accountTab={accountTab} patient={patient} checkout={checkout} ledgerVersion={ledgerVersion} />
@@ -175,7 +208,7 @@ export function ReceptionWorkspace({ id, checkout, accountTab }: { id: number; c
       ? <PatientLedger patientId={id} onNavigationGuardChange={registerGuard} onClinicalChange={() => setLedgerVersion(value => value + 1)} />
       : <a className={action} href={`/patients/${id}?tab=account`}>فتح فواتير المريض واتفاقاته</a>}
     <PatientAppointmentsPanel key={appointmentsVersion} patientId={id} />
-    {checkout === null && !accountTab && <ReceptionPlannedVisits id={id} version={appointmentsVersion}
+    {checkout === null && !accountTab && <ReceptionPlannedVisits patient={patient} todayTab={todayTab} version={appointmentsVersion}
       refresh={() => setAppointmentsVersion(value => value + 1)} />}
     <ExternalUpload id={id} />
     {booking && <QuickAppointmentModal patientId={id} patientName={patient.fullName} isOpen onClose={() => setBooking(false)}

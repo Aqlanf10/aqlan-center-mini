@@ -136,7 +136,7 @@ describe("invoice converted source, manual reasons and saved contract", () => {
       await page.getByRole("region", { name: "فاتورة جديدة", exact: true }).waitFor({ state: "detached" });
       expect(bodies).toHaveLength(1); expect(await facts(patientId)).toEqual({ invoices: 1, payments: 0, plans: 1, cases: 1, schedules: 1, items: 1 });
       const repeated = await authedMutation("/api/invoices", h.sessions[role], "POST", bodies[0]); expect(repeated.status).toBe(200); expect((await repeated.json()).replayed).toBe(true);
-      const ledgerResponse=await context.request.get(`${baseUrl}/api/patients/${patientId}/ledger`);expect(ledgerResponse.status()).toBe(200);
+      const ledgerResponse=await context.request.get(`${baseUrl}/api/patients/${patientId}/ledger?view=account`);expect(ledgerResponse.status()).toBe(200);
       const ledger=await ledgerResponse.json();expect(ledger.balances.SAR).toMatchObject({billedMinor:150000,collectedMinor:0,dueMinor:150000});
       expect(ledger.balances.YER.dueMinor).toBe(0);expect(ledger.balances.USD.dueMinor).toBe(0);
       const statement=await context.newPage();const statementResponse=await statement.goto(`${baseUrl}/print/statement/${patientId}`,{waitUntil:"domcontentloaded"});

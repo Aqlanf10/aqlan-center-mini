@@ -130,7 +130,7 @@ async function page(cookie: string, path: string) {
 
 async function openAccount(cookie: string) {
   const opened = await page(cookie, `/patients/${patientId}?tab=account`);
-  await opened.tab.getByRole("button", { name: /الحساب/ }).first().click();
+  if (cookie !== h.sessions.reception.cookie) await opened.tab.getByRole("button", { name: /الحساب/ }).first().click();
   await opened.tab.getByRole("region", { name: "الدفعات" }).waitFor();
   return opened;
 }

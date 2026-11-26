@@ -61,7 +61,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       };
       if (expanded && account.invoiceWorkspace) {
         const ledger = account.invoiceWorkspace;
-        return NextResponse.json({ ...ledger, ...legacy, openingAccess, clinicTimeZone: CLINIC_TIME_ZONE, installmentRecovery,
+        const receiptProvenance = await readReceiptProvenance(ledger.payments.map(payment => payment.id));
+        return NextResponse.json({ ...ledger, receiptProvenance, ...legacy, openingAccess, clinicTimeZone: CLINIC_TIME_ZONE, installmentRecovery,
           opening: ledger.openings.find(row => row.currency === CLINIC_BASE_CURRENCY) ?? null,
         }, { headers: { "Cache-Control": "private, no-store" } });
       }

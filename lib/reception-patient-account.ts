@@ -56,8 +56,8 @@ export async function readReceptionPatientAccount(id: number, includeInvoiceWork
       id, patientId, invoiceNumber, status, totalMinor, discountMinor, baseCurrency, createdAt, note: null,
       items: items.map(({ id, description, quantity, unitPriceMinor, totalMinor }) => ({ id, description, quantity, unitPriceMinor, totalMinor })),
     })),
-    payments: ledger.payments.map(({ id, receiptNumber, invoiceId, planId, openingCurrency, kind, amountMinor, currency, exchangeRate, baseAmountMinor, method, createdAt }) => ({
-      id, receiptNumber, invoiceId, planId, openingCurrency, kind, amountMinor, currency, exchangeRate, baseAmountMinor, method, createdAt, note: null,
+    payments: ledger.payments.map(({ id, receiptNumber, invoiceId, planId, openingCurrency, kind, amountMinor, currency, exchangeRate, baseAmountMinor, method, createdAt, reversalOfId }) => ({
+      id, receiptNumber, invoiceId, planId, openingCurrency, kind, amountMinor, currency, exchangeRate, baseAmountMinor, method, createdAt, reversalOfId, note: null,
     })),
     plans: plans.map(plan => ({ ...planLedgerSummary(plan), title: `اتفاق #${plan.id}` })),
     openings: openings.map(row => ({ ...row, patientId: id, note: null })),

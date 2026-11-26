@@ -47,7 +47,7 @@ async function openAccount(cookie: string) {
   await context.addCookies([{ ...sessionCookie(cookie), url: baseUrl }]);
   const page = await context.newPage();
   await page.goto(`${baseUrl}/patients/${patientId}?tab=account`);
-  await page.getByRole("button", { name: /الحساب/ }).first().click();
+  if (cookie !== h.sessions.reception.cookie) await page.getByRole("button", { name: /الحساب/ }).first().click();
   await page.getByRole("region", { name: "الفواتير" }).getByText("تنظيف وتلميع").first().waitFor();
   return { context, page };
 }

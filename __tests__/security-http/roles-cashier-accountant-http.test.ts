@@ -45,7 +45,7 @@ async function mediaMessage(kind: "file" | "voice", target: "broadcast" | "direc
 
 describe("cashier", () => {
   it("returns only finance-safe patient identity fields for search and pagination", async () => {
-    for (const session of [h.sessions.cashier, h.sessions.accountant]) {
+    for (const session of [h.sessions.cashier, h.sessions.accountant, h.sessions.reception]) {
       for (const path of ["/api/patients?q=مريض", "/api/patients"]) {
         const response = await authedGet(path, session);
         expect(response.status, path).toBe(200);
@@ -58,7 +58,7 @@ describe("cashier", () => {
         }
       }
     }
-    for (const session of [h.sessions.admin, h.sessions.reception, h.sessions.doctorA]) {
+    for (const session of [h.sessions.admin, h.sessions.doctorA]) {
       const response = await authedGet("/api/patients?q=مريض", session);
       expect(response.status).toBe(200);
       const rows = await response.json() as Record<string, unknown>[];

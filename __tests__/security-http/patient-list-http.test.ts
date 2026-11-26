@@ -21,7 +21,7 @@ type Row = { fullName: string; medicalAlert?: string | null; balances?: unknown[
 
 describe("(PAT-1) /api/patients", () => {
   it("filters on the server over all patients and reports the filtered total", async () => {
-    const response = await authedGet("/api/patients?filter=alert&sort=name", h.sessions.reception);
+    const response = await authedGet("/api/patients?filter=alert&sort=name", h.sessions.admin);
     expect(response.status).toBe(200);
     const page = await response.json() as { rows: Row[]; total: number; filter: string; sort: string };
     expect(page).toMatchObject({ filter: "alert", sort: "name" });

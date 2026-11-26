@@ -28,7 +28,9 @@ describe("(PAT-3) patient flags and email via PATCH /api/patients/[id]", () => {
     const ok = await authedMutation(`/api/patients/${patientId}`, h.sessions.reception, "PATCH",
       JSON.stringify({ flags: ["VIP"], email: "Patient@Example.com", preferredChannel: "whatsapp" }));
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toMatchObject({ flags: ["VIP"], email: "patient@example.com", preferredChannel: "whatsapp" });
+    expect(Object.keys(await ok.json()).sort()).toEqual(["fullName", "id", "patientNumber", "phone"]);
+    const file = await (await authedGet(`/api/patients/${patientId}`, h.sessions.admin)).json();
+    expect(file.patient).toMatchObject({ flags: ["VIP"], email: "patient@example.com", preferredChannel: "whatsapp" });
     for (const body of [{ flags: ["علم مخترع"] }, { email: "x@" }, { preferredChannel: "fax" }]) {
       const bad = await authedMutation(`/api/patients/${patientId}`, h.sessions.reception, "PATCH", JSON.stringify(body));
       expect(bad.status).toBe(400);

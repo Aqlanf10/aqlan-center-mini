@@ -119,14 +119,15 @@ describe("receipt provenance through existing authorized read routes", () => {
   it("adds separate privacy-minimal provenance while retaining permissions, face values and stored origin links", async () => {
     const before = await snapshot();
     for (const role of ["admin", "reception", "cashier", "accountant"] as const) {
-      const ledger = await authedGet(`/api/patients/${patientId}/ledger`, h.sessions[role]);
+      const ledger = await authedGet(`/api/patients/${patientId}/ledger?view=account`, h.sessions[role]);
       expect(ledger.status).toBe(200);
       const body = await ledger.json() as Feed;
       assertProjection(body);
       if (role !== "admin") expect(body.receiptRemaining).toBeUndefined();
       const shift = await authedGet("/api/shifts", h.sessions[role]);
       expect(shift.status).toBe(200);
-      assertProjection(await shift.json() as Feed);
+      if (role === "reception") expect(Object.keys(await shift.json())).toEqual(["open"]);
+      else assertProjection(await shift.json() as Feed);
     }
     for (const role of ["doctorA", "doctorB", "portalA", "portalB"] as const) {
       for (const path of [`/api/patients/${patientId}/ledger`, "/api/shifts", `/print/receipt/${original.id}`]) {

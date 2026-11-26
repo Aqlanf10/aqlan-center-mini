@@ -257,7 +257,7 @@ async function locked(form: Locator) {
     expect(await control.isDisabled()).toBe(true);
   }
 }
-async function refreshedHistory(page: Page, f: Fixture, appointmentId: number) {
+async function refreshedHistory(page: Page, f: Fixture, appointmentId: number, role: Role = "admin") {
   const panel = page.getByTestId("patient-appointments-panel");
   await panel.getByRole("button", { name: "تحديث المواعيد", exact: true }).click();
   const replacement = panel.locator(`[data-patient-appointment="${appointmentId}"]`);
@@ -268,7 +268,11 @@ async function refreshedHistory(page: Page, f: Fixture, appointmentId: number) {
   await panel.getByRole("button", { name: "السابقة والمغلقة", exact: true }).click();
   const old = panel.locator(`[data-patient-appointment="${f.old}"]`); await old.waitFor();
   expect(await old.innerText()).toContain(f.status === "no_show" ? "لم يحضر" : "ملغى");
-  if (f.status === "cancelled") expect(await old.innerText()).toContain("سبب تاريخي اصطناعي محفوظ");
+  if (f.status === "cancelled") {
+    const oldText = await old.innerText();
+    if (role === "reception") expect(oldText).not.toContain("سبب تاريخي اصطناعي محفوظ");
+    else expect(oldText).toContain("سبب تاريخي اصطناعي محفوظ");
+  }
   expect(await panel.locator("[data-patient-appointment]").count()).toBe(1);
   expect(await panel.locator(`[data-patient-appointment="${appointmentId}"]`).count()).toBe(0);
 }
@@ -336,7 +340,7 @@ describe("planned-session rebooking through the real patient Summary", () => {
       await expect.poll(() => plannedSection(page).innerText(), pollOptions).not.toContain("تحتاج إعادة حجز");
       expect(ui.writes).toHaveLength(2); expect(ui.writes[1].raw).toBe(ui.writes[0].raw);
       expect(ui.writes[1].result).toEqual({ ...ui.writes[0].result!, replayed: true });
-      await refreshedHistory(page, f, ui.writes[0].result!.appointmentId);
+      await refreshedHistory(page, f, ui.writes[0].result!.appointmentId, role);
       await verifySaved(f, ui.writes[1], role);
       expect(await history(f)).toEqual(before); expect(await untouchedFingerprint()).toEqual(untouched);
     });

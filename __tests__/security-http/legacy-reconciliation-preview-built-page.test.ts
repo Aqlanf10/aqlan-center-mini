@@ -148,7 +148,9 @@ async function fixture(width: number) {
       const prefix = `/api/patients/${id}`;
       if (target === prefix) { await json(route, { patient: patient(id), visits: [], appointments: [] }); return; }
       if (target === prefix + "/workflow") { await json(route, workflow(id)); return; }
-      if (target === prefix + "/ledger") { pending.push({ patientId: id, route }); return; }
+      if ([prefix + "?projection=reception", prefix + "?projection=reception-money",
+        prefix + "?projection=appointments&view=upcoming"].includes(target)) { await route.continue(); return; }
+      if (target === prefix + "/ledger" || target === prefix + "/ledger?view=account") { pending.push({ patientId: id, route }); return; }
       if (target === prefix + "/treatment-financial-context") {
         if (financialReply?.patientId === id) await json(route, financialReply.body, financialReply.status);
         else financialPending.push({ patientId: id, route });

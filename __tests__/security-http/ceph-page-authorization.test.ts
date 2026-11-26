@@ -69,7 +69,14 @@ describe.each([false, true])("Ceph page authorization (RSC=%s)", (rsc) => {
       await db.query("UPDATE users SET permissions=$1 WHERE username=$2", [original, TEST_USERS.doctorA.username]);
     }
   });
-  it.each(["doctorA", "admin", "reception"] as const)("preserves authorized %s access", async (role) => {
+  it("redirects reception before serving study or comparison data", async () => {
+    for (const path of [`/ceph/${first}`, compare(first, second, patientId)]) {
+      const response = await authedGet(path, h.sessions.reception, rsc ? { RSC: "1" } : {});
+      expect(response.status).toBe(307);
+      privateDataAbsent(await response.text());
+    }
+  });
+  it.each(["doctorA", "admin"] as const)("preserves authorized %s access", async (role) => {
     const body = await payload(`/ceph/${first}`, role, rsc);
     for (const marker of markers) expect(body.includes(marker), `authorized response missing ${marker}`).toBe(true);
     expect((await payload(compare(first, second, patientId), role, rsc)).includes(patientMarker)).toBe(true);

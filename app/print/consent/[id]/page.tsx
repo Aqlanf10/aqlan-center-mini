@@ -61,7 +61,7 @@ async function resolveSignedConsent(
     };
   }
   /* الصلاحية نفسها التي يفتح بها المستند (`/api/documents/[id]`): من لا يرى صورة التوقيع لا يُعرض له إقرارٌ موقّع. */
-  if (!(await canAccessPatient(session, patientId, "canViewXrays").catch(() => false))) {
+  if (session.role === "reception" || !(await canAccessPatient(session, patientId, "canViewXrays").catch(() => false))) {
     return { ok: false, reason: "لا صلاحية لك للاطلاع على الإقرارات المحفوظة في ملف هذا المريض." };
   }
   const found = await getDocumentForDownload(docId).catch(() => null);

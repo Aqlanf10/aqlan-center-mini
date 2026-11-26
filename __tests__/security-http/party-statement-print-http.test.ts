@@ -56,7 +56,7 @@ describe("كشف حساب جهة — الطباعة", () => {
     expect((await get(`/print/party/${supplierId}`, h.sessions.doctorA.cookie)).status).toBe(404);
     const reception = await get(`/print/party/${supplierId}`, h.sessions.reception.cookie);
     expect(reception.status).toBe(307);
-    expect(new URL(reception.headers.get("location")!).pathname).toBe("/patients");
+    expect(new URL(reception.headers.get("location")!, baseUrl).pathname).toBe("/patients");
     const cashier = await get(`/print/party/${supplierId}`, h.sessions.cashier.cookie);
     expect(cashier.status).toBe(307);
     expect(cashier.headers.get("location")).toContain("/finance");

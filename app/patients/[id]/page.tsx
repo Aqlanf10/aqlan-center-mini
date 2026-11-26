@@ -133,7 +133,7 @@ export default function PatientFilePage({ params, searchParams }: {
     const patientId = patientAppointmentId(id);
     if (patientId === null) return <main role="alert">رقم الملف غير صالح.</main>;
     return <ReceptionWorkspace key={JSON.stringify([id, session.username, session.permissions])}
-      id={patientId} checkout={checkoutVisitRequest} accountTab={query?.tab === "account"} />;
+      id={patientId} checkout={checkoutVisitRequest} accountTab={query?.tab === "account"} todayTab={query?.tab === "today"} />;
   }
   return <PatientFileWorkspace key={id} id={id} checkoutVisitRequest={checkoutVisitRequest} />;
 }

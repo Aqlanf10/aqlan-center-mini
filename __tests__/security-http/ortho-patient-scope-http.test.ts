@@ -113,7 +113,14 @@ describe("ortho list patient and image isolation over real HTTP", () => {
     expect(response.status).toBe(400);
   });
 
-  it.each(["admin", "reception"] as const)("preserves %s list and direct metadata access", async (who) => {
+  it("denies the receptionist clinical case lists, detail and photo data", async () => {
+    for (const path of ["/api/ortho", `/api/ortho?patientId=${patientA}`, `/api/ortho/${caseB}`, `/api/documents/${photoB}`]) {
+      expect((await authedGet(path, h.sessions.reception)).status, path).toBe(403);
+    }
+  });
+
+  it("preserves admin list and direct metadata access", async () => {
+    const who = "admin";
     const body = await listAs(h.sessions[who]);
     expect(body.cases.map((row) => row.id)).toEqual(expect.arrayContaining([caseA, caseB]));
     const response = await authedGet(`/api/ortho/${caseB}`, h.sessions[who]);

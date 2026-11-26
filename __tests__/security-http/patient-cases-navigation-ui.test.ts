@@ -207,7 +207,8 @@ async function fixture(width: number, options: { role?: "doctorA" | "reception";
       try {
         const response = await page.goto(entry(options.invalidContext), { waitUntil: "domcontentloaded" });
         expect(response?.status()).toBe(200);
-        if (options.invalidContext) await page.getByTestId("clinical-context-state").waitFor();
+        if (options.role === "reception") await page.getByRole("heading", { name: "حساب المريض", exact: true }).waitFor();
+        else if (options.invalidContext) await page.getByTestId("clinical-context-state").waitFor();
         else {
           await selected(page, "patient-subtab-cases");
           if (!malformed) await shortcut(page).waitFor();
@@ -458,19 +459,20 @@ describe("Cases to Ortho navigation on the real built RTL patient page", () => {
   });
 
   for (const role of ["reception", "doctorA"] as const) {
-    it.each([1280, 390])(`keeps the shortcut independent of ${role} write and plan visibility at %ipx`, async width => {
+    it.each([1280, 390])(`enforces the ${role} clinical navigation boundary at %ipx`, async width => {
       const f = await fixture(width, { role, planVisible: false });
       await f.run(async () => {
+        if (role === "reception") {
+          expect(await view(f.page).count()).toBe(0);
+          expect(await shortcut(f.page).count()).toBe(0);
+          expect(f.reads).toMatchObject({ cases: 0, ortho: 0 });
+          return;
+        }
         expect(await view(f.page).innerText()).toContain("عرض خطط العلاج غير مفعّل لحسابك.");
         expect(await view(f.page).getByRole("button", { name: OPEN, exact: true }).count()).toBe(2);
         expect(await view(f.page).getByLabel(`أولوية ${SERVICE}`, { exact: true }).count()).toBe(0);
-        if (role === "reception") {
-          expect(await view(f.page).locator("input,textarea,select").count()).toBe(0);
-          expect((await view(f.page).getByRole("button").allTextContents()).map(text => text.trim())).toEqual(["فاتورة / اتفاق علاج", "بنود خطة هذه الحالة", OPEN, OPEN, "بنود خطة هذه الحالة", "بنود خطة هذه الحالة"]);
-        } else {
-          expect(await view(f.page).getByRole("button", { name: "+ حالة جديدة", exact: true }).count()).toBe(1);
-          expect(await view(f.page).getByRole("button", { name: "فاتورة / اتفاق علاج", exact: true }).count()).toBe(0);
-        }
+        expect(await view(f.page).getByRole("button", { name: "+ حالة جديدة", exact: true }).count()).toBe(1);
+        expect(await view(f.page).getByRole("button", { name: "فاتورة / اتفاق علاج", exact: true }).count()).toBe(0);
         const original = f.page.url(), length = await f.page.evaluate(() => history.length);
         await shortcut(f.page).click(); await opened(f.page, original, length);
         expect(f.writes).toEqual([]); expect(f.documents).toHaveLength(1);

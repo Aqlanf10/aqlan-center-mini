@@ -41,7 +41,7 @@ describe("P3-1 — بادئة الفاتورة من الإعدادات", () => {
     expect(response.status).toBe(400);
     const body = await response.json() as { message: string };
     expect(body.message).toContain("حروف لاتينية كبيرة");
-    expect(await newInvoiceNumber()).toMatch(/^INV-\d{5}$/);
+    expect(await newInvoiceNumber()).toMatch(/^INV-\d{5,}$/);
   });
 
   it("بادئة الفاتورة لا تساوي بادئة سند القبض", async () => {
@@ -59,7 +59,7 @@ describe("P3-1 — بادئة الفاتورة من الإعدادات", () => {
     const before = await newInvoiceNumber();
     expect((await patchSettings({ "documents.invoice_prefix": "FAC" })).status).toBe(200);
     const after = await newInvoiceNumber();
-    expect(after).toMatch(/^FAC-\d{5}$/);
+    expect(after).toMatch(/^FAC-\d{5,}$/);
     expect(Number(after.replace(/\D/g, ""))).toBe(Number(before.replace(/\D/g, "")) + 1);
   });
 

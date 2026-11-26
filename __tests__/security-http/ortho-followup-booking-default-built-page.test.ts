@@ -112,7 +112,7 @@ describe("orthodontic board booking defaults satisfy its own follow-up classifie
     const feedResponse = () => page.waitForResponse((response) => response.request().method() === "GET" && new URL(response.url()).pathname === "/api/ortho/followups");
     const ownRow = (feed: Feed) => feed.buckets.flatMap((bucket) => bucket.rows).find((row) => row.caseId === caseId)!;
     try {
-      const [response] = await Promise.all([feedResponse(), page.goto(`${baseUrl}/ortho`, { waitUntil: "networkidle" })]);
+      const [response] = await Promise.all([feedResponse(), page.goto(`${baseUrl}/ortho`, { waitUntil: "domcontentloaded" })]);
       expect(response.status()).toBe(200); const initial = await response.json() as Feed;
       expect(ownRow(initial)).toMatchObject({ patientId, nextAppointment: null });
       expect(ownRow(initial).buckets).toContain("no_appointment");

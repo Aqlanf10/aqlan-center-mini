@@ -54,7 +54,7 @@ describe("actual saved converted-quote invoice in statement SSR", () => {
     expect(invoice).toMatchObject({ totalMinor: 150000, baseCurrency: "SAR" });
     const replay = await authedMutation("/api/invoices", h.sessions[role], "POST", body);
     expect(replay.status).toBe(200); expect(await replay.json()).toMatchObject({ id: invoice.id, replayed: true });
-    const ledger = await (await authedGet(`/api/patients/${patientId}/ledger`, h.sessions[role])).json();
+    const ledger = await (await authedGet(`/api/patients/${patientId}/ledger?view=account`, h.sessions[role])).json();
     expect(ledger.invoices).toHaveLength(1);
     expect(ledger.balances.SAR).toMatchObject({ billedMinor: 150000, collectedMinor: 0, dueMinor: 150000 });
     expect(ledger.balances.YER.dueMinor).toBe(0); expect(ledger.balances.USD.dueMinor).toBe(0);
