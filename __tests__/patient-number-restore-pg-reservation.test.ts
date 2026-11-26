@@ -6,13 +6,13 @@ import { reserveRestoredNumber } from "../lib/restore/numbering-reservation";
 const binding = { lineage: "synthetic_lineage_001", generation: "synthetic_generation_002" };
 const archive = { prefix: "P", allocatedThrough: 7027n, historicalThrough: 7027n,
   pendingNext: null, historyComplete: true, revision: "synthetic-r1" };
-function fixture(options: { generation?: string; commitLost?: boolean; commitRollback?: boolean; missing?: boolean; conflict?: boolean } = {}) {
+function fixture(options: { generation?: string; watermark?: unknown; commitLost?: boolean; commitRollback?: boolean; missing?: boolean; conflict?: boolean } = {}) {
   const calls: Array<{ sql: string; args?: unknown[] }> = [];
   const release = vi.fn();
   const query = vi.fn(async (sql: string, args?: unknown[]) => {
     calls.push({ sql, args });
     if (sql.includes("SELECT generation")) return { rows: [{ generation: options.generation ?? binding.generation }] };
-    if (sql.includes("SELECT reserved_through")) return { rows: options.missing ? [] : [{ reserved_through: "7029" }] };
+    if (sql.includes("SELECT reserved_through")) return { rows: options.missing ? [] : [{ reserved_through: options.watermark === undefined ? "7029" : options.watermark }] };
     if (sql.startsWith("UPDATE")) return { rowCount: options.conflict ? 0 : 1 };
     if (sql === "COMMIT") {
       if (options.commitLost) throw new Error("synthetic lost response");
@@ -91,6 +91,22 @@ describe("independent PG reservation SQL protocol (mock, no database)", () => {
     const f = fixture(options);
     expect(await reserveRestoredNumber(archive, binding, f.backend)).toEqual({ ok: false, reason: "watermark-reservation-unconfirmed" });
     expect(f.release).toHaveBeenCalledWith(true);
+  });
+  it.each([7029, 7029n, null, { toString: () => "7029" }])("rejects non-text authority values without writing: %s", async watermark => {
+    const f = fixture({ watermark });
+    expect(await reserveRestoredNumber(archive, binding, f.backend))
+      .toEqual({ ok: false, reason: "independent-watermark-unavailable" });
+    expect(f.calls.some(c => c.sql.startsWith("UPDATE"))).toBe(false);
+  });
+  it("rejects coercible schema and prefix before sending SQL", async () => {
+    const f = fixture();
+    const fakeSchema = { toString: () => "synthetic_authority" } as unknown as string;
+    expect(() => createIndependentPgReservationBackend(f.pool, fakeSchema)).toThrow("Invalid authority schema");
+    await f.backend.transaction(binding, async tx => {
+      const fakePrefix = { toString: () => "P" } as unknown as string;
+      await expect(tx.readFresh(fakePrefix)).rejects.toThrow("Invalid watermark read");
+    });
+    expect(f.calls.some(c => c.sql.includes("SELECT reserved_through"))).toBe(false);
   });
   it("rejects unsafe schema or malformed binding", async () => {
     const f = fixture();
