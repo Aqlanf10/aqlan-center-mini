@@ -35,7 +35,13 @@ export function createIndependentPgReservationBackend(
       let commitAttempted = false;
       let commitConfirmed = false;
       try {
-        await client.query("BEGIN");
+        // A failed or ambiguous BEGIN must never return an uncertain session
+        // to the pool. The connection is reusable only after a confirmed BEGIN
+        // followed by a confirmed COMMIT or ROLLBACK.
+        discard = true;
+        const begun = await client.query("BEGIN");
+        if (begun.command !== "BEGIN") throw new Error("Authority begin not confirmed");
+        discard = false;
         active = true;
         await client.query("SET LOCAL synchronous_commit = on");
         const admitted = await client.query<{ generation: string }>(
@@ -92,7 +98,10 @@ export function createIndependentPgReservationBackend(
         active = false;
         if (commitAttempted && !commitConfirmed) discard = true;
         else {
-          try { await client.query("ROLLBACK"); } catch { discard = true; }
+          try {
+            const rolledBack = await client.query("ROLLBACK");
+            if (rolledBack.command !== "ROLLBACK") discard = true;
+          } catch { discard = true; }
         }
         throw error;
       } finally {
