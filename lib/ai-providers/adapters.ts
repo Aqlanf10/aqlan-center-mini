@@ -434,14 +434,15 @@ export class OpenAiResponsesAdapter implements AIProviderAdapter {
       content: m.role === "system" ? m.content : sanitizeForPrivacy(m.content),
     }));
     try {
+      // Headers.set replaces case-insensitive duplicates from custom headers.
+      // A JSON body must not be sent with a conflicting content type or organization.
+      const headers = new Headers(guard.headers);
+      headers.set("Content-Type", "application/json");
+      headers.set("Authorization", `Bearer ${apiKey}`);
+      if (config.organizationId) headers.set("OpenAI-Organization", config.organizationId);
       const response = await (options.fetchImpl ?? fetch)(targetUrl, {
         method: "POST",
-        headers: {
-          ...guard.headers,
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-          ...(config.organizationId ? { "OpenAI-Organization": config.organizationId } : {}),
-        },
+        headers,
         body: JSON.stringify({
           model: config.model, input, store: false, stream: false,
           max_output_tokens: Math.max(16, options.maxTokens ?? config.maxTokens ?? 1024),
