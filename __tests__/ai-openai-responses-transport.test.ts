@@ -63,6 +63,26 @@ describe("OpenAI Responses transport (synthetic, no network)", () => {
     const result = await getProviderAdapter("openai-responses").testConnection(config(), fetchImpl);
     expect(result.ok).toBe(false);
   });
+  it("normalizes case-insensitive transport headers without losing allowed custom headers", async () => {
+    const { calls, fetchImpl } = mock(completed);
+    const result = await getProviderAdapter("openai-responses").chat({
+      messages: [{ role: "user", content: "synthetic" }], fetchImpl,
+    }, {
+      ...config(), organizationId: "synthetic-config-org",
+      customHeaders: {
+        "content-type": "text/plain",
+        "openai-organization": "synthetic-conflict-org",
+        "x-trace-id": "synthetic-trace",
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    const headers = new Headers(calls[0].init.headers);
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("openai-organization")).toBe("synthetic-config-org");
+    expect(headers.get("authorization")).toBe("Bearer synthetic-test-key-not-real");
+    expect(headers.get("x-trace-id")).toBe("synthetic-trace");
+  });
   it("does not report success for an HTTP rejection", async () => {
     const { fetchImpl } = mock({ error: { message: "invalid key" } }, 401);
     expect((await getProviderAdapter("openai-responses").testConnection(config(), fetchImpl)).ok).toBe(false);
@@ -97,6 +117,39 @@ describe("OpenAI Responses transport (synthetic, no network)", () => {
     const adapter = getProviderAdapter("openai-responses");
     expect((await adapter.testConnection(config(), fetchImpl)).ok).toBe(false);
     expect((await adapter.chat({ messages: [{ role: "user", content: "synthetic" }], fetchImpl }, config())).ok).toBe(false);
+  });
+  it.each([
+    { content: null }, { content: {} }, { content: [] }, { content: [null] },
+    { content: [{ type: "output_text", text: 42 }] },
+    { content: [{ type: "unknown", text: "ignored" }] },
+  ])("rejects malformed assistant content alongside a valid READY message (%j)", async ({ content }) => {
+    const { fetchImpl } = mock({ ...completed, output: [
+      { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "READY" }] },
+      { type: "message", role: "assistant", status: "completed", content },
+    ] });
+    const adapter = getProviderAdapter("openai-responses");
+    expect((await adapter.testConnection(config(), fetchImpl)).ok).toBe(false);
+    expect((await adapter.chat({ messages: [{ role: "user", content: "synthetic" }], fetchImpl }, config())).ok).toBe(false);
+  });
+  it.each([
+    { incomplete_details: { reason: "max_output_tokens" } },
+    { incomplete_details: {} },
+    { incomplete_details: false },
+    { error: { message: "synthetic error" } },
+    { error: false },
+  ])("rejects contradictory completion metadata (%j)", async (metadata) => {
+    const { fetchImpl } = mock({ ...completed, ...metadata, output: [
+      { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "READY" }] },
+    ] });
+    const adapter = getProviderAdapter("openai-responses");
+    expect((await adapter.testConnection(config(), fetchImpl)).ok).toBe(false);
+    expect((await adapter.chat({ messages: [{ role: "user", content: "synthetic" }], fetchImpl }, config())).ok).toBe(false);
+  });
+  it("accepts explicit null completion metadata", async () => {
+    const { fetchImpl } = mock({ ...completed, error: null, incomplete_details: null, output: [
+      { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "READY" }] },
+    ] });
+    expect((await getProviderAdapter("openai-responses").testConnection(config(), fetchImpl)).ok).toBe(true);
   });
   it("does not report readiness for an unrelated completed message", async () => {
     const { fetchImpl } = mock(completed);

@@ -434,14 +434,15 @@ export class OpenAiResponsesAdapter implements AIProviderAdapter {
       content: m.role === "system" ? m.content : sanitizeForPrivacy(m.content),
     }));
     try {
+      // Headers.set replaces case-insensitive duplicates from custom headers.
+      // A JSON body must not be sent with a conflicting content type or organization.
+      const headers = new Headers(guard.headers);
+      headers.set("Content-Type", "application/json");
+      headers.set("Authorization", `Bearer ${apiKey}`);
+      if (config.organizationId) headers.set("OpenAI-Organization", config.organizationId);
       const response = await (options.fetchImpl ?? fetch)(targetUrl, {
         method: "POST",
-        headers: {
-          ...guard.headers,
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-          ...(config.organizationId ? { "OpenAI-Organization": config.organizationId } : {}),
-        },
+        headers,
         body: JSON.stringify({
           model: config.model, input, store: false, stream: false,
           max_output_tokens: Math.max(16, options.maxTokens ?? config.maxTokens ?? 1024),
@@ -450,20 +451,24 @@ export class OpenAiResponsesAdapter implements AIProviderAdapter {
         signal: AbortSignal.timeout(options.timeoutMs ?? config.timeoutMs ?? 30000),
       });
       const payload = await response.json().catch(() => null) as {
-        status?: string; model?: string; error?: { message?: string };
+        status?: string; model?: string; error?: { message?: string }; incomplete_details?: unknown;
         output?: Array<{ type?: string; role?: string; status?: string; content?: Array<{ type?: string; text?: string }> }>;
       } | null;
       if (!response.ok) {
         const detail = sanitizeProviderDetail(payload?.error?.message);
         return fail(`رفض OpenAI: ${providerFailureCategory(response.status)}${detail ? ` — ${detail}` : ""}`);
       }
-      if (payload?.status !== "completed" || payload.error) return fail("لم يكتمل رد OpenAI.");
+      // A completed status must not contradict an explicit error or incomplete-details record.
+      if (payload?.status !== "completed" || payload.error != null || payload.incomplete_details != null) {
+        return fail("لم يكتمل رد OpenAI.");
+      }
       const messages = (Array.isArray(payload.output) ? payload.output : [])
         .filter((item) => item?.type === "message" && item.role === "assistant");
       // A refusal or incomplete assistant message must not be hidden by a separate READY text part.
       if (messages.some((item) => item.status !== "completed"
-        || (Array.isArray(item.content) && item.content.some((part) => part?.type === "refusal")))) {
-        return fail("تضمن رد OpenAI رفضًا أو رسالة غير مكتملة.");
+        || !Array.isArray(item.content) || item.content.length === 0
+        || item.content.some((part) => part?.type !== "output_text" || typeof part.text !== "string"))) {
+        return fail("تضمن رد OpenAI رفضًا أو رسالة غير مكتملة أو غير صالحة.");
       }
       const content = messages
         .flatMap((item) => Array.isArray(item.content) ? item.content : [])
