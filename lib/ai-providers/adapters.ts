@@ -458,8 +458,14 @@ export class OpenAiResponsesAdapter implements AIProviderAdapter {
         return fail(`رفض OpenAI: ${providerFailureCategory(response.status)}${detail ? ` — ${detail}` : ""}`);
       }
       if (payload?.status !== "completed" || payload.error) return fail("لم يكتمل رد OpenAI.");
-      const content = (Array.isArray(payload.output) ? payload.output : [])
-        .filter((item) => item?.type === "message" && item.role === "assistant" && item.status === "completed")
+      const messages = (Array.isArray(payload.output) ? payload.output : [])
+        .filter((item) => item?.type === "message" && item.role === "assistant");
+      // A refusal or incomplete assistant message must not be hidden by a separate READY text part.
+      if (messages.some((item) => item.status !== "completed"
+        || (Array.isArray(item.content) && item.content.some((part) => part?.type === "refusal")))) {
+        return fail("تضمن رد OpenAI رفضًا أو رسالة غير مكتملة.");
+      }
+      const content = messages
         .flatMap((item) => Array.isArray(item.content) ? item.content : [])
         .filter((part) => part?.type === "output_text" && typeof part.text === "string")
         .map((part) => part.text ?? "").join("\n").trim();
