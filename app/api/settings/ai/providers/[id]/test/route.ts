@@ -46,9 +46,17 @@ export async function POST(
   } catch (error) {
     const bounded = bodyErrorResponse(error);
     if (bounded) return bounded;
-    body = {};
+    // A broken or already-consumed request stream must not become a paid
+    // connection test against the stored credential.
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
-  const source = (body ?? {}) as Record<string, unknown>;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
+  const source = body as Record<string, unknown>;
+  if ("apiKey" in source && typeof source.apiKey !== "string") {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
+  }
   const apiKey = typeof source.apiKey === "string" ? source.apiKey : undefined;
 
   try {
