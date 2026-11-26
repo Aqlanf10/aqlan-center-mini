@@ -409,6 +409,105 @@ export class GoogleGeminiAdapter implements AIProviderAdapter {
   }
 }
 
+
+/** OpenAI Responses uses a different wire format from Chat Completions. */
+export class OpenAiResponsesAdapter implements AIProviderAdapter {
+  protocol: AiProtocolType = "openai-responses";
+
+  async chat(options: Parameters<AIProviderAdapter["chat"]>[0], config: AiProviderConfig): Promise<AiChatResult> {
+    const started = Date.now();
+    const fail = (error: string): AiChatResult => ({
+      ok: false, content: "", model: config.model, latencyMs: Date.now() - started, error,
+    });
+    if (!config.apiKeyEnc) return fail("لا يوجد مفتاح محفوظ لمزود OpenAI.");
+    let apiKey: string;
+    try {
+      apiKey = decryptSecret(config.apiKeyEnc);
+    } catch {
+      return fail("تعذر فك تشفير المفتاح.");
+    }
+    const targetUrl = joinUrl(config.baseUrl, config.apiEndpoint || "/responses");
+    const guard = await guardOutbound(targetUrl, config, options);
+    if ("error" in guard) return fail(guard.error);
+    const input = options.messages.map((m) => ({
+      role: m.role === "system" ? "developer" : m.role,
+      content: m.role === "system" ? m.content : sanitizeForPrivacy(m.content),
+    }));
+    try {
+      const response = await (options.fetchImpl ?? fetch)(targetUrl, {
+        method: "POST",
+        headers: {
+          ...guard.headers,
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+          ...(config.organizationId ? { "OpenAI-Organization": config.organizationId } : {}),
+        },
+        body: JSON.stringify({
+          model: config.model, input, store: false, stream: false,
+          max_output_tokens: Math.max(16, options.maxTokens ?? config.maxTokens ?? 1024),
+        }),
+        redirect: "error",
+        signal: AbortSignal.timeout(options.timeoutMs ?? config.timeoutMs ?? 30000),
+      });
+      const payload = await response.json().catch(() => null) as {
+        status?: string; model?: string; error?: { message?: string };
+        output?: Array<{ type?: string; role?: string; status?: string; content?: Array<{ type?: string; text?: string }> }>;
+      } | null;
+      if (!response.ok) {
+        const detail = sanitizeProviderDetail(payload?.error?.message);
+        return fail(`رفض OpenAI: ${providerFailureCategory(response.status)}${detail ? ` — ${detail}` : ""}`);
+      }
+      if (payload?.status !== "completed" || payload.error) return fail("لم يكتمل رد OpenAI.");
+      const messages = (Array.isArray(payload.output) ? payload.output : [])
+        .filter((item) => item?.type === "message" && item.role === "assistant");
+      // A refusal or incomplete assistant message must not be hidden by a separate READY text part.
+      if (messages.some((item) => item.status !== "completed"
+        || (Array.isArray(item.content) && item.content.some((part) => part?.type === "refusal")))) {
+        return fail("تضمن رد OpenAI رفضًا أو رسالة غير مكتملة.");
+      }
+      const content = messages
+        .flatMap((item) => Array.isArray(item.content) ? item.content : [])
+        .filter((part) => part?.type === "output_text" && typeof part.text === "string")
+        .map((part) => part.text ?? "").join("\n").trim();
+      if (!content) return fail("أعاد OpenAI ناتجاً فارغاً.");
+      // Never present the requested model as verified response metadata.
+      if (typeof payload.model !== "string" || !payload.model.trim()) {
+        return fail("لم يحدد رد OpenAI النموذج الذي نفذ الطلب.");
+      }
+      return { ok: true, content, model: payload.model, latencyMs: Date.now() - started };
+    } catch {
+      return fail("تعذر الاتصال بـ OpenAI أو انتهت المهلة.");
+    }
+  }
+
+  async testConnection(config: AiProviderConfig, fetchImpl?: typeof fetch): Promise<AiTestOutcome> {
+    const result = await this.chat({
+      messages: [{ role: "user", content: "Reply with READY only." }],
+      maxTokens: 256,
+      timeoutMs: 20000,
+      fetchImpl,
+    }, config);
+    if (!result.ok || result.content.trim() !== "READY") {
+      return {
+        ok: false,
+        message: result.error ?? "لم يُعد المزود علامة التحقق المطلوبة READY.",
+        latencyMs: result.latencyMs,
+      };
+    }
+    // The wire protocol alone is not proof of a direct OpenAI connection.
+    const endpoint = new URL(joinUrl(config.baseUrl, config.apiEndpoint || "/responses"));
+    const directOpenAi = endpoint.origin === "https://api.openai.com"
+      && endpoint.pathname === "/v1/responses" && !endpoint.search;
+    return {
+      ok: true,
+      message: directOpenAi
+        ? `الاتصال ناجح بـ OpenAI — النموذج ${result.model}`
+        : `نجح اختبار مزود متوافق مع Responses — النموذج ${result.model} (ليس اتصالاً مباشراً بـ OpenAI)`,
+      latencyMs: result.latencyMs,
+    };
+  }
+}
+
 // ─── مصفوفة موحدة للمحولات ───────────────────────────────────────────────────
 
 export function getProviderAdapter(protocolType: AiProtocolType): AIProviderAdapter {
@@ -417,8 +516,9 @@ export function getProviderAdapter(protocolType: AiProtocolType): AIProviderAdap
       return new AnthropicCompatibleAdapter();
     case "google-gemini":
       return new GoogleGeminiAdapter();
-    case "openai-compatible":
     case "openai-responses":
+      return new OpenAiResponsesAdapter();
+    case "openai-compatible":
     case "custom-http":
     default:
       return new OpenAiCompatibleAdapter();
