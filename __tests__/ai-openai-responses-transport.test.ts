@@ -111,6 +111,26 @@ describe("OpenAI Responses transport (synthetic, no network)", () => {
     expect((await adapter.testConnection(config(), fetchImpl)).ok).toBe(false);
     expect((await adapter.chat({ messages: [{ role: "user", content: "synthetic" }], fetchImpl }, config())).ok).toBe(false);
   });
+  it.each([
+    { incomplete_details: { reason: "max_output_tokens" } },
+    { incomplete_details: {} },
+    { incomplete_details: false },
+    { error: { message: "synthetic error" } },
+    { error: false },
+  ])("rejects contradictory completion metadata (%j)", async (metadata) => {
+    const { fetchImpl } = mock({ ...completed, ...metadata, output: [
+      { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "READY" }] },
+    ] });
+    const adapter = getProviderAdapter("openai-responses");
+    expect((await adapter.testConnection(config(), fetchImpl)).ok).toBe(false);
+    expect((await adapter.chat({ messages: [{ role: "user", content: "synthetic" }], fetchImpl }, config())).ok).toBe(false);
+  });
+  it("accepts explicit null completion metadata", async () => {
+    const { fetchImpl } = mock({ ...completed, error: null, incomplete_details: null, output: [
+      { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "READY" }] },
+    ] });
+    expect((await getProviderAdapter("openai-responses").testConnection(config(), fetchImpl)).ok).toBe(true);
+  });
   it("does not report readiness for an unrelated completed message", async () => {
     const { fetchImpl } = mock(completed);
     expect((await getProviderAdapter("openai-responses").testConnection(config(), fetchImpl)).ok).toBe(false);
