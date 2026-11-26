@@ -84,6 +84,9 @@ describe("One-Click Case Presentation PPTX/PDF (Package 5)", () => {
     const decoded = new TextDecoder().decode(pptx);
     expect(decoded).toContain("[Content_Types].xml");
     expect(decoded).toContain("ppt/presentation.xml");
+    expect(decoded).toContain("ppt/theme/theme1.xml");
+    expect(decoded).toContain("ppt/viewProps.xml");
+    expect(decoded).toContain("<p:origin ");
     expect(decoded).toContain("ppt/slides/slide1.xml");
     expect(decoded).toContain("ppt/slides/slide4.xml");
     expect(decoded).not.toContain("اسم مريض حقيقي سري");
