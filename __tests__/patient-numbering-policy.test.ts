@@ -12,7 +12,7 @@ describe('source-only patient numbering policy; no authority or DB mutation',()=
   it.each(['0','-1','+1','1.1','1e3','01','١٢','9007199254740993.0','9223372036854775808'])('rejects invalid numeric input %s',n=>{
     expect(parseNumberingRequest('A',n)).toBeNull();
   });
-  it.each(['AB','A1','Å','Ａ','ا','', 'A-'])('rejects invalid prefix %s',p=>expect(parseNumberingRequest(p,'1')).toBeNull());
+  it.each(['AB','A1','Å','Ａ','ا','', 'A-','ſ','ı'])('rejects invalid prefix %s',p=>expect(parseNumberingRequest(p,'1')).toBeNull());
   it('keeps bigint precision and enforces portal-compatible bounds',()=>{
     expect(plan('9007199254740993')).toMatchObject({ok:true,preview:'A-9007199254740993'});
     expect(plan(PATIENT_NUMBER_MAX.toString())).toMatchObject({ok:true});
@@ -40,6 +40,12 @@ describe('source-only patient numbering policy; no authority or DB mutation',()=
       expect(parseCanonicalPatientNumber(value)).toBeNull();
     }
     expect(plan('1',{...fresh(),historyComplete:false})).toEqual({ok:false,reason:'history-unverified'});
+  });
+  it('rejects non-string stored identifiers instead of coercing them into history',()=>{
+    for (const value of [['P-07000'], { toString: () => 'P-07000' }, null, undefined, 7000]) {
+      expect(parseCanonicalPatientNumber(value)).toBeNull();
+    }
+    expect(parseCanonicalPatientNumber('P-07000')).toEqual({prefix:'P',number:7000n});
   });
   it('rejects stale preview after concurrent allocator or configuration revision',()=>{
     expect(plan('38',{...fresh(),revision:'synthetic-r2',allocatedThrough:37n},'synthetic-r1')).toEqual({ok:false,reason:'stale-preview'});
