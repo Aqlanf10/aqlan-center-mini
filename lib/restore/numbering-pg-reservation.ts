@@ -19,7 +19,7 @@ export function createIndependentPgReservationBackend(
   independentPool: Pick<Pool, "connect">,
   schema: string,
 ): IndependentReservationBackend {
-  if (!/^[a-z][a-z0-9_]{0,62}$/.test(schema)) throw new Error("Invalid authority schema");
+  if (typeof schema !== "string" || !/^[a-z][a-z0-9_]{0,62}$/.test(schema)) throw new Error("Invalid authority schema");
   const admission = `"${schema}".generation_admission`;
   const watermarks = `"${schema}".numbering_watermarks`;
   const identifier = (value: unknown): value is string =>
@@ -48,13 +48,14 @@ export function createIndependentPgReservationBackend(
         let inFlight = false;
         const result = await work({
           async readFresh(prefix) {
-            if (!active || inFlight || advanceAttempted || !/^[A-Z]$/.test(prefix)) throw new Error("Invalid watermark read");
+            if (!active || inFlight || advanceAttempted || typeof prefix !== "string" || !/^[A-Z]$/.test(prefix)) throw new Error("Invalid watermark read");
             inFlight = true;
             try {
               const rows = (await client.query<{ reserved_through: string }>(
                 `SELECT reserved_through::text FROM ${watermarks}
                   WHERE lineage=$1 AND prefix=$2 FOR UPDATE`, [lineage, prefix])).rows;
-              if (rows.length !== 1 || !/^(0|[1-9][0-9]{0,17})$/.test(rows[0].reserved_through)) {
+              if (rows.length !== 1 || typeof rows[0].reserved_through !== "string"
+                || !/^(0|[1-9][0-9]{0,17})$/.test(rows[0].reserved_through)) {
                 read = null;
                 return null;
               }
