@@ -219,6 +219,19 @@ describe("عمليات المدير المشروعة وعدم تسريب الم�
     expect(mocks.reorderProviders).toHaveBeenCalledWith(["openai", "zai"], "admin");
   });
 
+  it("tests the saved OpenAI credential with an empty JSON object", async () => {
+    mocks.testProviderConnection.mockResolvedValue({ ok: true, message: "Synthetic", latencyMs: 1 });
+    const request = new Request("http://localhost/api/settings/ai/providers/openai/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const result = await testProvider(request, { params: Promise.resolve({ id: "openai" }) });
+    expect(result.status).toBe(200);
+    expect(mocks.testProviderConnection).toHaveBeenCalledWith("openai", undefined, "admin", "admin");
+    expect(mocks.testProviderConnection).toHaveBeenCalledTimes(1);
+  });
+
   it("يسمح للمدير بإجراء اختبار اتصال للمزود", async () => {
     mocks.testProviderConnection.mockResolvedValue({
       ok: true,
