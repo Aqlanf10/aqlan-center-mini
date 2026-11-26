@@ -98,6 +98,18 @@ describe("OpenAI Responses transport (synthetic, no network)", () => {
     expect((await adapter.testConnection(config(), fetchImpl)).ok).toBe(false);
     expect((await adapter.chat({ messages: [{ role: "user", content: "synthetic" }], fetchImpl }, config())).ok).toBe(false);
   });
+  it.each([
+    null, {}, [], [null], [{ type: "output_text", text: 42 }],
+    [{ type: "unknown", text: "ignored" }],
+  ])("rejects malformed assistant content alongside a valid READY message (%j)", async (content) => {
+    const { fetchImpl } = mock({ ...completed, output: [
+      { type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "READY" }] },
+      { type: "message", role: "assistant", status: "completed", content },
+    ] });
+    const adapter = getProviderAdapter("openai-responses");
+    expect((await adapter.testConnection(config(), fetchImpl)).ok).toBe(false);
+    expect((await adapter.chat({ messages: [{ role: "user", content: "synthetic" }], fetchImpl }, config())).ok).toBe(false);
+  });
   it("does not report readiness for an unrelated completed message", async () => {
     const { fetchImpl } = mock(completed);
     expect((await getProviderAdapter("openai-responses").testConnection(config(), fetchImpl)).ok).toBe(false);
