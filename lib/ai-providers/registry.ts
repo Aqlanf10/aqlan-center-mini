@@ -483,26 +483,29 @@ export async function testAiProviderConnection(
     return { ok: false, message: "المزود غير موجود.", latencyMs: 0 };
   }
 
+  const usesUnsavedKey = Boolean(unsavedApiKey?.trim());
   const testConfig: AiProviderConfig = {
     ...provider,
-    apiKeyEnc: unsavedApiKey && unsavedApiKey.trim().length > 0
-      ? encryptSecret(unsavedApiKey.trim())
+    apiKeyEnc: usesUnsavedKey
+      ? encryptSecret(unsavedApiKey!.trim())
       : provider.apiKeyEnc,
   };
 
   const adapter = getProviderAdapter(testConfig.protocolType);
   const outcome = await adapter.testConnection(testConfig, fetchImpl);
 
-  // تحديث حالة الاختبار في الجدول
-  await getPool().query(
-    `UPDATE ai_providers
-     SET last_test_at = NOW(),
-         last_test_ok = $1,
-         last_test_message = $2,
-         last_test_latency = $3
-     WHERE id = $4`,
-    [outcome.ok, outcome.message, outcome.latencyMs, id],
-  );
+  // A temporary key can be tested, but its result is not evidence about the saved credential.
+  if (!usesUnsavedKey) {
+    await getPool().query(
+      `UPDATE ai_providers
+       SET last_test_at = NOW(),
+           last_test_ok = $1,
+           last_test_message = $2,
+           last_test_latency = $3
+       WHERE id = $4 AND api_key_enc IS NOT DISTINCT FROM $5`,
+      [outcome.ok, outcome.message, outcome.latencyMs, id, provider.apiKeyEnc],
+    );
+  }
 
   await recordAudit({
     action: "ai.provider.test",
@@ -511,6 +514,7 @@ export async function testAiProviderConnection(
     entityLabel: provider.name,
     details: {
       providerId: id,
+      usesUnsavedKey,
       ok: outcome.ok,
       latencyMs: outcome.latencyMs,
       message: outcome.message,
