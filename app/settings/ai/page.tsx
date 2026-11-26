@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import type { AiProviderView, AiProtocolType, AiTaskModels } from "@/lib/ai-providers/types";
 import type { AiProviderPreset } from "@/lib/ai-providers/presets";
@@ -40,30 +40,35 @@ export default function AiSettingsPage() {
 
   // حالات الاختبار المباشر لكل مزود
   const [testingId, setTestingId] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<
-    Record<string, { ok: boolean; message: string; latencyMs: number }>
-  >({});
+  // Persisted server evidence is authoritative; never cache a successful POST result.
+  const loadRevision = useRef(0);
   const [saving, setSaving] = useState(false);
 
   // تحميل المزودين من السجل
   const load = useCallback(async () => {
+    const revision = ++loadRevision.current;
     setLoading(true);
     try {
       const response = await fetch("/api/settings/ai/providers", { cache: "no-store" });
+      if (revision !== loadRevision.current) return;
       if (response.status === 401) return denied();
       if (response.status === 403) {
+        setProviders([]);
         setError("إعدادات الذكاء الاصطناعي للمدير وحده.");
         return;
       }
       const data = await response.json();
+      if (revision !== loadRevision.current) return;
       if (!response.ok) throw new Error(data?.message || "تعذّر تحميل المزودين.");
       setProviders(data.providers || []);
       setPresets(data.presets || []);
       setError(null);
     } catch (err) {
+      if (revision !== loadRevision.current) return;
+      setProviders([]);
       setError((err as Error).message || "تعذّر تحميل مزودي الذكاء الاصطناعي.");
     } finally {
-      setLoading(false);
+      if (revision === loadRevision.current) setLoading(false);
     }
   }, []);
 
@@ -251,25 +256,16 @@ export default function AiSettingsPage() {
         headers: { "Content-Type": "application/json" },
       });
       const data = await res.json();
-      setTestResults((prev) => ({
-        ...prev,
-        [p.id]: {
-          ok: data.ok,
-          message: data.message,
-          latencyMs: data.latencyMs || 0,
-        },
-      }));
-      // تحديث بيانات المزود لعرض التاريخ
-      await load();
+      if (!res.ok || data.ok !== true) {
+        await load();
+        setError(data.message || "تعذّر فحص الاتصال بالمزوّد.");
+      } else {
+        // Reload the guarded, persisted result; a stale POST must not override it.
+        await load();
+      }
     } catch (err) {
-      setTestResults((prev) => ({
-        ...prev,
-        [p.id]: {
-          ok: false,
-          message: (err as Error).message,
-          latencyMs: 0,
-        },
-      }));
+      await load();
+      setError((err as Error).message || "تعذّر فحص الاتصال بالمزوّد.");
     } finally {
       setTestingId(null);
     }
@@ -449,7 +445,6 @@ export default function AiSettingsPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {providers.map((p, idx) => {
-                    const test = testResults[p.id];
                     const isTesting = testingId === p.id;
 
                     return (
@@ -536,16 +531,7 @@ export default function AiSettingsPage() {
 
                         {/* نتيجة آخر اختبار */}
                         <td className="px-4 py-3">
-                          {test ? (
-                            <div className="text-[11px]">
-                              <span className={test.ok ? "font-bold text-emerald-700" : "font-bold text-rose-700"}>
-                                {test.ok ? `متصل (${test.latencyMs} م.ث)` : "فشل الاتصال"}
-                              </span>
-                              <div className="text-[10px] text-slate-500 truncate max-w-xs" title={test.message}>
-                                {test.message}
-                              </div>
-                            </div>
-                          ) : p.lastTestAt ? (
+                          {p.lastTestAt ? (
                             <div className="text-[11px]">
                               <span className={p.lastTestOk ? "font-bold text-emerald-700" : "font-bold text-rose-700"}>
                                 {p.lastTestOk ? `متصل (${p.lastTestLatency || 0} م.ث)` : "فشل الاتصال"}
