@@ -122,7 +122,7 @@ function OwnedCheckoutExtras({ visitId, expectedPatientId, financialVerified = t
     const request = new AbortController();
     readRequest.current = request;
     try {
-      const response = await fetch(`/api/visits/${visitId}/walkout`, { cache: "no-store", signal: request.signal });
+      const response = await fetch(`/api/visits/${visitId}/walkout${expectedPatientId !== undefined ? `?patientId=${expectedPatientId}` : ""}`, { cache: "no-store", signal: request.signal });
       const payload: unknown = await response.json().catch(() => null);
       if (!mounted.current || request.signal.aborted || readRequest.current !== request) return;
       const verified = response.ok && isCheckoutWalkout(payload, visitId)

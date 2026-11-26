@@ -23,7 +23,13 @@ export async function patientAppointmentsResponse(request: Request, session: Ses
     const now = new Date();
     const result = await readPatientAppointments(patientId, query, clinicDateString(now, CLINIC_TIME_ZONE));
     if (!result) return json({ message: "الملف غير موجود أو لا تملك صلاحية عرضه." }, 404);
-    const payload = { patientId, view: query.view, requestCursor: query.requestCursor, ...result,
+    const payload = { patientId, view: query.view, requestCursor: query.requestCursor, today: result.today, nextCursor: result.nextCursor,
+      appointments: session.role === "reception" ? result.appointments.map(a => ({
+        id: a.id, patientId: a.patientId, patientName: a.patientName, patientPhone: a.patientPhone,
+        scheduledDate: a.scheduledDate, scheduledTime: a.scheduledTime, durationMinutes: a.durationMinutes,
+        status: a.status, doctorId: a.doctorId, doctorName: a.doctorName, reminderSentAt: a.reminderSentAt,
+        cancelReason: null, note: null,
+      })) : result.appointments,
       timeZone: CLINIC_TIME_ZONE, generatedAt: now.toISOString(), canRemind: canRemindPatientRole(session.role) };
     if (!readPatientAppointmentsPage(payload, patientId, query.view, query.requestCursor)) throw new Error("Invalid appointment data");
     return json(payload);

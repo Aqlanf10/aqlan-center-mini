@@ -40,6 +40,11 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role === "reception") return NextResponse.json(
+    { message: "يمكن للاستقبال رفع المستندات الخارجية فقط." },
+    { status: 403, headers: { "Cache-Control": "private, no-store" } },
+  );
+
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
 
@@ -91,6 +96,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
+  if (session.role === "reception") {
+    const allowed = new Set(["file", "kind", "title", "takenOn"]);
+    if (Array.from(form.keys()).some(key => !allowed.has(key) || form.getAll(key).length !== 1)
+      || !["xray", "report", "other"].includes(String(form.get("kind")))) {
+      return NextResponse.json({ message: "اختر أشعة أو مستندًا خارجيًا." }, { status: 400 });
+    }
+  }
   const file = form.get("file");
   if (!(file instanceof File)) {
     return NextResponse.json({ message: "اختر ملفًّا." }, { status: 400 });
@@ -189,7 +201,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       actor: session.username,
       actorRole: session.role,
     });
-    return NextResponse.json(document, { status: 201 });
+    return NextResponse.json(session.role === "reception" ? { uploaded: true } : document,
+      { status: 201, headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof DocumentAssociationError) {
       return NextResponse.json({ message: error.message }, { status: 400 });

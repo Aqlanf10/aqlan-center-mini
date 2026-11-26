@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
  * والسند يحمل **العملة المدفوعة وسعر الصرف ومكافئها**: مريضٌ دفع مئة دولار يجب أن
  * يرى في ورقته أنه دفع مئة دولار، لا رقمًا بالريال لا يعرف من أين جاء.
  */
-export default async function ReceiptPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ReceiptPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams?: Promise<{patientId?:string|string[]}> }) {
   // الطبيب لا يرى السندات والفواتير: صفحة الطباعة بابٌ خلفي إلى المال لو تُركت
   // مفتوحة لكل من يملك جلسة.
   const session = await requireSession();
@@ -34,7 +34,8 @@ export default async function ReceiptPage({ params }: { params: Promise<{ id: st
 
   const [payment, settings] = await Promise.all([getPayment(id), getSettingsSafe()]);
   const printed = await printCount("receipt", id);
-  if (!payment) notFound();
+  const expected = (await searchParams)?.patientId;
+  if (!payment || (expected !== undefined && expected !== String(payment.patientId))) notFound();
   const provenance = (await readReceiptProvenance([payment.id]))[payment.id];
 
   // (TD-05) الأساس دستوري من الكود.

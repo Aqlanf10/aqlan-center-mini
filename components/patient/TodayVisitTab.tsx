@@ -132,7 +132,7 @@ function OwnedTodayVisitTab({
     };
     try {
       const response = await fetch(visitId === null
-        ? `/api/patients/${patientId}/workflow` : `/api/visits/${visitId}/walkout`,
+        ? `/api/patients/${patientId}/workflow` : `/api/visits/${visitId}/walkout${requestedCheckoutVisitId !== null ? `?patientId=${patientId}` : ""}`,
         { cache: "no-store", signal: request.signal });
       if (!response.ok) throw new Error("Financial read failed");
       const payload: unknown = await response.json();

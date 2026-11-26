@@ -18,6 +18,11 @@ const denied = () =>
 
 const PAGE_SIZE = 25;
 
+function identity(patient: { id: number; patientNumber: string; fullName: string; phone: string | null }) {
+  const { id, patientNumber, fullName, phone } = patient;
+  return { id, patientNumber, fullName, phone };
+}
+
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
@@ -44,13 +49,11 @@ export async function GET(request: Request) {
   try {
     // Explicit server projection: finance staff never receive clinical fields,
     // even when requesting this API directly rather than through the UI.
-    const financeOnly = isRestrictedRole(session.role);
-    const financeSummary = (patient: { id: number; patientNumber: string; fullName: string; phone: string | null }) => ({
-      id: patient.id, patientNumber: patient.patientNumber, fullName: patient.fullName, phone: patient.phone,
-    });
+    const identityOnly = session.role === "reception" || isRestrictedRole(session.role);
+
     if (term.trim()) {
       const rows = await searchPatients(term, 20, doctorPartyId);
-      return NextResponse.json(financeOnly ? rows.map(financeSummary) : rows);
+      return NextResponse.json(identityOnly ? rows.map(identity) : rows);
     }
 
     // بلا كلمة بحث: صفحة من كل المرضى. الحدّ مغلق هنا لا مأخوذ من الطلب — رقم ضخم
@@ -67,7 +70,7 @@ export async function GET(request: Request) {
     });
     return NextResponse.json({
       // الأدوار المالية: هوية المريض فقط (عقد الأمن القائم) — لا أعمدة القائمة الإضافية.
-      rows: financeOnly ? rows.map(financeSummary) : rows,
+      rows: identityOnly ? rows.map(identity) : rows,
       total, page, pageSize: PAGE_SIZE, filter, sort, flag,
     });
   } catch {
@@ -136,11 +139,13 @@ export async function POST(request: Request) {
     const registration = await createPatientWithDuplicateReview(validation.value, confirmed);
     if (!registration.ok) {
       return NextResponse.json(
-        { message: duplicateWarning(registration.duplicates), duplicates: registration.duplicates },
+        { message: duplicateWarning(registration.duplicates), duplicates: session.role === "reception"
+          ? registration.duplicates.map(({ reason, patient }) => ({ reason, patient: identity(patient) })) : registration.duplicates },
         { status: 409 },
       );
     }
     const created = registration.patient;
+    const result = session.role === "reception" ? identity(created) : created;
     // (P1-4) الإنشاء يُدقَّق بلقطته — ومع علامة إن أُكِّد رغم تحذير التكرار.
     await recordAudit({
       action: "patient.create",
@@ -162,12 +167,12 @@ export async function POST(request: Request) {
       } catch {
         // الملف وُلد — والرصيد يُعاد من ملفه؛ يُقال ذلك صراحةً لا يُبلَع.
         return NextResponse.json({
-          ...created,
+          ...result,
           warning: "حُفظ المريض لكن تعذّر حفظ الرصيد السابق — أضفه من ملفه ← الحساب ← «رصيد سابق».",
         }, { status: 201 });
       }
     }
-    return NextResponse.json(created, { status: 201 });
+    return NextResponse.json(result, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر حفظ المريض. أعد المحاولة." }, { status: 500 });
   }

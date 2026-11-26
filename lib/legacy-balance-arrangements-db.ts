@@ -90,16 +90,17 @@ export interface LegacyOpeningPosition {
   remainingMinor: number;
 }
 
-export async function listLegacyOpeningPositions(patientId: number): Promise<LegacyOpeningPosition[]> {
-  await ensureSchema();
-  const { rows } = await getPool().query<{ currency: string }>(
+export async function listLegacyOpeningPositions(patientId: number, client?: DbClient): Promise<LegacyOpeningPosition[]> {
+  if (!client) await ensureSchema();
+  const reader = client ?? getPool();
+  const { rows } = await reader.query<{ currency: string }>(
     `SELECT currency FROM patient_opening_balances WHERE patient_id = $1 ORDER BY currency`,
     [patientId],
   );
   const positions: LegacyOpeningPosition[] = [];
   for (const row of rows) {
     if (!isCurrency(row.currency)) throw new Error(`عملة رصيد افتتاحي غير صالحة: ${row.currency}`);
-    const position = await openingPosition(getPool() as unknown as DbClient, patientId, row.currency);
+    const position = await openingPosition(reader, patientId, row.currency);
     if (position) positions.push({ currency: row.currency, ...position });
   }
   return positions;

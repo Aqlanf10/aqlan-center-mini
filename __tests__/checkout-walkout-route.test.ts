@@ -16,6 +16,7 @@ beforeEach(() => { vi.clearAllMocks(); state.session = { username: "synthetic", 
   state.reader.mockReset().mockResolvedValue({ walkout, summary: [], dueRecommendation, today: "2026-10-20" }); state.handoff.mockResolvedValue(null); });
 describe("authorized checkout recommendation transport", () => {
   it("returns the composed snapshot unchanged with private no-store and server clinic date", async () => {
+    state.session = { username: "synthetic-admin", role: "admin" };
     const response = await get(); expect(response.status).toBe(200); expect(response.headers.get("Cache-Control")).toBe("private, no-store");
     expect(await response.json()).toEqual({ ...walkout, summary: [], dueRecommendation, signedToday: true });
     expect(state.authorize).toHaveBeenCalledWith(state.session, 10); expect(state.see).toHaveBeenCalledWith(state.session, 7); expect(state.reader).toHaveBeenCalledWith(10);

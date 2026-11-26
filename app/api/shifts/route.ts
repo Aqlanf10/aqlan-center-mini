@@ -45,6 +45,9 @@ export async function GET() {
   }
   try {
     const open = await getOpenShift();
+    if (session.role === "reception") {
+      return NextResponse.json({ open: open ? { id: open.id } : null }, { headers: { "Cache-Control": "private, no-store" } });
+    }
     const [payments, expenses, drawer] = open
       ? await Promise.all([listShiftPayments(open.id), listShiftExpenses(open.id), shiftDrawerBreakdown(open)])
       : [[], [], null];
@@ -97,7 +100,7 @@ export async function POST(request: Request) {
       details: { الافتتاحي: shift.opening },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(shift, { status: 201 });
+    return NextResponse.json(session.role === "reception" ? { id: shift.id } : shift, { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر فتح الوردية." }, { status: 500 });
   }
@@ -134,6 +137,9 @@ export async function PATCH(request: Request) {
     }
     if (result.reason === "difference_reason_required" && result.difference) {
       /* (P1-3) الجرد أعمى: الفرق يُكشف بعد إدخال المعدود لا قبله، ولا يُقفَل بلا سبب. */
+      if (session.role === "reception") return NextResponse.json({
+        code: "difference_reason_required", message: "راجع العدّ وأدخل سبب الفرق لإقفال الوردية.",
+      }, { status: 409 });
       const parts = CURRENCIES
         .filter((currency) => result.difference![currency] !== 0)
         .map((currency) => {
@@ -161,7 +167,7 @@ export async function PATCH(request: Request) {
       },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(result.shift);
+    return NextResponse.json(session.role === "reception" ? { id } : result.shift);
   } catch {
     return NextResponse.json({ message: "تعذّر إغلاق الوردية." }, { status: 500 });
   }

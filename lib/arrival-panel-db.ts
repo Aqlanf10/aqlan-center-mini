@@ -27,7 +27,7 @@ export interface ArrivalPanel {
  * (P0-D) لوحة الوصول — تجميعٌ للقراءة فقط من المصادر القائمة: الرصيد الكانوني (computeDebtRows)،
  * والرصيد السابق وترتيبه (P0-C)، وتقدم خطط الاتفاق (BILL-1)، والفواتير المفتوحة. لا كتابة ولا محرك دفع.
  */
-export async function arrivalPanel(patientId: number, options: { includeMoney: boolean }): Promise<ArrivalPanel | null> {
+export async function arrivalPanel(patientId: number, options: { includeMoney: boolean; administrativeOnly?: boolean }): Promise<ArrivalPanel | null> {
   await ensureSchema();
   const pool = getPool();
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
@@ -49,8 +49,8 @@ export async function arrivalPanel(patientId: number, options: { includeMoney: b
         WHERE patient_id = $1 AND signed_at IS NULL AND status NOT IN ('done', 'cancelled')
           AND (arrived_at AT TIME ZONE $2)::date = $3::date
         ORDER BY id DESC LIMIT 1`, [patientId, CLINIC_TIME_ZONE, today]),
-    listPatientCases(patientId),
-    openOrthoCaseFor(patientId, today),
+    options.administrativeOnly ? [] : listPatientCases(patientId),
+    options.administrativeOnly ? null : openOrthoCaseFor(patientId, today),
   ]);
 
   let money: ArrivalPanel["money"] = null;
@@ -73,7 +73,7 @@ export async function arrivalPanel(patientId: number, options: { includeMoney: b
       openings: openings.map((row) => ({ currency: row.currency, remainingMinor: row.remainingMinor })),
       arrangements: arrangements.map((row) => ({ id: row.id, currency: row.currency, cadence: row.cadence, progress: row.progress })),
       plans: plans.filter(plan => plan.approvedAgreement?.available !== false).map((plan) => ({
-        id: plan.id, title: plan.title, baseCurrency: plan.baseCurrency, status: plan.status,
+        id: plan.id, title: options.administrativeOnly ? `اتفاق #${plan.id}` : plan.title, baseCurrency: plan.baseCurrency, status: plan.status,
         installmentCount: plan.installments.length, progress: plan.progress,
       })),
       openInvoices: invoiceRows.rows
@@ -88,8 +88,8 @@ export async function arrivalPanel(patientId: number, options: { includeMoney: b
     patientName: patient.full_name,
     today,
     appointments: appointmentRows.rows.map((row) => ({
-      id: row.id, time: row.time, type: row.appointment_type, status: row.status,
-      doctorName: row.doctor_name, plannedTitle: row.planned_title,
+      id: row.id, time: row.time, type: options.administrativeOnly ? null : row.appointment_type, status: row.status,
+      doctorName: row.doctor_name, plannedTitle: options.administrativeOnly ? null : row.planned_title,
     })),
     activeVisit: visitRows.rows[0] ?? null,
     cases: cases

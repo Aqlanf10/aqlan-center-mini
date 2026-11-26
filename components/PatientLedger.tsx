@@ -342,7 +342,10 @@ function restoreInvoiceCommand(command: FinancialCommand, patientId: number): In
   return { ...(value as unknown as InvoiceCommandState), outcome: "uncertain", editing: false };
 }
 
+const ignoreDebtHold = () => {};
+
 interface PatientLedgerProps {
+  receptionSchedules?: boolean;
   patientId: number;
   /** Trusted calling visit context; independent entry leaves this undefined. */
   visitId?:number;
@@ -354,7 +357,7 @@ interface PatientLedgerProps {
   accountDetails?: ReactNode;
 }
 
-export function PatientLedger({ patientId, visitId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, accountDetails }: PatientLedgerProps) {
+export function PatientLedger({ receptionSchedules, patientId, visitId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, accountDetails }: PatientLedgerProps) {
   const session = useSession();
   // A fresh patient/principal/permission owner cannot reuse another owner's read.
   const scope = JSON.stringify([patientId, session, visitId??null]);
@@ -428,6 +431,17 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
   const recovery = recoveries.get(recoveryKey) ?? null;
   const reconciliationRecovery = reconciliationRecoveries.get(recoveryKey) ?? null;
   if (!session) return <p role="status" className="p-4 text-sm text-slate-500">غير مصرّح لك بعرض حساب المريض.</p>;
+  const changeDebtRecovery = (command: DebtRepaymentCommand | null) =>{
+      if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
+      setDebtRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
+  };
+  if (receptionSchedules) {
+    const held = !!(recovery || moneyRecoveries.get(recoveryKey) || historicalRecoveries.get(recoveryKey)
+      || revisionRecoveries.get(recoveryKey) || reconciliationRecovery);
+    return <DebtRepaymentPanel key={scope} patientId={patientId} refreshKey={patientId} financialRecovery={financialRecovery}
+      recovery={debtRecoveries.get(recoveryKey) ?? null} onRecoveryChange={changeDebtRecovery} onHold={ignoreDebtHold}
+      enabled={session.role === "reception" && financialRecovery.ready && !held} onChanged={onClinicalChange ?? ignoreDebtHold} />;
+  }
   return <PatientLedgerContent key={scope} reconciliationRecovery={reconciliationRecovery} patientId={patientId} visitId={visitId} selectionContextKey={selectionContextKey} onClinicalChange={onClinicalChange} entryRequestKey={entryRequestKey} onEntryRequestConsumed={onEntryRequestConsumed} onNavigationGuardChange={onNavigationGuardChange}
     accountDetails={accountDetails} financialRecovery={financialRecovery} restoredCommandKey={restoredCommandKey}
     debtRecovery={debtRecoveries.get(recoveryKey)??null}
@@ -445,10 +459,7 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
       if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
       setRevisionRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
     }}
-    onDebtRecoveryChange={command=>{
-      if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
-      setDebtRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
-    }}
+    onDebtRecoveryChange={changeDebtRecovery}
     recovery={recovery?.patientId === patientId && recovery.principal === principal ? recovery.command : null}
     onRecoveryChange={command => {
       if (recoveryLifetime.current.owner !== recoveryOwner || !recoveryLifetime.current.active) return;

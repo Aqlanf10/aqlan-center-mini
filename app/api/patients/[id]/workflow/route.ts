@@ -30,6 +30,10 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
+  if (session.role === "reception") return NextResponse.json(
+    { message: "استخدم ملخص الاستقبال لهذا المريض." },
+    { status: 403, headers: { "Cache-Control": "private, no-store" } },
+  );
   const patientId = await idFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم ملف غير صالح." }, { status: 400 });
 

@@ -30,6 +30,11 @@ const idFrom = async (context: { params: Promise<{ id: string }> }) => {
 export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role === "reception") return NextResponse.json(
+    { message: "يمكن للاستقبال رفع المستندات الخارجية فقط." },
+    { status: 403, headers: { "Cache-Control": "private, no-store" } },
+  );
+
   const id = await idFrom(context);
   if (!id) return NextResponse.json({ message: "رقم المستند غير صالح." }, { status: 400 });
 

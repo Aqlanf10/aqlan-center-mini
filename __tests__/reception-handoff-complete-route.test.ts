@@ -16,6 +16,7 @@ vi.mock("../lib/checkout-db", () => ({ readVisitCheckout: async (id: number) => 
 const { POST } = await import("../app/api/visits/[id]/reception-handoff/route");
 const { GET } = await import("../app/api/visits/[id]/walkout/route");
 const signedAt = "2026-10-10T09:00:00.000Z";
+const deskWalkout = { visitId: 41, patientId: 7, signedAt, lines: [], balances: [], checkout: { previous: {}, current: {}, invoicePaidMinor: 0 } };
 const payload = { patientId: 7, signedAt, reason: "موعد متابعة للتحصيل" };
 const post = (body: unknown = payload, id = "41", extraHeaders: Record<string, string> = {}) => POST(
   new Request(`http://localhost/api/visits/${id}/reception-handoff`, { method: "POST", body: JSON.stringify(body),
@@ -28,7 +29,7 @@ beforeEach(() => {
   state.see.mockReset().mockResolvedValue(true);
   state.complete.mockReset().mockResolvedValue({ ok: true, visitId: 41, patientId: 7, signedAt, status: "handled", handledReason: payload.reason });
   state.handoff.mockReset().mockResolvedValue({ status: "handled", handledReason: payload.reason });
-  state.walkout.mockReset().mockResolvedValue({ visitId: 41, patientId: 7, signedAt });
+  state.walkout.mockReset().mockResolvedValue(deskWalkout);
   state.owner.mockResolvedValue({ found: true, patientId: 7 });
   state.summary.mockResolvedValue({});
 });
@@ -102,8 +103,8 @@ describe("walkout includes durable front-desk status", () => {
     const response = await get();
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("private, no-store");
-    expect((await response.json()).receptionHandoff).toEqual({ status: "handled", handledReason: payload.reason });
-    expect(state.handoff).toHaveBeenCalledWith(41, { visitId: 41, patientId: 7, signedAt });
+    expect((await response.json()).receptionHandoff).toEqual({ status: "handled", handledReason: null });
+    expect(state.handoff).toHaveBeenCalledWith(41, deskWalkout);
   });
   it("does not expose the action to doctors with existing financial read permission", async () => {
     state.session = { username: "doctor", role: "doctor" };
@@ -111,10 +112,10 @@ describe("walkout includes durable front-desk status", () => {
     expect(state.handoff).not.toHaveBeenCalled();
   });
   it("omits completion for unsigned or concurrently changed identity", async () => {
-    state.walkout.mockResolvedValue({ visitId: 41, patientId: 7, signedAt: null });
+    state.walkout.mockResolvedValue({ ...deskWalkout, signedAt: null });
     expect((await (await get()).json()).receptionHandoff).toBeUndefined();
     expect(state.handoff).not.toHaveBeenCalled();
-    state.walkout.mockResolvedValue({ visitId: 41, patientId: 7, signedAt });
+    state.walkout.mockResolvedValue(deskWalkout);
     state.handoff.mockResolvedValue(null);
     expect((await (await get()).json()).receptionHandoff).toBeUndefined();
   });

@@ -21,6 +21,10 @@ export async function GET(request: Request) {
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const patientId = Number(new URL(request.url).searchParams.get("patientId"));
 
+  if (session.role === "reception" && (!Number.isSafeInteger(patientId) || patientId <= 0)) {
+    return NextResponse.json({ message: "حدّد المريض لعرض اتفاقاته." }, { status: 403 });
+  }
+
   /* صلاحيات الوكيل المساعد: الطبيب بلا صلاحية الخطط ممنوع، ومن يملكها لا يقرأ
      إلا خطط مرضاه (عزل الخادم) — وعموم الخطط تبقى للإدارة والاستقبال. */
   if (session.role === "doctor") {
@@ -57,7 +61,7 @@ export async function GET(request: Request) {
       : canViewMoney(session.role);
     // Finance roles need receivables and installments, not treatment items,
     // tooth codes, clinical notes or patient consent details.
-    const result = isRestrictedRole(session.role) ? plans.map((plan) => ({
+    const result = (isRestrictedRole(session.role) || session.role === "reception") ? plans.map((plan) => ({
       id: plan.id,
       patientId: plan.patientId,
       patientName: plan.patientName,

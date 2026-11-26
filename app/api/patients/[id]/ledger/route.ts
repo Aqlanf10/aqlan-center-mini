@@ -1,3 +1,4 @@
+import { readReceptionPatientAccount } from "@/lib/reception-patient-account";
 import { NextResponse } from "next/server";
 import {
   getSettings, listPatientPlans, patientLedger, patientReceiptRemainders, patientReversedInstallmentRecoveries,
@@ -45,6 +46,22 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   try {
+    if (session.role === "reception") {
+      const [account, settings] = await Promise.all([readReceptionPatientAccount(id), getSettings()]);
+      const openingAccess = openingBalanceAccess(session.role, settings["finance.reception_adds_opening_balance"] === "true");
+      const selectable = new Set(account.targets.invoices.map(item => item.id));
+      return NextResponse.json({
+        openingAccess, openings: account.openings,
+        opening: account.openings.find(row => row.currency === CLINIC_BASE_CURRENCY) ?? null,
+        invoices: account.invoices.filter(item => selectable.has(item.id)).map(item => ({
+          id: item.id, invoiceNumber: item.number, totalMinor: item.netMinor, discountMinor: 0,
+          baseCurrency: item.currency, status: item.status,
+        })),
+        plans: account.targets.plans.map(item => ({
+          id: item.id, title: "اتفاق #" + item.id, baseCurrency: item.currency, status: "active",
+        })),
+      }, { headers: { "Cache-Control": "private, no-store" } });
+    }
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
     const [
       { invoices, payments, openings }, plans, settings, receiptRemaining,

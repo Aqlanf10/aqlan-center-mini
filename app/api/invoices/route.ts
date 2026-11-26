@@ -32,7 +32,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
   }
   try {
-    return NextResponse.json(await listPatientInvoices(patientId));
+    const invoices = await listPatientInvoices(patientId);
+    if (session.role === "reception") {
+      return NextResponse.json(invoices.map(({id, invoiceNumber, patientId, status, totalMinor, discountMinor, baseCurrency, createdAt}) =>
+        ({id, invoiceNumber, patientId, status, totalMinor, discountMinor, baseCurrency, createdAt})));
+    }
+    return NextResponse.json(invoices);
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الفواتير." }, { status: 500 });
   }

@@ -25,7 +25,7 @@ export default async function VoucherPage({ params }: { params: Promise<{ id: st
 
   const [expense, settings] = await Promise.all([getExpense(id), getSettingsSafe()]);
   const printed = await printCount("voucher", id);
-  if (!expense) notFound();
+  if (!expense || (session.role === "reception" && expense.createdBy !== session.username)) notFound();
 
   // (TD-05) الأساس دستوري من الكود.
   const base = CLINIC_BASE_CURRENCY;

@@ -2,7 +2,7 @@
  * No DOM, real HTTP, DB or writer is invoked. */
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import FinancePage from "../app/finance/page";
+import FinancePage from "./helpers/render-finance-workspace";
 import { FinanceKpis } from "../components/finance/FinanceKpis";
 import { ReceivablesLabsTab } from "../components/finance/ReceivablesLabsTab";
 import type { SessionInfo } from "../components/SessionProvider";
@@ -169,7 +169,12 @@ describe("actual finance page canonical lab read lifecycle", () => {
   });
   it.each(["doctor", "reception", "accountant", "cashier", "assistant", "logout"])("does not fetch privileged lab balances for %s, or retain them after downgrade", async (role) => {
     await ready(); runtime.session = role === "logout" ? null : { username: "restricted", role, permissions: { ...DEFAULT_DOCTOR_PERMISSIONS, canViewCostPrices: true } };
-    render(); await ready(); expect(state()).toEqual({ phase: "unavailable", data: null }); expect(balances()).toHaveLength(1);
+    render(); await ready(); expect(balances()).toHaveLength(1);
+    if (role === "reception" || role === "logout") {
+      expect(nodes(render()).some(node => node.type === FinanceKpis || node.type === ReceivablesLabsTab)).toBe(false);
+      return;
+    }
+    expect(state()).toEqual({ phase: "unavailable", data: null });
     expect(labs().labBalanceState).toEqual({ phase: "unavailable", data: null });
   });
   it("aborts and ignores a late canonical completion after page unmount", async () => {

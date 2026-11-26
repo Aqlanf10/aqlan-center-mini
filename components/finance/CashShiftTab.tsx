@@ -70,7 +70,7 @@ export interface PartyItem {
   id: number;
   name: string;
   kind: PartyKind;
-  commissionPercent: number;
+  commissionPercent?: number;
   isActive: boolean;
 }
 
@@ -161,17 +161,6 @@ export function CashShiftTab({
   const [differenceReason, setDifferenceReason] = useState("");
   const [reasonNeeded, setReasonNeeded] = useState(false);
   const [closeNote, setCloseNote] = useState("");
-
-  const [expenseForm, setExpenseForm] = useState({
-    category: "lab" as ExpenseCategory,
-    partyId: "",
-    payee: "",
-    amount: "",
-    currency: baseCurrency,
-    note: "",
-    prepayment: false,
-    prepaymentReason: "",
-  });
 
   // تصفية حركات الصندوق
   const [txFilter, setTxFilter] = useState<"all" | "payments" | "expenses">("all");
@@ -409,159 +398,8 @@ export function CashShiftTab({
 
           {/* نموذج تسجيل سند صرف نثري جديد */}
           {canExpense && spending ? (
-            <div className="mt-4 rounded-2xl border-2 border-rose-300 bg-rose-50/40 p-4">
-              <h4 className="mb-3 text-xs font-black text-rose-900">
-                تسجيل سند صرف نثري جديد من الصندوق
-              </h4>
-              <div className="grid gap-2.5 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-[11px] font-bold text-slate-600">بند المصروف</span>
-                  <select
-                    value={expenseForm.category}
-                    onChange={(e) =>
-                      setExpenseForm((curr) => ({
-                        ...curr,
-                        category: e.target.value as ExpenseCategory,
-                      }))
-                    }
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold"
-                  >
-                    {EXPENSE_CATEGORIES.map((cat) => (
-                      <option key={cat} value={cat}>
-                        {EXPENSE_CATEGORY_LABEL[cat] || cat}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="block">
-                  <span className="mb-1 block text-[11px] font-bold text-slate-600">
-                    الجهة أو المورد المستفيد
-                  </span>
-                  <select
-                    value={expenseForm.partyId}
-                    onChange={(e) => {
-                      const party = parties.find((p) => String(p.id) === e.target.value);
-                      setExpenseForm((curr) => ({
-                        ...curr,
-                        partyId: e.target.value,
-                        category: party ? categoryForParty(party.kind) : curr.category,
-                      }));
-                    }}
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold"
-                  >
-                    <option value="">— جهة غير مسجلة / مستفيد مباشر —</option>
-                    {parties
-                      .filter((p) => p.isActive)
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-              </div>
-
-              {!expenseForm.partyId ? (
-                <div className="mt-2.5">
-                  <input
-                    value={expenseForm.payee}
-                    onChange={(e) => setExpenseForm((curr) => ({ ...curr, payee: e.target.value }))}
-                    placeholder="اسم المستفيد المباشر"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
-                  />
-                </div>
-              ) : null}
-
-              <div className="mt-2.5 flex flex-wrap gap-2">
-                <input
-                  value={expenseForm.amount}
-                  onChange={(e) => setExpenseForm((curr) => ({ ...curr, amount: e.target.value }))}
-                  placeholder="المبلغ"
-                  inputMode="decimal"
-                  dir="ltr"
-                  className="min-w-[7rem] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-mono font-bold"
-                />
-                <select
-                  value={expenseForm.currency}
-                  onChange={(e) =>
-                    setExpenseForm((curr) => ({ ...curr, currency: e.target.value as Currency }))
-                  }
-                  className="w-32 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold"
-                >
-                  {CURRENCIES.map((c) => (
-                    <option key={c} value={c}>
-                      {CURRENCY_LABEL[c]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="mt-2.5">
-                <input
-                  value={expenseForm.note}
-                  onChange={(e) => setExpenseForm((curr) => ({ ...curr, note: e.target.value }))}
-                  placeholder="البيان ومبرر الصرف بالتفصيل"
-                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
-                />
-              </div>
-
-              {/* (P0-2) الصرف لمورد/مختبر لا يتجاوز رصيده المستحق؛ الزيادة «دفعة مقدمة»
-                  يعلّمها المدير بسببٍ مكتوب يُحفظ في السند ويُدقَّق. */}
-              {isAdmin && expenseForm.partyId ? (
-                <div className="mt-2.5 rounded-xl border border-amber-200 bg-amber-50/60 p-2">
-                  <label className="flex items-center gap-2 text-[11px] font-bold text-amber-900">
-                    <input
-                      type="checkbox"
-                      checked={expenseForm.prepayment}
-                      onChange={(e) => setExpenseForm((curr) => ({ ...curr, prepayment: e.target.checked }))}
-                    />
-                    دفعة مقدمة / مشتريات بلا فاتورة مسجّلة (تتجاوز رصيد الجهة المستحق)
-                  </label>
-                  {expenseForm.prepayment ? (
-                    <input
-                      value={expenseForm.prepaymentReason}
-                      onChange={(e) => setExpenseForm((curr) => ({ ...curr, prepaymentReason: e.target.value }))}
-                      placeholder="سبب الدفعة المقدمة (إلزامي)"
-                      aria-label="سبب الدفعة المقدمة"
-                      className="mt-1.5 w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs"
-                    />
-                  ) : null}
-                </div>
-              ) : null}
-
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    // يُفرَّغ النموذج بعد النجاح فقط — الرفض (مثل تجاوز الرصيد) يُبقي ما كُتب.
-                    const created = await onCreateExpense(expenseForm);
-                    if (created === undefined) return;
-                    setExpenseForm({
-                      category: "lab",
-                      partyId: "",
-                      payee: "",
-                      amount: "",
-                      currency: baseCurrency,
-                      note: "",
-                      prepayment: false,
-                      prepaymentReason: "",
-                    });
-                  }}
-                  disabled={busy || !expenseForm.amount.trim()}
-                  className="flex-1 rounded-xl bg-rose-700 py-2.5 text-xs font-black text-white hover:bg-rose-800 disabled:opacity-50"
-                >
-                  {busy ? "جارٍ الصرف…" : "سجّل الصرف واطبع السند 🖨️"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSpending(false)}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100"
-                >
-                  إلغاء
-                </button>
-              </div>
-            </div>
+            <ShiftExpenseForm parties={parties} baseCurrency={baseCurrency} isAdmin={isAdmin}
+              busy={busy} onCreateExpense={onCreateExpense} onCancel={() => setSpending(false)} />
           ) : null}
 
           {/* نموذج جرد وإغلاق الوردية */}
@@ -884,5 +722,176 @@ export function CashShiftTab({
         </section>
       ) : null}
     </div>
+  );
+}
+
+
+export function ShiftExpenseForm({ parties, baseCurrency, isAdmin, busy, onCreateExpense, onCancel }:
+  Pick<CashShiftTabProps, "parties" | "baseCurrency" | "isAdmin" | "busy" | "onCreateExpense"> & { onCancel: () => void }) {
+  const [expenseForm, setExpenseForm] = useState({
+    category: "lab" as ExpenseCategory,
+    partyId: "",
+    payee: "",
+    amount: "",
+    currency: baseCurrency,
+    note: "",
+    prepayment: false,
+    prepaymentReason: "",
+  });
+
+  return (
+    <div className="mt-4 rounded-2xl border-2 border-rose-300 bg-rose-50/40 p-4">
+              <h4 className="mb-3 text-xs font-black text-rose-900">
+                تسجيل سند صرف نثري جديد من الصندوق
+              </h4>
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-bold text-slate-600">بند المصروف</span>
+                  <select
+                    value={expenseForm.category}
+                    onChange={(e) =>
+                      setExpenseForm((curr) => ({
+                        ...curr,
+                        category: e.target.value as ExpenseCategory,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold"
+                  >
+                    {EXPENSE_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {EXPENSE_CATEGORY_LABEL[cat] || cat}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-bold text-slate-600">
+                    الجهة أو المورد المستفيد
+                  </span>
+                  <select
+                    value={expenseForm.partyId}
+                    onChange={(e) => {
+                      const party = parties.find((p) => String(p.id) === e.target.value);
+                      setExpenseForm((curr) => ({
+                        ...curr,
+                        partyId: e.target.value,
+                        category: party ? categoryForParty(party.kind) : curr.category,
+                      }));
+                    }}
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold"
+                  >
+                    <option value="">— جهة غير مسجلة / مستفيد مباشر —</option>
+                    {parties
+                      .filter((p) => p.isActive)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+
+              {!expenseForm.partyId ? (
+                <div className="mt-2.5">
+                  <input
+                    value={expenseForm.payee}
+                    onChange={(e) => setExpenseForm((curr) => ({ ...curr, payee: e.target.value }))}
+                    placeholder="اسم المستفيد المباشر"
+                    className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+                  />
+                </div>
+              ) : null}
+
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                <input
+                  value={expenseForm.amount}
+                  onChange={(e) => setExpenseForm((curr) => ({ ...curr, amount: e.target.value }))}
+                  placeholder="المبلغ"
+                  inputMode="decimal"
+                  dir="ltr"
+                  className="min-w-[7rem] flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-mono font-bold"
+                />
+                <select
+                  value={expenseForm.currency}
+                  onChange={(e) =>
+                    setExpenseForm((curr) => ({ ...curr, currency: e.target.value as Currency }))
+                  }
+                  className="w-32 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold"
+                >
+                  {CURRENCIES.map((c) => (
+                    <option key={c} value={c}>
+                      {CURRENCY_LABEL[c]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="mt-2.5">
+                <input
+                  value={expenseForm.note}
+                  onChange={(e) => setExpenseForm((curr) => ({ ...curr, note: e.target.value }))}
+                  placeholder="البيان ومبرر الصرف بالتفصيل"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs"
+                />
+              </div>
+
+              {/* (P0-2) الصرف لمورد/مختبر لا يتجاوز رصيده المستحق؛ الزيادة «دفعة مقدمة»
+                  يعلّمها المدير بسببٍ مكتوب يُحفظ في السند ويُدقَّق. */}
+              {isAdmin && expenseForm.partyId ? (
+                <div className="mt-2.5 rounded-xl border border-amber-200 bg-amber-50/60 p-2">
+                  <label className="flex items-center gap-2 text-[11px] font-bold text-amber-900">
+                    <input
+                      type="checkbox"
+                      checked={expenseForm.prepayment}
+                      onChange={(e) => setExpenseForm((curr) => ({ ...curr, prepayment: e.target.checked }))}
+                    />
+                    دفعة مقدمة / مشتريات بلا فاتورة مسجّلة (تتجاوز رصيد الجهة المستحق)
+                  </label>
+                  {expenseForm.prepayment ? (
+                    <input
+                      value={expenseForm.prepaymentReason}
+                      onChange={(e) => setExpenseForm((curr) => ({ ...curr, prepaymentReason: e.target.value }))}
+                      placeholder="سبب الدفعة المقدمة (إلزامي)"
+                      aria-label="سبب الدفعة المقدمة"
+                      className="mt-1.5 w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-xs"
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    // يُفرَّغ النموذج بعد النجاح فقط — الرفض (مثل تجاوز الرصيد) يُبقي ما كُتب.
+                    const created = await onCreateExpense(expenseForm);
+                    if (created === undefined) return;
+                    setExpenseForm({
+                      category: "lab",
+                      partyId: "",
+                      payee: "",
+                      amount: "",
+                      currency: baseCurrency,
+                      note: "",
+                      prepayment: false,
+                      prepaymentReason: "",
+                    });
+                  }}
+                  disabled={busy || !expenseForm.amount.trim()}
+                  className="flex-1 rounded-xl bg-rose-700 py-2.5 text-xs font-black text-white hover:bg-rose-800 disabled:opacity-50"
+                >
+                  {busy ? "جارٍ الصرف…" : "سجّل الصرف واطبع السند 🖨️"}
+                </button>
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
   );
 }

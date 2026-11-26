@@ -4,6 +4,8 @@ import { clinicDateString } from "@/lib/schedule";
 import { readVisitCheckout } from "@/lib/checkout-db";
 import { authorizeVisit } from "@/lib/operational-access";
 import { requireSession } from "@/lib/session";
+import { patientAppointmentId } from "@/lib/patient-appointments-contract";
+import { walkoutNeedsReview } from "@/lib/walkout-presentation";
 import { canSeeWalkout } from "@/lib/walkout-access";
 import { canReadReceptionHandoff } from "@/lib/reception-handoff";
 import { readReceptionHandoff } from "@/lib/reception-handoff-db";
@@ -26,6 +28,11 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const allowed = await authorizeVisit(session, id);
   if (!allowed.ok) return NextResponse.json({ message: allowed.message }, { status: allowed.status });
+  const patientRef = new URL(_request.url).searchParams.getAll("patientId");
+  if (patientRef.length > 0 && (patientRef.length !== 1 || patientAppointmentId(patientRef[0]) !== allowed.patientId
+    || allowed.patientId === null)) {
+    return NextResponse.json({ message: "الزيارة غير متاحة لهذا المريض." }, { status: 404, headers: { "Cache-Control": "private, no-store" } });
+  }
   try {
     const owner = await getVisitOwner(id);
     if (!(await canSeeWalkout(session, owner.patientId))) {
@@ -43,6 +50,21 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
       && clinicDateString(new Date(walkout.signedAt), CLINIC_TIME_ZONE) === today;
     const handoff = canReadReceptionHandoff(session.role) && walkout.signedAt
       ? await readReceptionHandoff(id, walkout) : null;
+    if (session.role === "reception") {
+      // The checkout UI also reads the review verdict: redact the underlying
+      // clinical lines only after deriving the verdict from the real snapshot.
+      const { visitId, patientId, patientName, arrivedAt, signedAt, deferred, invoice, balances, nextAppointment } = walkout;
+      return NextResponse.json({
+        visitId, patientId, patientName, arrivedAt, signedAt, signedToday, deferred,
+        financialReviewRequired: walkoutNeedsReview(walkout), lines: [], orthoAdjustment: null,
+        invoice: invoice && { id: invoice.id, currency: invoice.currency, netMinor: invoice.netMinor, number: invoice.number },
+        balances: balances.map(({ currency, balanceMinor }) => ({ currency, balanceMinor })),
+        nextAppointment: nextAppointment && { date: nextAppointment.date, time: nextAppointment.time },
+        checkout: { previous: walkout.checkout.previous, current: walkout.checkout.current, invoicePaidMinor: walkout.checkout.invoicePaidMinor },
+        summary, dueRecommendation,
+        ...(handoff ? { receptionHandoff: { status: handoff.status, handledReason: null } } : {}),
+      }, { headers: { "Cache-Control": "private, no-store" } });
+    }
     return NextResponse.json({ ...walkout, summary, dueRecommendation, signedToday,
       ...(handoff ? { receptionHandoff: { status: handoff.status, handledReason: handoff.handledReason } } : {}),
     }, { headers: { "Cache-Control": "private, no-store" } });

@@ -290,6 +290,17 @@ async function restrictedRoleVerdict(request: NextRequest, bearer: string | null
   const access = (cookieToken ? await verifiedSessionAccess(cookieToken) : null)
     ?? (bearer ? await verifiedSessionAccess(bearer) : null);
   const role = access?.role;
+  if (role === "reception") {
+    const clinicFinance = /^\/api\/(?:accounting|executive|reports|export|payables|finance\/(?:report|commissions|commission-overrides|debts|lab-accounting|lab-reconciliation|reconciliation)|lab\/pricing)(?:\/|$)/.test(pathname);
+    const dailyTransactions = /^\/api\/(?:payments|expenses)\/?$/.test(pathname) && ["GET", "HEAD"].includes(request.method);
+    const clinicalMedia = /^\/api\/(?:ortho|ceph|patients\/[^/]+\/(?:photo|ceph|historical-documents))(?:\/|$)/.test(pathname);
+    if (clinicFinance || dailyTransactions || clinicalMedia) {
+      return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+    }
+    if (/^\/(?:finance\/(?:plans|debts|lab-accounting|reports|reconciliation|accounting|commissions|fx)|reports|executive|ortho|ceph|print\/(?:shift|report|party|commission-statement|dossier|ceph|ceph-compare))(?:\/|$)/.test(pathname)) {
+      return NextResponse.redirect(new URL("/patients", request.url));
+    }
+  }
   if (!isGatedRole(role) || restrictedRouteAllowed(role, pathname, request.method, access?.financeAccess)) return null;
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403 });
