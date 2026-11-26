@@ -63,6 +63,26 @@ describe("OpenAI Responses transport (synthetic, no network)", () => {
     const result = await getProviderAdapter("openai-responses").testConnection(config(), fetchImpl);
     expect(result.ok).toBe(false);
   });
+  it("normalizes case-insensitive transport headers without losing allowed custom headers", async () => {
+    const { calls, fetchImpl } = mock(completed);
+    const result = await getProviderAdapter("openai-responses").chat({
+      messages: [{ role: "user", content: "synthetic" }], fetchImpl,
+    }, {
+      ...config(), organizationId: "synthetic-config-org",
+      customHeaders: {
+        "content-type": "text/plain",
+        "openai-organization": "synthetic-conflict-org",
+        "x-trace-id": "synthetic-trace",
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    const headers = new Headers(calls[0].init.headers);
+    expect(headers.get("content-type")).toBe("application/json");
+    expect(headers.get("openai-organization")).toBe("synthetic-config-org");
+    expect(headers.get("authorization")).toBe("Bearer synthetic-test-key-not-real");
+    expect(headers.get("x-trace-id")).toBe("synthetic-trace");
+  });
   it("does not report success for an HTTP rejection", async () => {
     const { fetchImpl } = mock({ error: { message: "invalid key" } }, 401);
     expect((await getProviderAdapter("openai-responses").testConnection(config(), fetchImpl)).ok).toBe(false);
