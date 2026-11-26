@@ -84,7 +84,7 @@ export default function AiSettingsPage() {
       setFormName(preset.name);
       setFormProtocol(preset.protocolType);
       setFormBaseUrl(preset.baseUrl);
-      setFormEndpoint(preset.protocolType === "anthropic-compatible" ? "/v1/messages" : "/chat/completions");
+      setFormEndpoint(preset.protocolType === "openai-responses" ? "/responses" : preset.protocolType === "anthropic-compatible" ? "/v1/messages" : "/chat/completions");
       setFormModel(preset.defaultModel);
       setFormModelsText(preset.suggestedModels.join(", "));
     } else {
@@ -649,7 +649,16 @@ export default function AiSettingsPage() {
                   <label className="block font-bold text-slate-700 mb-1">نوع البروتوكول (Adapter) *</label>
                   <select
                     value={formProtocol}
-                    onChange={(e) => setFormProtocol(e.target.value as AiProtocolType)}
+                    onChange={(e) => {
+                      const next = e.target.value as AiProtocolType;
+                      // Switching the OpenAI wire protocol must not retain the other protocol's standard path.
+                      if (next === "openai-responses" && (!formEndpoint.trim() || formEndpoint.trim() === "/chat/completions")) {
+                        setFormEndpoint("/responses");
+                      } else if (next === "openai-compatible" && (!formEndpoint.trim() || formEndpoint.trim() === "/responses")) {
+                        setFormEndpoint("/chat/completions");
+                      }
+                      setFormProtocol(next);
+                    }}
                     className="w-full rounded-xl border border-slate-200 p-2.5 text-xs outline-none focus:border-brand-blue font-bold"
                   >
                     {Object.entries(AI_PROTOCOL_LABELS).map(([k, label]) => (
@@ -680,7 +689,7 @@ export default function AiSettingsPage() {
                     type="text"
                     value={formEndpoint}
                     onChange={(e) => setFormEndpoint(e.target.value)}
-                    placeholder="افتراضي: /chat/completions"
+                    placeholder={formProtocol === "openai-responses" ? "افتراضي: /responses" : "افتراضي: /chat/completions"}
                     className="w-full rounded-xl border border-slate-200 p-2.5 text-xs outline-none focus:border-brand-blue font-mono"
                   />
                 </div>
