@@ -347,6 +347,10 @@ export async function saveAiProvider(
        is_default = EXCLUDED.is_default,
        priority = EXCLUDED.priority,
        task_models = EXCLUDED.task_models,
+       last_test_at = NULL,
+       last_test_ok = NULL,
+       last_test_message = NULL,
+       last_test_latency = NULL,
        updated_by = EXCLUDED.updated_by,
        updated_at = NOW()
      RETURNING *`,
@@ -502,8 +506,16 @@ export async function testAiProviderConnection(
            last_test_ok = $1,
            last_test_message = $2,
            last_test_latency = $3
-       WHERE id = $4 AND api_key_enc IS NOT DISTINCT FROM $5`,
-      [outcome.ok, outcome.message, outcome.latencyMs, id, provider.apiKeyEnc],
+       WHERE id = $4 AND api_key_enc IS NOT DISTINCT FROM $5
+         AND protocol_type = $6 AND base_url = $7 AND model = $8
+         AND api_endpoint IS NOT DISTINCT FROM $9
+         AND organization_id IS NOT DISTINCT FROM $10
+         AND COALESCE(custom_headers::jsonb, '{}'::jsonb) = $11::jsonb
+         AND timeout_ms = $12 AND max_tokens = $13 AND temperature = $14`,
+      [outcome.ok, outcome.message, outcome.latencyMs, id, provider.apiKeyEnc,
+        provider.protocolType, provider.baseUrl, provider.model, provider.apiEndpoint ?? null,
+        provider.organizationId ?? null, JSON.stringify(provider.customHeaders ?? {}),
+        provider.timeoutMs, provider.maxTokens, provider.temperature],
     );
   }
 
