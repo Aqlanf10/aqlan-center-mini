@@ -211,6 +211,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role === "reception") return NextResponse.json({ message: "الملف السريري مخصّص للفريق المعالج." }, { status: 403 });
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);

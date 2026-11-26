@@ -65,7 +65,10 @@ vi.mock("react", async (original) => {
   };
 });
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("../components/SessionProvider", () => ({ useSession: () => ({ role: "doctor", username: hooks.username, permissions: { canEditPlans: hooks.canEditPlans } }) }));
+vi.mock("../components/SessionProvider", () => {
+  const useSession = () => ({ role: "doctor", username: hooks.username, permissions: { canEditPlans: hooks.canEditPlans } });
+  return { useSession, useSessionActions: () => ({ session: useSession(), ready: true }) };
+});
 vi.mock("../components/SettingsProvider", () => ({ useSetting: () => "" }));
 vi.mock("../components/PatientLedger", () => ({ PatientLedger: () => null }));
 vi.mock("../components/LegacyHistory", () => ({ LegacyHistory: () => null }));

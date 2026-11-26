@@ -16,7 +16,7 @@ const runtime = vi.hoisted(() => ({
 // Stub leaf workspaces so this suite exercises the real page owner without
 // mounting unrelated clinical readers. The assessment banner remains real.
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("@/components/SessionProvider", () => ({ useSession: () => runtime.session }));
+vi.mock("@/components/SessionProvider", () => ({ useSession: () => runtime.session, useSessionActions: () => ({ session: runtime.session, ready: true }) }));
 vi.mock("@/components/SettingsProvider", () => ({ useSetting: () => "" }));
 vi.mock("@/components/PatientLedger", () => ({ PatientLedger: "mock-ledger" }));
 vi.mock("@/components/LegacyHistory", () => ({ LegacyHistory: "mock-history" }));

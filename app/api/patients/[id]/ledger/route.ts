@@ -47,11 +47,13 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   try {
     if (session.role === "reception") {
-      const [account, settings] = await Promise.all([readReceptionPatientAccount(id), getSettings()]);
+      const [account, settings, installmentRecovery] = await Promise.all([
+        readReceptionPatientAccount(id), getSettings(), patientReversedInstallmentRecoveries(id),
+      ]);
       const openingAccess = openingBalanceAccess(session.role, settings["finance.reception_adds_opening_balance"] === "true");
       const selectable = new Set(account.targets.invoices.map(item => item.id));
       return NextResponse.json({
-        openingAccess, openings: account.openings,
+        clinicTimeZone: CLINIC_TIME_ZONE, installmentRecovery, openingAccess, openings: account.openings,
         opening: account.openings.find(row => row.currency === CLINIC_BASE_CURRENCY) ?? null,
         invoices: account.invoices.filter(item => selectable.has(item.id)).map(item => ({
           id: item.id, invoiceNumber: item.number, totalMinor: item.netMinor, discountMinor: 0,

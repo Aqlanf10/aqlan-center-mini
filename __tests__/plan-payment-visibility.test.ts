@@ -126,8 +126,8 @@ for (const route of ["generic", "patient"] as const) {
       expect((await get(route)).status).toBe(401);
       expect(mocks.plans).not.toHaveBeenCalled();
     });
-    it.each(["admin", "reception"])("preserves the %s financial and clinical response", async (role) => {
-      mocks.session.mockResolvedValue({ role });
+    it("preserves the admin financial and clinical response", async () => {
+      mocks.session.mockResolvedValue({ role: "admin" });
       const response = await get(route);
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ plans: [plan], canSeeFinancial: true });
@@ -148,7 +148,12 @@ it("generic plans still honor clinical plan denial and reject an unscoped doctor
   mocks.user.mockResolvedValue(doctor());
   expect((await genericGet(new Request("http://localhost/api/plans"))).status).toBe(403);
 });
-it.each(["cashier", "accountant"])("keeps %s financial-only projection and no patient-file access", async (role) => {
+it("refuses an unscoped reception plan list before reading plans", async () => {
+  mocks.session.mockResolvedValue({ role: "reception" });
+  expect((await genericGet(new Request("http://localhost/api/plans"))).status).toBe(403);
+  expect(mocks.active).not.toHaveBeenCalled();
+});
+it.each(["cashier", "accountant", "reception"])("keeps %s financial-only projection and no patient-file access", async (role) => {
   mocks.session.mockResolvedValue({ role });
   const response = await get("generic");
   expect(response.status).toBe(200);
