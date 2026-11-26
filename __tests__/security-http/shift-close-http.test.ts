@@ -7,7 +7,7 @@ import { authedMutation, baseUrl, harness } from "./_server";
  *
  * الجرد الأعمى: الخادم يحسب المتوقَّع لحظة الإقفال، فإن خالفه المعدود رفض برسالةٍ
  * عربية تكشف الفرق وتطلب سببه؛ ومع السبب يُقفَل ويُدقَّق بالمتوقَّع والفرق والسبب.
- * وتقرير الإقفال (Z) يُطبع للإدارة والاستقبال ولا يُفتح للطبيب.
+ * وتقرير الإقفال (Z) منفصل عن تشغيل الوردية: يُطبع للإدارة والكاشير والمحاسب فقط.
  */
 
 let h: Awaited<ReturnType<typeof harness>>;
@@ -76,13 +76,17 @@ describe("إقفال الوردية — جردٌ أعمى وفرقٌ لا يُق
     expect((audit.details["الفرق"] as Record<string, number>).YER).toBe(777);
   });
 
-  it("تقرير الإقفال (Z) يُطبع للاستقبال ولا يُفتح للطبيب", async () => {
-    const ok = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions.reception.cookie } });
+  it.each(["admin", "cashier", "accountant"] as const)("تقرير الإقفال (Z) يُطبع لدور %s", async (role) => {
+    const ok = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions[role].cookie } });
     expect(ok.status).toBe(200);
     const html = await ok.text();
     expect(html).toContain("تقرير إقفال الوردية");
     expect(html).toContain("مبلغ زائد تركه مريض");
-    const denied = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions.doctorA.cookie } });
+  });
+
+  it.each(["reception", "doctorA"] as const)("تقرير الإقفال (Z) لا يُفتح لدور %s", async (role) => {
+    const denied = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions[role].cookie } });
     expect(denied.status).toBe(404);
+    expect(await denied.text()).not.toContain("مبلغ زائد تركه مريض");
   });
 });
