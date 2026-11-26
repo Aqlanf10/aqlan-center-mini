@@ -450,14 +450,17 @@ export class OpenAiResponsesAdapter implements AIProviderAdapter {
         signal: AbortSignal.timeout(options.timeoutMs ?? config.timeoutMs ?? 30000),
       });
       const payload = await response.json().catch(() => null) as {
-        status?: string; model?: string; error?: { message?: string };
+        status?: string; model?: string; error?: { message?: string }; incomplete_details?: unknown;
         output?: Array<{ type?: string; role?: string; status?: string; content?: Array<{ type?: string; text?: string }> }>;
       } | null;
       if (!response.ok) {
         const detail = sanitizeProviderDetail(payload?.error?.message);
         return fail(`رفض OpenAI: ${providerFailureCategory(response.status)}${detail ? ` — ${detail}` : ""}`);
       }
-      if (payload?.status !== "completed" || payload.error) return fail("لم يكتمل رد OpenAI.");
+      // A completed status must not contradict an explicit error or incomplete-details record.
+      if (payload?.status !== "completed" || payload.error != null || payload.incomplete_details != null) {
+        return fail("لم يكتمل رد OpenAI.");
+      }
       const messages = (Array.isArray(payload.output) ? payload.output : [])
         .filter((item) => item?.type === "message" && item.role === "assistant");
       // A refusal or incomplete assistant message must not be hidden by a separate READY text part.
