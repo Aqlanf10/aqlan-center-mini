@@ -18,8 +18,8 @@ let h: Awaited<ReturnType<typeof harness>>;
 let db: Client;
 let doctorPartyId = 0;
 const stamp = Date.now();
-const services: Record<"rct" | "bridge" | "filling" | "ortho" | "consultation", number> = {
-  rct: 0, bridge: 0, filling: 0, ortho: 0, consultation: 0,
+const services: Record<"rct" | "bridge" | "crown" | "filling" | "ortho" | "consultation", number> = {
+  rct: 0, bridge: 0, crown: 0, filling: 0, ortho: 0, consultation: 0,
 };
 const SHOTS = "/tmp/claude-0/shots";
 
@@ -29,7 +29,7 @@ beforeAll(async () => {
   await db.connect();
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
   ({ rows: [{ party_id: doctorPartyId }] } = await db.query<{ party_id: number }>(`SELECT party_id FROM users WHERE username = 'secdoctora'`));
-  const prices = { rct: 6000000, bridge: 9000000, filling: 1500000, ortho: 30000000, consultation: 300000 };
+  const prices = { rct: 6000000, bridge: 9000000, crown: 1000, filling: 1500000, ortho: 30000000, consultation: 300000 };
   for (const category of Object.keys(services) as (keyof typeof services)[]) {
     ({ rows: [{ id: services[category] }] } = await db.query<{ id: number }>(
       `INSERT INTO services (name, price_minor, is_active, price_configured, category) VALUES ($1, $2, TRUE, TRUE, $3) RETURNING id`,
@@ -310,6 +310,64 @@ describe("INV-LINK TOOTH — invoice tooth selection through the shared dental c
       .toEqual([36, 46].map(tooth_code => ({ quantity: 1, unit_price_minor: "6000000", doctor_id: doctorPartyId, tooth_code })));
     expect(await cases(patientId)).toEqual([{ specialty: "endodontics", site: "36" }, { specialty: "endodontics", site: "46" }]);
     await context.close();
+  });
+
+  it("shows the grouped lab limit before saving separate crowns across arches", async () => {
+    const patientId = await newPatient("lab-limit");
+    const { context, page } = await openInvoice(patientId);
+    try {
+      await chooseService(page, services.crown);
+      await pickTeeth(page, 0, [14, 46]);
+      await confirm(page);
+      const guidance = page.getByTestId("invoice-lab-group-guidance");
+      await guidance.waitFor({ state: "visible" });
+      expect(await guidance.innerText()).toContain("إنشاء طلب مختبر واحد لها من الفاتورة غير متاح حاليًا");
+      const counts = async () => (await db.query(`SELECT
+        (SELECT count(*)::int FROM invoices WHERE patient_id=$1) AS invoices,
+        (SELECT count(*)::int FROM visits WHERE patient_id=$1) AS visits,
+        (SELECT count(*)::int FROM lab_orders WHERE patient_id=$1) AS orders`, [patientId])).rows[0];
+      expect(await counts()).toEqual({ invoices: 0, visits: 0, orders: 0 });
+      await page.getByTestId("invoice-provider-0").selectOption(String(doctorPartyId));
+      await save(page);
+      expect(await counts()).toEqual({ invoices: 1, visits: 0, orders: 0 });
+      expect((await planItems(patientId)).map(row => row.tooth_code)).toEqual([14, 46]);
+    } finally {
+      await context.close();
+    }
+  });
+
+  it("shows the grouped lab limit in the unsigned visit and preserves its diagnosis after refusal", async () => {
+    const patientId = await newPatient("visit-lab-limit");
+    const { rows: [visit] } = await db.query(
+      "INSERT INTO visits (patient_name, patient_id, doctor_id, status) VALUES ($1,$2,$3,'waiting') RETURNING id",
+      ["Synthetic grouped lab visit", patientId, doctorPartyId]);
+    const context = await browser.newContext({ locale: "ar-YE" });
+    try {
+      const [name, ...value] = h.sessions.doctorA.cookie.split("=");
+      await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
+      const url = `${baseUrl}/api/visits/${visit.id}/clinical`;
+      const post = (data: Record<string, unknown>) => context.request.post(url, { headers: { Origin: baseUrl }, data });
+      const diagnosis = "Synthetic saved diagnosis";
+      const draft = await post({ diagnosis, doctorId: doctorPartyId, billingCurrency: "YER",
+        procedures: [14, 46].map(toothCode => ({ serviceId: services.crown, doctorId: doctorPartyId,
+          toothCode, quantity: 1, unitPriceMinor: 1000 })) });
+      expect(draft.status()).toBe(200);
+      const page = await context.newPage();
+      await page.goto(`${baseUrl}/visits/${visit.id}`);
+      const guidance = page.getByTestId("clinical-lab-sign-guidance");
+      await guidance.waitFor({ state: "visible" });
+      expect(await guidance.innerText()).toContain("إنشاء طلب مختبر واحد لهذه الأسنان من الزيارة غير متاح حاليًا");
+      const refusal = await post({ action: "prepare_lab_dispatch", patientId });
+      expect(refusal.status()).toBe(409);
+      expect((await refusal.json()).code).toBe("lab_work_unavailable");
+      await page.reload();
+      await guidance.waitFor({ state: "visible" });
+      expect(await page.locator('#visit-notes label:has(> span:text-is("② التشخيص")) > textarea').inputValue()).toBe(diagnosis);
+      expect((await db.query("SELECT diagnosis, signed_at FROM visits WHERE id=$1", [visit.id])).rows)
+        .toEqual([{ diagnosis, signed_at: null }]);
+    } finally {
+      await context.close();
+    }
   });
 
   it("bridge: 14, 15, 16 on the chart ⇒ one quantity-three group, three saved tooth lines carrying the episode, one case", async () => {
