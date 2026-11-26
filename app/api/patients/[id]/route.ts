@@ -58,6 +58,18 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const id = readId(rawId);
   if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
 
+  // The appointment projection has its own bounded authorization. The full-file
+  // representation is clinical: only authorized doctors and administration.
+  // Refuse all other roles (including today's assistant) before any DB access.
+  // Financial collection remains available through separate patient-scoped APIs.
+  const projectionRequested = new URL(_request.url).searchParams.has("projection");
+  if (!projectionRequested && session.role !== "admin" && session.role !== "doctor") {
+    return NextResponse.json(
+      { message: "الملف السريري الكامل متاح فقط للطبيب المخوّل والإدارة؛ استخدم واجهات المواعيد أو التحصيل المصرّح بها." },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
+
   const blocked = await doctorBlocked(id);
   if (blocked) {
     return NextResponse.json({ message: blocked }, { status: blocked.includes("جلسة") ? 401 : 403 });
@@ -65,14 +77,14 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   // The existing patient authorization runs first. This explicit, bounded read mode
   // never invokes the full patient/financial file and does not change ordinary GET.
-  if (new URL(_request.url).searchParams.has("projection")) {
+  if (projectionRequested) {
     return patientAppointmentsResponse(_request, session, rawId);
   }
 
   try {
     const file = await getPatientFile(id);
     if (!file) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
-    return NextResponse.json(file);
+    return NextResponse.json(file, { headers: { "Cache-Control": "private, no-store" } });
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل ملف المريض." }, { status: 500 });
   }
