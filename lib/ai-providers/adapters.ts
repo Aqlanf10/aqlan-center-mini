@@ -462,8 +462,9 @@ export class OpenAiResponsesAdapter implements AIProviderAdapter {
         .filter((item) => item?.type === "message" && item.role === "assistant");
       // A refusal or incomplete assistant message must not be hidden by a separate READY text part.
       if (messages.some((item) => item.status !== "completed"
-        || (Array.isArray(item.content) && item.content.some((part) => part?.type === "refusal")))) {
-        return fail("تضمن رد OpenAI رفضًا أو رسالة غير مكتملة.");
+        || !Array.isArray(item.content) || item.content.length === 0
+        || item.content.some((part) => part?.type !== "output_text" || typeof part.text !== "string"))) {
+        return fail("تضمن رد OpenAI رفضًا أو رسالة غير مكتملة أو غير صالحة.");
       }
       const content = messages
         .flatMap((item) => Array.isArray(item.content) ? item.content : [])
