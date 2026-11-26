@@ -134,6 +134,26 @@ export function filterWorkspaceByPrivacy(
     next.presentation = { ...next.presentation, presenterNotes: "" };
   }
 
+  // Also enforce granular section/field stripping inside orthoCoreCase snapshot
+  if (next.orthoCoreCase && typeof next.orthoCoreCase === "object") {
+    const oc = { ...(next.orthoCoreCase as Record<string, unknown>) };
+    if (!access.sections.medical_history || !access.fields.medicalHistory) delete oc.questionnaire;
+    if (!access.sections.exam) delete oc.clinicalExam;
+    if (!access.sections.media || !access.permissions["photos.view"] || !access.fields.previousPhotos) {
+      oc.media = [];
+    }
+    if (!access.sections.measurements) oc.analyses = [];
+    if (!access.sections.diagnosis) {
+      oc.problems = [];
+      delete oc.diagnosis;
+    }
+    if (!access.sections.plan && !access.sections.appliances) delete oc.treatmentPlan;
+    if (!access.sections.sessions) oc.sessions = [];
+    if (!access.sections.retention) delete oc.retention;
+    if (!access.sections.reports) oc.customReports = [];
+    next.orthoCoreCase = oc;
+  }
+
   return { filtered: next, hiddenSections };
 }
 

@@ -263,6 +263,8 @@ export interface OrthoWorkspaceRecord {
   treatmentPlan: OrthoTreatmentPlan;
   retention: OrthoRetentionRecord;
   presentation: CasePresentationPreferences;
+  /** Full OrthoCore PatientCase snapshot synced cleanly over PostgreSQL */
+  orthoCoreCase?: Record<string, unknown> | null;
 }
 
 export const PERMANENT_FDI_TEETH: readonly number[] = [

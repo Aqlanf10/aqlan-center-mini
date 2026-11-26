@@ -92,6 +92,7 @@ interface OrthoCase {
   retainer: RetainerType | null; retainerOn: string | null; note: string | null;
   closedAt: string | null; closedBy: string | null; closedNote: string | null;
   baselineKind: "legacy" | null; baselineRecordedAt: string | null; elastics: string | null;
+  responsibleDoctorId?: number | null;
   responsibleDoctorName: string | null; legacyFinancialMode: LegacyFinancialMode | null;
   remainingObjectives: string | null;
   /** Absent on older payloads; explicit false means withheld, not an empty album. */
