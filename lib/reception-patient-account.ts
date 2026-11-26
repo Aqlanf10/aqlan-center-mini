@@ -1,10 +1,11 @@
 import { CLINIC_TIME_ZONE, ledgerBalancesByCurrency, patientStatementSnapshot } from "./db";
-import { CURRENCIES } from "./money";
+import { planLedgerSummary } from "./plans";
+import { CURRENCIES, CLINIC_BASE_CURRENCY } from "./money";
 import { clinicDateString } from "./schedule";
 
 // One ledger snapshot owns every amount shown together. Explicit fields keep
 // clinical items, photos, free text, staff names and drawer data off the wire.
-export async function readReceptionPatientAccount(id: number) {
+export async function readReceptionPatientAccount(id: number, includeInvoiceWorkspace = false) {
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const { ledger, plans, planCurrencies, historicalAgreements, reception } =
     await patientStatementSnapshot(id, today, { historicalAgreements: true, reception: true });
@@ -29,6 +30,9 @@ export async function readReceptionPatientAccount(id: number) {
       (p.installments.length ? Math.min(current.remainingMinor, Math.max(0,current.dueToDateMinor-current.paidMinor)) : null);
     return { id:p.id, currency:p.baseCurrency, totalMinor:current.totalMinor, paidMinor:verified ? current.paidMinor : null,
       remainingMinor:verified ? current.remainingMinor : null, dueNowMinor, status:p.status,
+      approval: p.approvedAgreement ?? null,
+      mayApprove: p.status === "active" && !!p.consentAt && !p.items.some(item => item.legacyAgreementId) && !p.approvedAgreement,
+      principalMinor: p.totalMinor,
       collectible:verified && p.status === "active" && (p.debtSource === "classic_installments" || p.debtSource === "approved_agreement" || (!p.invoiceFinancial && !p.approvedAgreement && p.installments.length > 0)) };
   });
   const receipts = ledger.payments.map(p => ({id:p.id, number:p.receiptNumber, currency:p.currency, amountMinor:p.amountMinor,
@@ -46,5 +50,17 @@ export async function readReceptionPatientAccount(id: number) {
   const schedules = reception.due.currencies.flatMap(row => row.sources.filter(s => s.kind === "repayment_schedule")
     .map(s => ({id:s.authorityId,currency:s.currency,dueNowMinor:row.status==="verified" ? s.dueNowMinor : null})));
   const openings = ledger.openings.map(({currency, amountMinor, asOfDate}) => ({currency, amountMinor, asOfDate}));
-  return { id, balances, invoices, agreements, receipts, history, schedules, targets, openings };
+  const invoiceWorkspace = includeInvoiceWorkspace ? {
+    balances: buckets, balance: buckets[CLINIC_BASE_CURRENCY], baseCurrency: CLINIC_BASE_CURRENCY,
+    invoices: ledger.invoices.map(({ id, patientId, invoiceNumber, status, totalMinor, discountMinor, baseCurrency, createdAt, items }) => ({
+      id, patientId, invoiceNumber, status, totalMinor, discountMinor, baseCurrency, createdAt, note: null,
+      items: items.map(({ id, description, quantity, unitPriceMinor, totalMinor }) => ({ id, description, quantity, unitPriceMinor, totalMinor })),
+    })),
+    payments: ledger.payments.map(({ id, receiptNumber, invoiceId, planId, openingCurrency, kind, amountMinor, currency, exchangeRate, baseAmountMinor, method, createdAt }) => ({
+      id, receiptNumber, invoiceId, planId, openingCurrency, kind, amountMinor, currency, exchangeRate, baseAmountMinor, method, createdAt, note: null,
+    })),
+    plans: plans.map(plan => ({ ...planLedgerSummary(plan), title: `اتفاق #${plan.id}` })),
+    openings: openings.map(row => ({ ...row, patientId: id, note: null })),
+  } : undefined;
+  return { id, balances, invoices, agreements, receipts, history, schedules, targets, openings, invoiceWorkspace, legacyOpeningPositions: reception.openings };
 }

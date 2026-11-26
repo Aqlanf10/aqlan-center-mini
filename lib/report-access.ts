@@ -1,3 +1,4 @@
+import type { ReportResult } from "./reports-types";
 /**
  * سياسة الوصول إلى مركز التقارير.
  *
@@ -140,4 +141,21 @@ export function reportVisibleToRole(
   access?: { viewCommissions?: boolean } | null,
 ): boolean {
   return canAccessUnifiedReport(role, report, access);
+}
+
+/** Visits mix invoices with scheduling, and unscheduled treatment includes pending
+ * revenue. Build the reception response from the operational fields only. */
+export function projectReportForRole(report: ReportResult, role: string): ReportResult {
+  if (role !== "reception" || (report.report !== "visits" && report.report !== "unscheduled-treatment")) return report;
+  const visits = report.report === "visits";
+  const columns = new Set(visits
+    ? ["visitDate", "arrivedTime", "patientId", "patientNumber", "patientName", "phone", "kind", "doctorName", "appointment", "calledTime", "seatedTime", "finishedTime", "waitMinutes", "sessionMinutes", "statusLabel"]
+    : ["patientId", "patientNumber", "patientName", "phone", "doctorName", "startDate", "pendingItems", "lastVisit"]);
+  const counts = new Set(visits ? ["visits", "visitedPatients", "firstVisits", "completed", "avgWait", "avgSession"] : ["plans", "patients", "items"]);
+  return {
+    report: report.report, title: report.title, periodLabel: report.periodLabel, from: report.from, to: report.to,
+    baseCurrency: report.baseCurrency, filtersLabel: report.filtersLabel,
+    kpis: report.kpis.filter(kpi => counts.has(kpi.key)), columns: report.columns?.filter(column => columns.has(column.key)),
+    rows: report.rows?.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => columns.has(key)))),
+  };
 }

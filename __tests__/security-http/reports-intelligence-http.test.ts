@@ -33,7 +33,14 @@ describe("Practice Intelligence — server-side access", () => {
 
   it("reception gets the operational ones and 403 on the financial ones", async () => {
     for (const report of RECEPTION_ALLOWED) {
-      expect((await get(`/api/reports?report=${report}&${period}`, h.sessions.reception.cookie)).status, report).toBe(200);
+      const response = await get(`/api/reports?report=${report}&${period}`, h.sessions.reception.cookie);
+      expect(response.status, report).toBe(200);
+      if (report === "unscheduled-treatment") {
+        const { result } = await response.json();
+        expect(result.columns.map((c: { key: string }) => c.key)).not.toContain("pendingMinor");
+        expect(result.kpis.map((k: { key: string }) => k.key)).toEqual(["plans", "patients", "items"]);
+        expect(JSON.stringify(result.rows)).not.toContain("pendingMinor");
+      }
     }
     for (const report of ADMIN_ONLY) {
       const response = await get(`/api/reports?report=${report}&${period}`, h.sessions.reception.cookie);

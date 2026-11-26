@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { SessionPayload } from "@/lib/auth";
-import { getPool } from "@/lib/db";
+import { clinicDateString } from "@/lib/schedule";
+import { projectPlannedVisitRebooking } from "@/lib/planned-visit-projection";
+import { CLINIC_TIME_ZONE, getPool, listPatientPlannedVisits } from "@/lib/db";
 import { canAccessPatient, canViewPatientMoney } from "@/lib/patient-access";
 import { readReceptionPatientAccount } from "@/lib/reception-patient-account";
 import { canHandleMoney } from "@/lib/roles";
@@ -16,7 +18,7 @@ export async function receptionRead(request: Request, session: SessionPayload, r
   const params = new URL(request.url).searchParams;
   const mode = params.get("projection");
   const id = patientAppointmentId(rawId);
-  if (id === null || params.size !== 1 || (mode !== "reception" && mode !== "reception-money"))
+  if (id === null || params.size !== 1 || (mode !== "reception" && mode !== "reception-money" && mode !== "reception-booking"))
     return json({ message: "طلب غير صالح." }, 400);
   if (session.role !== "reception") return json({ message: "هذه الواجهة للاستقبال." }, 403);
   const missing = () => json({ message: "الملف غير متاح." }, 404);
@@ -29,6 +31,19 @@ export async function receptionRead(request: Request, session: SessionPayload, r
       if (!row || row.id !== id) return missing();
       const { fullName, patientNumber, phone } = row;
       return json({ id, fullName, patientNumber, phone });
+    }
+    if (mode === "reception-booking") {
+      const { rows: [patient] } = await pool.query<{ open: boolean }>(
+        "SELECT EXISTS(SELECT 1 FROM visits WHERE patient_id = p.id AND signed_at IS NULL) AS open FROM patients p WHERE p.id = $1", [id]);
+      if (!patient) return missing();
+      const visits = patient.open ? [] : await listPatientPlannedVisits(id);
+      const plannedVisits = visits.map(visit => {
+        const { id, sequence, title, doctorName, durationMinutes, status, appointmentId, appointmentStatus,
+          canRebook, rebookBlockedReason, rebookGeneration, appointmentDate, appointmentTime } = projectPlannedVisitRebooking(visit, session);
+        return { id, sequence, title, doctorName, durationMinutes, status, appointmentId, appointmentStatus,
+          canRebook, rebookBlockedReason, rebookGeneration, appointmentDate, appointmentTime, note: null, planTitle: null };
+      });
+      return json({ id, plannedVisits, today: clinicDateString(new Date(), CLINIC_TIME_ZONE), timeZone: CLINIC_TIME_ZONE });
     }
     if (!await canViewPatientMoney(session, id)) return json({ message: "الرصيد غير متاح." }, 403);
     const exists = await pool.query<{id:number}>("SELECT id FROM patients WHERE id = $1", [id]);

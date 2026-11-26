@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { PrintButton } from "@/components/PrintButton";
 import { PrintableReportDocument } from "@/components/reports/PrintableReportDocument";
-import { canAccessUnifiedReport, isDisbursementReport } from "@/lib/report-access";
+import { canAccessUnifiedReport, projectReportForRole, isDisbursementReport } from "@/lib/report-access";
 import { buildReport, dbTodayISO, parseFilters, ReportInputError, validateCustomReportRange } from "@/lib/reports";
 import { CLINIC_TIME_ZONE, getSettingsSafe } from "@/lib/db";
 import { requireSession } from "@/lib/session";
@@ -46,7 +46,7 @@ export default async function OfficialReportPrintPage({
     const [today, printSettings] = await Promise.all([dbTodayISO(), getSettingsSafe()]);
     settings = printSettings;
     const filters = parseFilters(params, today);
-    result = await buildReport(report, filters);
+    result = projectReportForRole(await buildReport(report, filters), session.role);
   } catch (error) {
     if (error instanceof ReportInputError) notFound();
     throw error;

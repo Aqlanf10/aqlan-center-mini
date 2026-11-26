@@ -105,6 +105,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = (body ?? {}) as Record<string, unknown>;
+  if (session.role === "reception" && (Object.keys(source).length !== 1 || !Object.hasOwn(source, "planId"))) {
+    return forbidden("صلاحية الاستقبال هنا تقتصر على ربط اتفاق المريض.");
+  }
+
 
   try {
     if ("responsibleDoctorId" in source) {

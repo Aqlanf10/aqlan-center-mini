@@ -60,7 +60,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   const { id: rawId } = await context.params;
   const query = new URL(_request.url).searchParams;
   const mode = query.get("projection");
-  if (mode === "reception" || mode === "reception-money") return receptionRead(_request, session, rawId);
+  if (mode === "reception" || mode === "reception-money" || mode === "reception-booking") return receptionRead(_request, session, rawId);
   const id = readId(rawId);
   if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400, headers: privateHeaders });
 

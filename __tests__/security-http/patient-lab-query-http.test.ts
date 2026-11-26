@@ -89,9 +89,10 @@ describe("patient lab query through the built HTTP application", () => {
     const path = queryPath(fixture.targetPatientId);
     const admin = await list(path);
     const reception = await list(path, h.sessions.reception);
-    expect(reception).toEqual(admin);
+    const masked = { ...admin, orders: admin.orders.map(order => ({ ...order, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null })) };
+    expect(reception).toEqual(masked);
     const doctor = await list(path, h.sessions.doctorA);
-    expect(doctor).toEqual({ ...admin, orders: admin.orders.map((order) => ({ ...order, costMinor: null, costCurrency: null })) });
+    expect(doctor).toEqual(masked);
   });
 
   it("preserves explicit doctor cost-price permission without modifying the read policy", async () => {

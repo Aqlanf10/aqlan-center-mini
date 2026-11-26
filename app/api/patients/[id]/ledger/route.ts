@@ -47,13 +47,27 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   try {
     if (session.role === "reception") {
-      const [account, settings, installmentRecovery] = await Promise.all([
-        readReceptionPatientAccount(id), getSettings(), patientReversedInstallmentRecoveries(id),
+      const expanded = new URL(_request.url).searchParams.get("view") === "account";
+      const [account, settings, installmentRecovery, arrangements] = await Promise.all([
+        readReceptionPatientAccount(id, expanded), getSettings(), patientReversedInstallmentRecoveries(id),
+        listLegacyBalanceArrangements(id, clinicDateString(new Date(), CLINIC_TIME_ZONE)),
       ]);
       const openingAccess = openingBalanceAccess(session.role, settings["finance.reception_adds_opening_balance"] === "true");
+      const legacy = {
+        legacyBalanceArrangements: arrangements.map(({ id, currency, cadence, installmentMinor, startingDueMinor, firstDueDate, progress }) =>
+          ({ id, currency, cadence, installmentMinor, startingDueMinor, firstDueDate, progress, note: null })),
+        legacyOpeningPositions: account.legacyOpeningPositions,
+        legacyArrangementAccess: { manage: true },
+      };
+      if (expanded && account.invoiceWorkspace) {
+        const ledger = account.invoiceWorkspace;
+        return NextResponse.json({ ...ledger, ...legacy, openingAccess, clinicTimeZone: CLINIC_TIME_ZONE, installmentRecovery,
+          opening: ledger.openings.find(row => row.currency === CLINIC_BASE_CURRENCY) ?? null,
+        }, { headers: { "Cache-Control": "private, no-store" } });
+      }
       const selectable = new Set(account.targets.invoices.map(item => item.id));
       return NextResponse.json({
-        clinicTimeZone: CLINIC_TIME_ZONE, installmentRecovery, openingAccess, openings: account.openings,
+        ...legacy, clinicTimeZone: CLINIC_TIME_ZONE, installmentRecovery, openingAccess, openings: account.openings,
         opening: account.openings.find(row => row.currency === CLINIC_BASE_CURRENCY) ?? null,
         invoices: account.invoices.filter(item => selectable.has(item.id)).map(item => ({
           id: item.id, invoiceNumber: item.number, totalMinor: item.netMinor, discountMinor: 0,

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { canAccessUnifiedReport, isDisbursementReport, isKnownUnifiedReport } from "@/lib/report-access";
+import { canAccessUnifiedReport, projectReportForRole, isDisbursementReport, isKnownUnifiedReport } from "@/lib/report-access";
 import { requireSession } from "@/lib/session";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
 import { ReportInputError, buildReport, dbTodayISO, parseFilters, reportOptions, validateCustomReportRange } from "@/lib/reports";
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
     validateCustomReportRange(params);
     // «اليوم» من القاعدة نفسها — مطابقةً للطريقة التي حُسبت بها تواريخ كل حركة.
     const filters = parseFilters(params, await dbTodayISO());
-    const result = await buildReport(report, filters);
+    const result = projectReportForRole(await buildReport(report, filters), session.role);
     /* (P1-2) العقد الذي تقرؤه الصفحة (`LoadedReport`): التقرير داخل `result`. كان
        يُعاد مسطّحًا ({...result}) فتقرأ الصفحة `data.result` غير معرَّف وتنهار لكل
        مستخدم — والمسار نفسه يعيد 200. */

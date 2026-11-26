@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { readReceptionPatientAccount } from "@/lib/reception-patient-account";
+import { PlannedVisitBooking } from "@/components/patient/PlannedVisitBooking";
+import type { WorkflowSummary } from "@/components/patient/SummaryTab";
 import { PatientLedger } from "@/components/PatientLedger";
+import { ApprovedAgreementPanel } from "@/components/ApprovedAgreementPanel";
 import { CollectPaymentModal } from "@/components/CollectPaymentModal";
 import { QuickAppointmentModal } from "@/components/QuickAppointmentModal";
 import { PatientAppointmentsPanel } from "@/components/patient/PatientAppointmentsPanel";
@@ -15,7 +18,7 @@ type Money = Awaited<ReturnType<typeof readReceptionPatientAccount>> & {canColle
 const action = "rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold";
 const panel = "space-y-3 rounded-2xl border border-slate-200 bg-white p-4";
 
-function useReceptionRead<T extends { id: number }>(id: number, projection: string, version: number) {
+function useReceptionRead<T extends { id: number }>(id: number, projection: string, version: number, keepMounted = false) {
   const [result, setResult] = useState<{ version: number; data?: T; error?: string }>();
   useEffect(() => {
     const controller = new AbortController();
@@ -35,7 +38,7 @@ function useReceptionRead<T extends { id: number }>(id: number, projection: stri
     void load();
     return () => controller.abort();
   }, [id, projection, version]);
-  return result?.version === version ? result : undefined;
+  return result?.version === version || keepMounted && result?.data?.id === id ? result : undefined;
 }
 
 function ExternalUpload({ id }: { id: number }) {
@@ -70,12 +73,12 @@ function ExternalUpload({ id }: { id: number }) {
   </form>;
 }
 
-function PatientMoney({ patient, checkout }: { patient: Card; checkout: CheckoutVisitRequest }) {
+function PatientMoney({ patient, checkout, ledgerVersion, accountTab }: { accountTab: boolean; patient: Card; checkout: CheckoutVisitRequest; ledgerVersion: number }) {
   const [version, setVersion] = useState(0);
   const [choice, setChoice] = useState("");
   const [receipt, setReceipt] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
-  const response = useReceptionRead<Money>(patient.id, "reception-money", version);
+  const response = useReceptionRead<Money>(patient.id, "reception-money", version + ledgerVersion);
   const money = response?.data;
   function refresh() { setOpen(false); setChoice(""); setVersion(value => value + 1); }
   if (!money) return <section className={panel} aria-label="الرصيد الفردي">
@@ -94,9 +97,12 @@ function PatientMoney({ patient, checkout }: { patient: Card; checkout: Checkout
       {row.otherMinor > 0 && <p>رصيد خارج جدول السداد: {formatMoney(row.otherMinor,row.currency)}</p>}
     </div>)}</div>
     {money.agreements.length > 0 && <section><h3 className="font-bold">الاتفاقات والأقساط</h3>{money.agreements.map(a =>
-      <p key={a.id}>اتفاق #{a.id} · المتفق عليه {formatMoney(a.totalMinor,a.currency)} · المدفوع {a.paidMinor===null?"غير متحقق":formatMoney(a.paidMinor,a.currency)}
+      <div key={a.id}><p>اتفاق #{a.id} · المتفق عليه {formatMoney(a.totalMinor,a.currency)} · المدفوع {a.paidMinor===null?"غير متحقق":formatMoney(a.paidMinor,a.currency)}
       {" · "}المتبقي {a.remainingMinor===null?"غير متحقق":formatMoney(a.remainingMinor,a.currency)}
-      {" · "}قسط الاتفاق المستحق اليوم {a.dueNowMinor===null?"يحتاج مراجعة":formatMoney(a.dueNowMinor,a.currency)}</p>)}</section>}
+      {" · "}قسط الاتفاق المستحق اليوم {a.dueNowMinor===null?"يحتاج مراجعة":formatMoney(a.dueNowMinor,a.currency)}</p>
+        <ApprovedAgreementPanel planId={a.id} totalMinor={a.principalMinor} currency={a.currency} position={a.approval}
+          canApprove={a.mayApprove} isAdmin={false} onChanged={async () => refresh()} />
+      </div>)}</section>}
     {money.history.length > 0 && <section><h3 className="font-bold">الاتفاقات السابقة عند الترحيل</h3>{money.history.map(a =>
       <p key={a.kind+a.id}>{a.historicalAsOf} · المتفق عليه {formatMoney(a.agreedMinor,a.currency)} · المدفوع سابقًا {formatMoney(a.previouslyPaidMinor,a.currency)} · المتبقي وقت الترحيل {formatMoney(a.remainingMinor,a.currency)}</p>)}</section>}
     <details><summary className="cursor-pointer font-bold">الفواتير ({money.invoices.length})</summary>
@@ -106,7 +112,7 @@ function PatientMoney({ patient, checkout }: { patient: Card; checkout: Checkout
         {" · "}<a className="underline" href={`/print/receipt/${r.id}?patientId=${patient.id}`} target="_blank" rel="noopener">طباعة السند</a></p>)}</details>
     {receipt && money.receipts.some(r=>r.id===receipt) && <a role="status" className="block underline" target="_blank" rel="noopener"
       href={`/print/receipt/${receipt}?patientId=${patient.id}`}>تم التحصيل · طباعة سند القبض</a>}
-    {checkout === null && money.schedules.length > 0 && <PatientLedger patientId={patient.id} receptionSchedules onClinicalChange={refresh} />}
+    {!accountTab && checkout === null && money.schedules.length > 0 && <PatientLedger patientId={patient.id} receptionSchedules onClinicalChange={refresh} />}
     {checkout === "invalid" ? <p role="alert">رقم زيارة التحصيل غير صالح.</p> : typeof checkout === "number" ?
       <TodayVisitTab key={checkout} patientId={patient.id} patientName={patient.fullName} summary={null} visits={[]}
         base={CLINIC_BASE_CURRENCY} canCollect={money.canCollect} requestedCheckoutVisitId={checkout}
@@ -128,9 +134,24 @@ function PatientMoney({ patient, checkout }: { patient: Card; checkout: Checkout
   </section>;
 }
 
-export function ReceptionWorkspace({ id, checkout }: { id: number; checkout: CheckoutVisitRequest }) {
+function ReceptionPlannedVisits({ id, version, refresh }: { id: number; version: number; refresh: () => void }) {
+  const bookings = useReceptionRead<{ id: number } & Pick<WorkflowSummary, "today" | "timeZone" | "plannedVisits">>(id, "reception-booking", version, true);
+  return <>
+    {bookings?.data && <PlannedVisitBooking patientId={id} summary={bookings.data} workflowIsCurrent={() => bookings.version === version}
+      onChanged={refresh} />}
+    {bookings?.error && <button className={action} onClick={refresh}>إعادة تحميل الجلسات المخططة</button>}
+  </>;
+}
+
+export function ReceptionWorkspace({ id, checkout, accountTab }: { id: number; checkout: CheckoutVisitRequest; accountTab: boolean }) {
   const [version, setVersion] = useState(0);
   const [booking, setBooking] = useState(false);
+  const accountGuard = useRef<(() => boolean) | null>(null);
+  const registerGuard = useCallback((guard: () => boolean) => {
+    accountGuard.current = guard;
+    return () => { if (accountGuard.current === guard) accountGuard.current = null; };
+  }, []);
+  const [ledgerVersion, setLedgerVersion] = useState(0);
   const [appointmentsVersion, setAppointmentsVersion] = useState(0);
   const response = useReceptionRead<Card>(id, "reception", version);
   const patient = response?.data;
@@ -147,8 +168,15 @@ export function ReceptionWorkspace({ id, checkout }: { id: number; checkout: Che
       {patient.phone && <p>الهاتف <bdi>{patient.phone}</bdi></p>}
       <button className={action} onClick={() => setBooking(true)}>حجز موعد</button>
     </header>
-    <PatientMoney patient={patient} checkout={checkout} />
+    {accountTab && <a className={action} href={`/patients/${id}?tab=summary`} data-testid="patient-tab-summary"
+      onClick={event => { if (accountGuard.current?.() === false) event.preventDefault(); }}>ملخص المريض</a>}
+    <PatientMoney accountTab={accountTab} patient={patient} checkout={checkout} ledgerVersion={ledgerVersion} />
+    {accountTab && checkout === null
+      ? <PatientLedger patientId={id} onNavigationGuardChange={registerGuard} onClinicalChange={() => setLedgerVersion(value => value + 1)} />
+      : <a className={action} href={`/patients/${id}?tab=account`}>فتح فواتير المريض واتفاقاته</a>}
     <PatientAppointmentsPanel key={appointmentsVersion} patientId={id} />
+    {checkout === null && !accountTab && <ReceptionPlannedVisits id={id} version={appointmentsVersion}
+      refresh={() => setAppointmentsVersion(value => value + 1)} />}
     <ExternalUpload id={id} />
     {booking && <QuickAppointmentModal patientId={id} patientName={patient.fullName} isOpen onClose={() => setBooking(false)}
       onSuccess={() => { setBooking(false); setAppointmentsVersion(value => value + 1); }} />}

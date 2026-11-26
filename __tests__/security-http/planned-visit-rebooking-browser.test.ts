@@ -217,12 +217,13 @@ async function connected(f: Fixture, session: Session, width: number) {
 
 const plannedSection = (page: Page) => page.getByRole("region", { name: "الجلسات المخطَّطة", exact: true });
 const formFor = (page: Page, f: Fixture) => page.getByRole("form", { name: `إعادة حجز ${f.title}`, exact: true });
-async function openPatient(page: Page, f: Fixture) {
+async function openPatient(page: Page, f: Fixture, role: Role = "admin") {
   // Genuine authenticated document navigation, never a URL-only history patch,
   // injected router/anchor or replaced patient GET (including projections).
   const response = await page.goto(`${baseUrl}/patients/${f.patient}?tab=summary`, { waitUntil: "domcontentloaded" });
   expect(response?.status()).toBe(200);
-  await expect.poll(() => page.getByTestId("patient-tab-summary").getAttribute("aria-current"), pollOptions).toBe("page");
+  if (role === "reception") await page.getByRole("heading", { name: "حساب المريض", exact: true }).waitFor();
+  else await expect.poll(() => page.getByTestId("patient-tab-summary").getAttribute("aria-current"), pollOptions).toBe("page");
   await plannedSection(page).getByText(f.title, { exact: false }).waitFor();
   expect(await plannedSection(page).innerText()).toContain("تحتاج إعادة حجز");
   expect(await plannedSection(page).getByRole("button", { name: "ابدأ الزيارة", exact: true }).count()).toBe(0);
@@ -282,7 +283,7 @@ describe("planned-session rebooking through the real patient Summary", () => {
     const ui = await connected(f, h.sessions[role], width);
     await ui.run(async () => {
       const { page } = ui;
-      await openPatient(page, f);
+      await openPatient(page, f, role);
       expect(await plannedSection(page).innerText()).toContain(status === "no_show" ? "لم يحضر الموعد السابق." : "أُلغي الموعد السابق.");
       expect(await plannedSection(page).innerText()).toContain("إعادة الحجز تنشئ موعدًا جديدًا ولا تبدأ زيارة");
       await bounds(plannedSection(page).getByRole("button", { name: "إعادة حجز", exact: true }), width);

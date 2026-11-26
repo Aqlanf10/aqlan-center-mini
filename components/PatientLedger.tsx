@@ -558,7 +558,7 @@ function PatientLedgerContent({ reconciliationRecovery, patientId, visitId, sele
         const nextServices: unknown = await response.json();
         if (current() && Array.isArray(nextServices)) setServices(nextServices);
       }).catch(() => {});
-      const ledgerResponse = await fetch(`/api/patients/${patientId}/ledger`, { cache: "no-store", signal: controller.signal });
+      const ledgerResponse = await fetch(`/api/patients/${patientId}/ledger${session?.role === "reception" ? "?view=account" : ""}`, { cache: "no-store", signal: controller.signal });
       if (!current()) return;
       // Retire denied data before awaiting an error body that may never arrive.
       if (!ledgerResponse.ok) {
@@ -577,7 +577,7 @@ function PatientLedgerContent({ reconciliationRecovery, patientId, visitId, sele
     } finally {
       if (current()) setLoading(false);
     }
-  }, [patientId]);
+  }, [patientId, session?.role]);
 
   const notifyFinancialChange = useCallback(() => {
     if (readRef.current.active) onClinicalChange?.();
@@ -681,10 +681,10 @@ function PatientLedgerContent({ reconciliationRecovery, patientId, visitId, sele
           className="min-h-11 rounded-xl bg-navy-800 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
           {mode === "entry" || mode === "invoice" || mode === "legacy" ? "إغلاق الفاتورة / الاتفاق" : "فاتورة / اتفاق علاج"}
         </button>
-        <button disabled={financialBlocked} onClick={() => {if(!financialBlocked&&!debtHeld.current&&!invoiceUnresolved.current)setCollectOpen(true);}}
+        {session?.role !== "reception" && <button disabled={financialBlocked} onClick={() => {if(!financialBlocked&&!debtHeld.current&&!invoiceUnresolved.current)setCollectOpen(true);}}
           className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-bold text-white">
           قبض دفعة
-        </button>
+        </button>}
         <a href={`/print/statement/${patientId}`} target="_blank" rel="noopener"
           className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-navy-800">
           كشف حساب

@@ -122,6 +122,13 @@ it("uploads an external report and denies reception all tested image and clinic-
   for (const path of ["/print/shift/1", "/reports"]) {
     expect((await context.request.get(baseUrl + path, { maxRedirects:0 })).status(), path).toBe(307);
   }
+  const ownAccount = await context.request.get(`${baseUrl}/api/patients/${patient}/ledger?view=account`);
+  expect(ownAccount.status()).toBe(200);
+  const ledger = await ownAccount.json();
+  expect(ledger.invoices.every((item: { patientId: number }) => item.patientId === patient)).toBe(true);
+  expect(ledger.balances.YER.dueMinor).toBe((await account()).balances.find((row: { currency: string }) => row.currency === "YER").dueMinor);
+  expect(ledger).not.toHaveProperty("receiptRemaining");
+  expect(JSON.stringify(ledger)).not.toMatch(/"(?:storageKey|photoDocumentId|shiftId|createdBy|doctorShareMinor)"/);
   const admin = await context.request.get(baseUrl + "/api/patients/" + patient + "/documents", { headers:{ Cookie:adminCookie } });
   expect(admin.status()).toBe(200);
   expect(JSON.stringify(await admin.json())).toContain("acceptance.pdf");

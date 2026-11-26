@@ -173,20 +173,20 @@ async function nativeSaveAndReadAccount(page: Page, patientId: number, control: 
   // Native coordinate clicks do not wait for enabled state like Locator.click.
   // Every invoice row now requires the real server preview, including consultation.
   await expect.poll(() => control.isEnabled(), { timeout: 15_000 }).toBe(true);
-  const ledgerPath = `/api/patients/${patientId}/ledger`, workflowPath = `/api/patients/${patientId}/workflow`;
+  const ledgerPath = `/api/patients/${patientId}/ledger`, workflowPath = `/api/patients/${patientId}?projection=reception-money`;
   const reads = new Set<Request>(); let writeSeen = false;
   const isWrite = (response: Response) => new URL(response.url()).pathname === "/api/invoices"
     && response.request().method() === "POST";
   const observeWrite = (response: Response) => { if (isWrite(response)) writeSeen = true; };
   const observeRead = (request: Request) => {
-    if (writeSeen && request.method() === "GET" && [ledgerPath, workflowPath].includes(new URL(request.url()).pathname)) reads.add(request);
+    if (writeSeen && request.method() === "GET" && (new URL(request.url()).pathname === ledgerPath || request.url() === baseUrl + workflowPath)) reads.add(request);
   };
   page.on("response", observeWrite); page.on("request", observeRead);
   try {
     const [saved, ledgerResponse, workflowResponse] = await Promise.all([
       page.waitForResponse(isWrite, { timeout: 15_000 }),
       page.waitForResponse(response => reads.has(response.request()) && new URL(response.url()).pathname === ledgerPath, { timeout: 15_000 }),
-      page.waitForResponse(response => reads.has(response.request()) && new URL(response.url()).pathname === workflowPath, { timeout: 15_000 }),
+      page.waitForResponse(response => reads.has(response.request()) && response.url() === baseUrl + workflowPath, { timeout: 15_000 }),
       nativeClick(page, control),
     ]);
     expect([200, 201]).toContain(saved.status());
@@ -195,7 +195,7 @@ async function nativeSaveAndReadAccount(page: Page, patientId: number, control: 
     }
     const receipt = await saved.json() as { id: number };
     const ledger = await ledgerResponse.json() as { invoices: { id: number; invoiceNumber: string }[]; balances: { YER: { dueMinor: number } } };
-    const workflow = await workflowResponse.json() as { patient: { id: number }; financial: { byCurrency: { YER: { balanceMinor: number } } } };
+    const workflow = await workflowResponse.json() as { id: number; balances: { currency: string; dueMinor: number }[] };
     const stored = (await db.query<{ id: number; invoice_number: string }>(
       "SELECT id, invoice_number FROM invoices WHERE patient_id=$1 ORDER BY id", [patientId])).rows;
     expect(stored).toHaveLength(expectedCount);
@@ -203,8 +203,8 @@ async function nativeSaveAndReadAccount(page: Page, patientId: number, control: 
     expect(invoiceIds).toContain(receipt.id);
     expect(ledger.invoices.map(row => row.id).sort((a, b) => a - b)).toEqual(invoiceIds);
     expect(ledger.invoices.map(row => row.invoiceNumber).sort()).toEqual(stored.map(row => row.invoice_number).sort());
-    expect(workflow.patient.id).toBe(patientId);
-    expect(workflow.financial.byCurrency.YER.balanceMinor).toBe(ledger.balances.YER.dueMinor);
+    expect(workflow.id).toBe(patientId);
+    expect(workflow.balances.find(row => row.currency === "YER")?.dueMinor).toBe(ledger.balances.YER.dueMinor);
     const proof = { patientId, savedInvoiceId: receipt.id, invoiceIds, invoiceNumbers: stored.map(row => row.invoice_number),
       dueMinor: ledger.balances.YER.dueMinor, ledgerUrl: ledgerResponse.url(), workflowUrl: workflowResponse.url() };
     await renderedAccount(page, proof);

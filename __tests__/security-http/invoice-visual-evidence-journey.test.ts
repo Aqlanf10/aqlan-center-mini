@@ -267,14 +267,14 @@ describe("required invoice visual evidence through retained CI stdout", () => {
         const [issued, ledgerResponse, workflowResponse] = await Promise.all([
           page.waitForResponse(response => new URL(response.url()).pathname === "/api/invoices" && response.request().method() === "POST"),
           page.waitForResponse(response => new URL(response.url()).pathname === `/api/patients/${patientId}/ledger`),
-          page.waitForResponse(response => new URL(response.url()).pathname === `/api/patients/${patientId}/workflow`),
+          page.waitForResponse(response => response.url() === `${baseUrl}/api/patients/${patientId}?projection=reception-money`),
           save.click(),
         ]);
         expect(issued.status()).toBe(201); expect(ledgerResponse.status()).toBe(200); expect(workflowResponse.status()).toBe(200);
         const saved = await issued.json() as { id: number };
         const ledger = await ledgerResponse.json() as { invoices: { id: number }[] };
-        const workflow = await workflowResponse.json() as { patient: { id: number } };
-        expect(ledger.invoices.map(invoice => invoice.id)).toEqual([saved.id]); expect(workflow.patient.id).toBe(patientId);
+        const workflow = await workflowResponse.json() as { id: number };
+        expect(ledger.invoices.map(invoice => invoice.id)).toEqual([saved.id]); expect(workflow.id).toBe(patientId);
         const renderedInvoices = page.getByRole("region", { name: "الفواتير", exact: true });
         const settled = async () => ({
           ledgerPending: await page.getByTestId("account-balance-unavailable").count(),
