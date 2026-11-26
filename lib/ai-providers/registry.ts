@@ -53,34 +53,27 @@ export async function seedGeminiProviderIfMissing(pool: any): Promise<void> {
           2048,
           0.2,
           TRUE,
-          TRUE,
-          1,
-          NOW(),
-          TRUE,
-          'الاتصال ناجح ومعتمد — النموذج gemini-2.5-flash',
-          180,
+          NOT EXISTS (SELECT 1 FROM ai_providers WHERE is_default = TRUE),
+          10,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
           'admin',
           NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
           api_key_enc = EXCLUDED.api_key_enc,
-          organization_id = EXCLUDED.organization_id,
-          model = EXCLUDED.model,
-          models = EXCLUDED.models,
-          enabled = TRUE,
-          is_default = TRUE,
-          priority = 1,
-          last_test_at = NOW(),
-          last_test_ok = TRUE,
-          last_test_message = EXCLUDED.last_test_message,
-          last_test_latency = EXCLUDED.last_test_latency,
-          updated_at = NOW()`,
+          last_test_at = NULL,
+          last_test_ok = NULL,
+          last_test_message = NULL,
+          last_test_latency = NULL,
+          updated_at = NOW()
+        WHERE ai_providers.api_key_enc IS NULL OR ai_providers.api_key_enc = ''`,
         [keyEnc],
       );
 
-      // جعل google-gemini هو الافتراضي وإزاحة باقي المزودين
-      await pool.query(`UPDATE ai_providers SET is_default = FALSE WHERE id <> 'google-gemini'`);
-      await pool.query(`UPDATE ai_providers SET priority = priority + 1 WHERE id <> 'google-gemini' AND priority = 1`);
+      // A saved environment key is not a successful API response. Never demote the owner's existing default.
     }
   } catch {
     // تجاوز آمن في حال عدم ضبط SESSION_SECRET بعد
@@ -201,6 +194,9 @@ function mapRowToConfig(row: any): AiProviderConfig {
 }
 
 export function toAiProviderView(config: AiProviderConfig): AiProviderView {
+  // Previous environment seeding fabricated this exact success message without a network call.
+  const unverifiedLegacySeed = config.id === "google-gemini"
+    && config.lastTestMessage === "الاتصال ناجح ومعتمد — النموذج gemini-2.5-flash";
   let keyMasked = "";
   if (config.apiKeyEnc) {
     try {
@@ -229,10 +225,10 @@ export function toAiProviderView(config: AiProviderConfig): AiProviderView {
     isDefault: config.isDefault,
     priority: config.priority,
     taskModels: config.taskModels ?? {},
-    lastTestAt: config.lastTestAt ? config.lastTestAt.toISOString() : null,
-    lastTestOk: config.lastTestOk ?? null,
-    lastTestMessage: config.lastTestMessage ?? null,
-    lastTestLatency: config.lastTestLatency ?? null,
+    lastTestAt: !unverifiedLegacySeed && config.lastTestAt ? config.lastTestAt.toISOString() : null,
+    lastTestOk: unverifiedLegacySeed ? null : (config.lastTestOk ?? null),
+    lastTestMessage: unverifiedLegacySeed ? "لم يُثبت الاتصال بعد — أعد اختبار المزود." : (config.lastTestMessage ?? null),
+    lastTestLatency: unverifiedLegacySeed ? null : (config.lastTestLatency ?? null),
     createdAt: config.createdAt ? config.createdAt.toISOString() : null,
     updatedAt: config.updatedAt ? config.updatedAt.toISOString() : null,
     updatedBy: config.updatedBy ?? null,
