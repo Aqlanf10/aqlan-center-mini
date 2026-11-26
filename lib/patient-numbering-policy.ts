@@ -23,7 +23,10 @@ export type NumberingPlan =
 
 export function parseNumberingRequest(rawPrefix: unknown, rawNext: unknown): NumberingRequest | null {
   if (typeof rawPrefix !== "string" || typeof rawNext !== "string") return null;
-  const prefix = rawPrefix.trim().toUpperCase();
+  const trimmedPrefix = rawPrefix.trim();
+  // Check ASCII before case conversion: dotless i and long s fold to I/S.
+  if (!/^[A-Za-z]$/.test(trimmedPrefix)) return null;
+  const prefix = trimmedPrefix.toUpperCase();
   const next = rawNext.trim();
   // No scientific notation, signs, fractions, Unicode lookalikes or JS rounding.
   if (!/^[A-Z]$/.test(prefix) || !/^[1-9][0-9]*$/.test(next) || next.length > 18) return null;
@@ -32,7 +35,8 @@ export function parseNumberingRequest(rawPrefix: unknown, rawNext: unknown): Num
 }
 
 /** Only call with a stored canonical identifier, NEVER an import note/phone. */
-export function parseCanonicalPatientNumber(stored: string): { prefix: string; number: bigint } | null {
+export function parseCanonicalPatientNumber(stored: unknown): { prefix: string; number: bigint } | null {
+  if (typeof stored !== "string") return null;
   const match = /^([A-Z])-([0-9]{5,18})$/.exec(stored);
   if (!match) return null;
   const number = BigInt(match[2]);
