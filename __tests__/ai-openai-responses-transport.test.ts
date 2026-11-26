@@ -72,6 +72,23 @@ describe("OpenAI Responses transport (synthetic, no network)", () => {
     expect((await getProviderAdapter("openai-responses").testConnection({ ...config(), apiKeyEnc: null }, fetchImpl)).ok).toBe(false);
     expect(calls).toHaveLength(0);
   });
+  it("accepts the exact synthetic readiness marker on the official endpoint", async () => {
+    const { fetchImpl } = mock({ ...completed, output: [{ type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "READY" }] }] });
+    const result = await getProviderAdapter("openai-responses").testConnection(config(), fetchImpl);
+    expect(result.ok).toBe(true);
+    expect(result.message).toContain("OpenAI");
+  });
+  it("does not report readiness for an unrelated completed message", async () => {
+    const { fetchImpl } = mock(completed);
+    expect((await getProviderAdapter("openai-responses").testConnection(config(), fetchImpl)).ok).toBe(false);
+  });
+  it("does not describe a compatible endpoint as direct OpenAI", async () => {
+    const { fetchImpl } = mock({ ...completed, output: [{ type: "message", role: "assistant", status: "completed", content: [{ type: "output_text", text: "READY" }] }] });
+    // api.groq.com is already in the outbound allowlist; transport is mocked.
+    const result = await getProviderAdapter("openai-responses").testConnection({ ...config(), baseUrl: "https://api.groq.com/openai/v1" }, fetchImpl);
+    expect(result.ok).toBe(true);
+    expect(result.message).not.toContain("الاتصال ناجح بـ OpenAI");
+  });
   it("retains the independent chat completions protocol", () => {
     expect(getProviderAdapter("openai-compatible").protocol).toBe("openai-compatible");
   });
