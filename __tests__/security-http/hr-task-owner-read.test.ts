@@ -23,7 +23,12 @@ async function setup(){
  const context=await browser.newContext();const page=await context.newPage();
  await page.route("http://hr-owner.invalid/",route=>route.fulfill({contentType:"text/html",body:'<!doctype html><html><body><div id="root"></div></body></html>'}));
  await page.goto("http://hr-owner.invalid/");await page.addScriptTag({content:bundle});
- return {page,close:()=>context.close()};
+ return {page,close:async()=>{
+  // A successful mutation can trigger a background list refresh after the
+  // modal closes. Let its synthetic response finish before closing Chromium.
+  try{await page.unrouteAll({behavior:"wait"});}
+  finally{await context.close();}
+ }};
 }
 async function mount(page:Page,owner:string|null){return page.evaluate(value=>{
  (window as unknown as {mountOwner:(name:string|null)=>void}).mountOwner(value);

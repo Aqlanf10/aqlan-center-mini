@@ -19,6 +19,14 @@ describe("AI settings connection evidence UI", () => {
   it("does not keep a stale provider list when refreshing fails", () => {
     expect(source).toMatch(/catch \(err\) \{\s*if \(revision !== loadRevision\.current\) return;\s*setProviders\(\[\]\)/);
   });
+  it("sends an empty JSON object, never a credential, to test the saved configuration", () => {
+    const start = source.indexOf("const handleTestConnection");
+    const end = source.indexOf("const handleMovePriority", start);
+    const handler = source.slice(start, end);
+    expect(handler).toContain('headers: { "Content-Type": "application/json" }');
+    expect(handler).toContain('body: JSON.stringify({})');
+    expect(handler).not.toMatch(/apiKey|formApiKey/i);
+  });
   it("switches the standard OpenAI endpoint in both directions", () => {
     expect(source).toMatch(/next === "openai-responses"[^\n]+\n\s*setFormEndpoint\("\/responses"\)/);
     expect(source).toMatch(/next === "openai-compatible"[^\n]+\n\s*setFormEndpoint\("\/chat\/completions"\)/);

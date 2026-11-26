@@ -254,6 +254,7 @@ export default function AiSettingsPage() {
       const res = await fetch(`/api/settings/ai/providers/${p.id}/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (!res.ok || data.ok !== true) {
