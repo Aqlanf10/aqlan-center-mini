@@ -103,6 +103,14 @@ export async function POST(request: Request) {
 
   const source = (body ?? {}) as Record<string, unknown>;
 
+  // A supplied but malformed patient context must not become an unlinked cloud request.
+  // Null/omitted is the explicit no-patient case; all other IDs must be safe positive integers.
+  const requestedPatientId = source.conversationPatientId;
+  if (requestedPatientId != null && (typeof requestedPatientId !== "number"
+    || !Number.isSafeInteger(requestedPatientId) || requestedPatientId <= 0)) {
+    return NextResponse.json({ message: "رقم سياق المريض غير صالح." }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
+
   // استخراج سجل المحادثة — رسائل العميل **بياناتٌ لا هوية** (P0.5):
   // role=system من العميل يُهمَد بالكامل (البرومبت النظامي الموثوق يملكه الخادم
   // وحده)، وrole=assistant يُقبل كسياقٍ غير موثوق لا يُمنح أي امتياز.
