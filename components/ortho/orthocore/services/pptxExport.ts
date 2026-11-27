@@ -83,7 +83,7 @@ async function buildClientTracedOverlays(
       if (dataUrl) overlays.ceph = dataUrl;
     }
   } catch {
-    // Non-blocking: server still embeds raw Ceph radiograph if overlay rendering fails
+    // Non-blocking
   }
 
   // 2. Profile Traced Overlay
@@ -161,30 +161,37 @@ async function buildClientTracedOverlays(
     // ignore
   }
 
-  // 5. Intraoral Frontal Traced Overlay
-  try {
-    const intraAnalysis = patient.analyses.find(
-      (a) =>
-        a.analysisType === "photo_analysis" &&
-        a.photoViewMode === "intraoral_frontal" &&
-        Object.keys(a.landmarks || {}).length > 0,
-    );
-    if (intraAnalysis) {
-      const media = findMediaForAnalysis(patient, intraAnalysis.linkedMediaId, [
-        "intraoral_frontal",
-        "frontal",
-      ]);
-      const dataUrl = await renderPhotoAnalysisImage(
-        media,
-        "intraoral_frontal",
-        intraAnalysis,
-        cache,
-        { anonymize: false },
+  // 5. Intraoral Traced Overlays (Frontal, Right, Left, Upper Occlusal, Lower Occlusal)
+  const intraModes: Array<{
+    mode: "intraoral_frontal" | "intraoral_right" | "intraoral_left" | "intraoral_upper" | "intraoral_lower";
+    key: string;
+    views: string[];
+  }> = [
+    { mode: "intraoral_frontal", key: "intraoral", views: ["intraoral_frontal"] },
+    { mode: "intraoral_right", key: "intraoral_right", views: ["intraoral_right", "right_buccal"] },
+    { mode: "intraoral_left", key: "intraoral_left", views: ["intraoral_left", "left_buccal"] },
+    { mode: "intraoral_upper", key: "intraoral_upper", views: ["intraoral_upper", "upper_occlusal"] },
+    { mode: "intraoral_lower", key: "intraoral_lower", views: ["intraoral_lower", "lower_occlusal"] },
+  ];
+
+  for (const item of intraModes) {
+    try {
+      const analysis = patient.analyses.find(
+        (a) =>
+          a.analysisType === "photo_analysis" &&
+          a.photoViewMode === item.mode &&
+          Object.keys(a.landmarks || {}).length > 0,
       );
-      if (dataUrl) overlays.intraoral = dataUrl;
+      if (analysis) {
+        const media = findMediaForAnalysis(patient, analysis.linkedMediaId, item.views);
+        const dataUrl = await renderPhotoAnalysisImage(media, item.mode, analysis, cache, {
+          anonymize: false,
+        });
+        if (dataUrl) overlays[item.key] = dataUrl;
+      }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
   }
 
   return overlays;

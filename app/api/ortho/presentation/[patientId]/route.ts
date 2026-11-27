@@ -11,6 +11,7 @@ import {
   buildCasePresentationDeck,
   generateEditablePptxBytes,
   type PresentationMediaAsset,
+  type PresentationOverlayKey,
   type PresentationSessionInput,
 } from "@/lib/ortho-case-presentation";
 import {
@@ -27,18 +28,21 @@ import { clinicDateString } from "@/lib/schedule";
 
 export const dynamic = "force-dynamic";
 
-type OverlayKey = "ceph" | "profile" | "smile" | "fifths" | "thirds" | "intraoral";
-const ALLOWED_OVERLAY_KEYS = new Set<OverlayKey>([
+const ALLOWED_OVERLAY_KEYS = new Set<PresentationOverlayKey>([
   "ceph",
   "profile",
   "smile",
   "fifths",
   "thirds",
   "intraoral",
+  "intraoral_right",
+  "intraoral_left",
+  "intraoral_upper",
+  "intraoral_lower",
 ]);
 const MAX_OVERLAY_BYTES = 1536 * 1024; // 1.5 MB per traced overlay
-const MAX_EMBEDDED_PHOTOS = 24;
-const MAX_PHOTO_BYTES = 4 * 1024 * 1024; // 4 MB per clinic photo
+const MAX_EMBEDDED_PHOTOS = 36;
+const MAX_PHOTO_BYTES = 6 * 1024 * 1024; // 6 MB per clinic photo
 
 function detectPngOrJpeg(bytes: Uint8Array): "png" | "jpg" | null {
   if (bytes.byteLength < 8) return null;
@@ -68,21 +72,29 @@ function parseOverlayDataUrl(raw: unknown): { bytes: Uint8Array; ext: "png" | "j
   }
 }
 
+function extractDocIdFromUrl(url: unknown): number | null {
+  if (typeof url !== "string") return null;
+  const m = /\/api\/documents\/(\d+)/.exec(url);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
 function inferViewType(photoView: string | null, title: string, kind: string): string {
   if (photoView && photoView.trim()) return photoView.trim();
   const text = `${title} ${kind}`.toLowerCase();
   if (text.includes("ceph") || text.includes("سيفالو")) return "lateral_ceph";
-  if (text.includes("opg") || text.includes("panoramic") || text.includes("بانوراما")) return "opg";
+  if (text.includes("opg") || text.includes("panoramic") || text.includes("بانوراما")) return "panoramic_opg";
   if (text.includes("profile") || text.includes("جانبي") || text.includes("بروفايل")) return "extraoral_profile";
-  if (text.includes("smile") || text.includes("ابتسام")) return "extraoral_frontal_smile";
-  if (text.includes("extraoral") || text.includes("وجه")) return "extraoral_frontal_rest";
+  if (text.includes("smile") || text.includes("ابتسام")) return "extraoral_smile";
+  if (text.includes("extraoral") || text.includes("وجه")) return "extraoral_frontal";
   if (text.includes("upper") || text.includes("علوي")) return "intraoral_upper";
   if (text.includes("lower") || text.includes("سفلي")) return "intraoral_lower";
   if (text.includes("right") || text.includes("يمين")) return "intraoral_right";
   if (text.includes("left") || text.includes("يسار")) return "intraoral_left";
   if (text.includes("frontal") || text.includes("أمامي")) return "intraoral_frontal";
-  if (text.includes("cast") || text.includes("model") || text.includes("نموذج")) return "cast";
-  if (kind === "xray") return "opg";
+  if (text.includes("cast") || text.includes("model") || text.includes("نموذج")) return "model_3d_stl";
+  if (kind === "xray") return "panoramic_opg";
   return "intraoral_frontal";
 }
 
@@ -118,7 +130,7 @@ export async function POST(
     tracedOverlays?: Record<string, string>;
   };
   try {
-    body = await readJsonBody(req, 6 * 1024 * 1024);
+    body = await readJsonBody(req, 10 * 1024 * 1024);
   } catch (err) {
     const errRes = bodyErrorResponse(err);
     if (errRes) return errRes;
@@ -172,11 +184,13 @@ export async function POST(
   const clinicName = settings?.["clinic.name"]?.trim() || "مركز الدكتور عقلان";
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const cases = await listPatientOrthoCases(patientId, today).catch(() => []);
+  const oc = (filtered.orthoCoreCase && typeof filtered.orthoCoreCase === "object"
+    ? filtered.orthoCoreCase
+    : null) as Record<string, unknown> | null;
+
   const doctorName =
     cases.find((c) => c.responsibleDoctorName)?.responsibleDoctorName ??
-    (typeof (filtered.orthoCoreCase as Record<string, unknown> | undefined)?.assignedDoctor === "string"
-      ? String((filtered.orthoCoreCase as Record<string, unknown>).assignedDoctor)
-      : undefined);
+    (typeof oc?.assignedDoctor === "string" ? oc.assignedDoctor : undefined);
 
   const rawAdjustments = cases
     .flatMap((c) => c.adjustments ?? [])
@@ -196,6 +210,34 @@ export async function POST(
     photoDocIds: (a.photos ?? []).map((p) => p.id),
   }));
 
+  // Build lookup from OrthoCore MediaTab metadata (id: "med-...", viewType, stage, derivedUrl) -> docId
+  interface OcMediaMeta {
+    mediaId: string;
+    viewType: string;
+    stage: string;
+    title: string;
+    effectiveDocId: number;
+  }
+  const ocMediaByDocId = new Map<number, OcMediaMeta>();
+  const derivedDocIdsToSkipStandalone = new Set<number>();
+  const rawOcMedia = Array.isArray(oc?.media) ? (oc.media as Array<Record<string, unknown>>) : [];
+  for (const m of rawOcMedia) {
+    const origId = extractDocIdFromUrl(m.originalUrl);
+    const derivId = extractDocIdFromUrl(m.derivedUrl);
+    if (derivId && origId && derivId !== origId) {
+      derivedDocIdsToSkipStandalone.add(derivId);
+    }
+    const targetDocId = origId ?? derivId;
+    if (!targetDocId) continue;
+    ocMediaByDocId.set(targetDocId, {
+      mediaId: typeof m.id === "string" ? m.id : `doc-${targetDocId}`,
+      viewType: typeof m.viewType === "string" && m.viewType.trim() ? m.viewType.trim() : "",
+      stage: typeof m.stage === "string" && m.stage.trim() ? m.stage.trim() : "T0",
+      title: typeof m.title === "string" && m.title.trim() ? m.title.trim() : "",
+      effectiveDocId: derivId ?? targetDocId,
+    });
+  }
+
   // Load permitted clinical photos from durable disk storage for embedding into PPTX
   const mediaAssets: PresentationMediaAsset[] = [];
   const canEmbedPhotos =
@@ -208,19 +250,20 @@ export async function POST(
         ? new Set(body.selectedMediaIds.map((x) => String(x)))
         : null;
 
-    // Also include adjustment-linked photo IDs so session progress slides always get their photos
     const adjustmentDocIds = new Set<number>();
     for (const s of sessionSummaries) {
       for (const did of s.photoDocIds ?? []) adjustmentDocIds.add(did);
     }
 
     const imageDocs = docs
-      .filter((d) => d.isImage && !d.removedAt)
+      .filter((d) => d.isImage && !d.removedAt && !derivedDocIdsToSkipStandalone.has(d.id))
       .filter((d) => {
         if (!selectedSet) return true;
+        const meta = ocMediaByDocId.get(d.id);
         return (
           selectedSet.has(String(d.id)) ||
           selectedSet.has(`doc-${d.id}`) ||
+          (meta ? selectedSet.has(meta.mediaId) : false) ||
           adjustmentDocIds.has(d.id)
         );
       })
@@ -229,11 +272,13 @@ export async function POST(
     const allowFacialWhenAnon = Boolean(filtered.questionnaire.consentForEducationDeidentified);
 
     for (const doc of imageDocs) {
-      const viewType = inferViewType(doc.photoView, doc.title, doc.kind);
+      const meta = ocMediaByDocId.get(doc.id);
+      const viewType = meta?.viewType || inferViewType(doc.photoView, meta?.title || doc.title, doc.kind);
       if (anonymize && isFacialView(viewType) && !allowFacialWhenAnon) {
         continue;
       }
-      const dl = await getDocumentForDownload(doc.id).catch(() => null);
+      const readDocId = meta?.effectiveDocId ?? doc.id;
+      const dl = await getDocumentForDownload(readDocId).catch(() => null);
       if (!dl || dl.document.patientId !== patientId || !dl.storageKey) continue;
       const buf = await readFileByKey(dl.storageKey).catch(() => null);
       if (!buf || buf.byteLength < 16 || buf.byteLength > MAX_PHOTO_BYTES) continue;
@@ -241,11 +286,11 @@ export async function POST(
       if (!ext) continue;
 
       mediaAssets.push({
-        id: `doc-${doc.id}`,
+        id: meta?.mediaId || `doc-${doc.id}`,
         docId: doc.id,
-        title: doc.title || viewType,
+        title: meta?.title || doc.title || viewType,
         viewType,
-        stage: doc.photoStage || "T0",
+        stage: meta?.stage || doc.photoStage || "T0",
         adjustmentId: doc.adjustmentId,
         bytes: new Uint8Array(buf),
         ext,
@@ -254,13 +299,13 @@ export async function POST(
   }
 
   // Validate optional client-rendered traced canvas overlays (Ceph / Photo Analysis)
-  const tracedOverlays: Partial<Record<OverlayKey, { bytes: Uint8Array; ext: "png" | "jpg" }>> = {};
+  const tracedOverlays: Partial<Record<PresentationOverlayKey, { bytes: Uint8Array; ext: "png" | "jpg" }>> = {};
   if (canEmbedPhotos && body.tracedOverlays && typeof body.tracedOverlays === "object") {
     for (const [k, val] of Object.entries(body.tracedOverlays)) {
-      if (!ALLOWED_OVERLAY_KEYS.has(k as OverlayKey)) continue;
+      if (!ALLOWED_OVERLAY_KEYS.has(k as PresentationOverlayKey)) continue;
       const parsed = parseOverlayDataUrl(val);
       if (parsed) {
-        tracedOverlays[k as OverlayKey] = parsed;
+        tracedOverlays[k as PresentationOverlayKey] = parsed;
       }
     }
   }
@@ -321,7 +366,6 @@ export async function POST(
     });
   }
 
-  // Strip raw image bytes for lightweight PDF JSON payload
   const lightDeck = {
     ...deck,
     slides: deck.slides.map((s) => ({

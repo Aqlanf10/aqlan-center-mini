@@ -98,8 +98,11 @@ function mapDocToMediaRecord(doc: LivePatientDocument): MediaRecord {
     upper_occlusal: "intraoral_upper",
     lower_occlusal: "intraoral_lower",
     profile: "extraoral_profile",
-    smile: "extraoral_frontal_smile",
-    frontal_rest: "extraoral_frontal_rest",
+    smile: "extraoral_smile",
+    frontal_rest: "extraoral_frontal",
+    extraoral_frontal_smile: "extraoral_smile",
+    extraoral_frontal_rest: "extraoral_frontal",
+    opg: "panoramic_opg",
   };
   const viewType = (doc.photoView && viewMap[doc.photoView]) || doc.photoView || "intraoral_frontal";
   const today = doc.takenOn || doc.uploadedAt?.slice(0, 10) || new Date().toISOString().slice(0, 10);
@@ -460,8 +463,27 @@ export function applyOrthoCoreCaseToWorkspace(
       ...baseRecord.questionnaire,
       chiefComplaint: nextCase.chiefComplaintPatientWords || baseRecord.questionnaire.chiefComplaint,
       patientExpectations: nextCase.patientExpectations || baseRecord.questionnaire.patientExpectations,
+      medicalAlertsSummary: nextCase.questionnaire?.medicalHistory?.value || baseRecord.questionnaire.medicalAlertsSummary,
+      allergies: nextCase.questionnaire?.allergies?.value || baseRecord.questionnaire.allergies,
+      medications: nextCase.questionnaire?.medications?.value || baseRecord.questionnaire.medications,
       consentForEducationDeidentified: Boolean(nextCase.consents?.photoEducationalConsent),
       consentSignedOn: nextCase.consents?.signedAt ?? baseRecord.questionnaire.consentSignedOn,
+    },
+    clinicalExam: {
+      ...baseRecord.clinicalExam,
+      extraoral: {
+        ...baseRecord.clinicalExam.extraoral,
+        notes: nextCase.clinicalExam?.extraoral?.notes || baseRecord.clinicalExam.extraoral.notes,
+      },
+      intraoral: {
+        ...baseRecord.clinicalExam.intraoral,
+        notes: nextCase.clinicalExam?.intraoral?.notes || baseRecord.clinicalExam.intraoral.notes,
+      },
+    },
+    retention: {
+      ...baseRecord.retention,
+      debondDate: nextCase.retention?.debondDate || baseRecord.retention.debondDate,
+      wearProtocol: nextCase.retention?.wearProtocol || baseRecord.retention.wearProtocol,
     },
     approvedAnalyses: approvedAnalyses.length > 0 ? approvedAnalyses : baseRecord.approvedAnalyses,
     diagnosisSummary: {

@@ -189,6 +189,18 @@ function makeImg(
   };
 }
 
+export type PresentationOverlayKey =
+  | "ceph"
+  | "profile"
+  | "smile"
+  | "fifths"
+  | "thirds"
+  | "intraoral"
+  | "intraoral_right"
+  | "intraoral_left"
+  | "intraoral_upper"
+  | "intraoral_lower";
+
 export function buildCasePresentationDeck(input: {
   clinicName: string;
   patientName: string;
@@ -202,7 +214,7 @@ export function buildCasePresentationDeck(input: {
   sessionSummaries?: PresentationSessionInput[];
   photoCount?: number;
   mediaAssets?: PresentationMediaAsset[];
-  tracedOverlays?: Partial<Record<"ceph" | "profile" | "smile" | "fifths" | "thirds" | "intraoral", { bytes: Uint8Array; ext: "png" | "jpg" }>>;
+  tracedOverlays?: Partial<Record<PresentationOverlayKey, { bytes: Uint8Array; ext: "png" | "jpg" }>>;
 }): PresentationDeck {
   const { clinicName, record, anonymize } = input;
   const lang = input.lang ?? "ar";
@@ -245,21 +257,40 @@ export function buildCasePresentationDeck(input: {
   );
   const approvedProblems = record.problems.filter((p) => p.approved);
 
-  // Classify photos into standard MSD conference views
-  const imgFrontalRest = pickImageByViews(assets, ["extraoral_frontal_rest", "frontal_rest", "rest"]);
-  const imgFrontalSmile = pickImageByViews(assets, ["extraoral_frontal_smile", "smile"]);
+  // Classify photos into standard MSD conference views (matching OrthoCore REQUIRED_T0_VIEWS + AQLAN views)
+  const imgFrontalRest = pickImageByViews(assets, ["extraoral_frontal", "extraoral_frontal_rest", "frontal_rest", "rest"]);
+  const imgFrontalSmile = pickImageByViews(assets, ["extraoral_smile", "extraoral_frontal_smile", "smile"]);
   const imgProfile = pickImageByViews(assets, ["extraoral_profile", "profile"]);
-  const imgIntraRight = pickImageByViews(assets, ["intraoral_right", "right_buccal", "right"], 1);
-  const imgIntraFront = pickImageByViews(assets, ["intraoral_frontal", "frontal"], 0);
-  const imgIntraLeft = pickImageByViews(assets, ["intraoral_left", "left_buccal", "left"]);
-  const imgIntraUpper = pickImageByViews(assets, ["intraoral_upper", "upper_occlusal", "upper"]);
-  const imgIntraLower = pickImageByViews(assets, ["intraoral_lower", "lower_occlusal", "lower"]);
-  const imgOpg = pickImageByViews(assets, ["opg", "panoramic"]);
+  const imgIntraRight = pickImageByViews(assets, ["intraoral_right", "right_buccal"]);
+  const imgIntraFront = pickImageByViews(assets, ["intraoral_frontal"]);
+  const imgIntraLeft = pickImageByViews(assets, ["intraoral_left", "left_buccal"]);
+  const imgIntraUpper = pickImageByViews(assets, ["intraoral_upper", "upper_occlusal"]);
+  const imgIntraLower = pickImageByViews(assets, ["intraoral_lower", "lower_occlusal"]);
+  const imgOpg = pickImageByViews(assets, ["panoramic_opg", "opg", "panoramic"]);
   const imgCeph = pickImageByViews(assets, ["lateral_ceph", "ceph"]);
-  const imgCast = pickImageByViews(assets, ["cast", "model3d", "model"]);
+  const imgCast = pickImageByViews(assets, ["model_3d_stl", "cast", "model3d", "model"]);
 
-  const boltonAnt = computeBoltonAnalysis(record.clinicalExam.teeth, "anterior");
-  const boltonAll = computeBoltonAnalysis(record.clinicalExam.teeth, "overall");
+  // Merge tooth widths from OrthoCore cast_bolton analysis if entered there
+  const mergedTeeth = { ...record.clinicalExam.teeth };
+  const boltonOc = ocAnalyses.find((a) => a.analysisType === "cast_bolton" && a.toothWidths && typeof a.toothWidths === "object");
+  if (boltonOc && boltonOc.toothWidths) {
+    for (const [fdiStr, wVal] of Object.entries(boltonOc.toothWidths as Record<string, unknown>)) {
+      const fdiNum = Number(fdiStr);
+      const numW = typeof wVal === "number" ? wVal : Number(wVal);
+      if (Number.isInteger(fdiNum) && Number.isFinite(numW) && numW > 0) {
+        mergedTeeth[fdiStr] = {
+          fdi: fdiNum,
+          dentition: mergedTeeth[fdiStr]?.dentition ?? (fdiNum >= 50 ? "primary" : "permanent"),
+          status: mergedTeeth[fdiStr]?.status ?? "present",
+          widthMm: numW,
+          note: mergedTeeth[fdiStr]?.note ?? "",
+        };
+      }
+    }
+  }
+
+  const boltonAnt = computeBoltonAnalysis(mergedTeeth, "anterior");
+  const boltonAll = computeBoltonAnalysis(mergedTeeth, "overall");
 
   // Helper to attach traced overlay or fallback raw photo
   const overlayOrAsset = (
@@ -588,8 +619,8 @@ export function buildCasePresentationDeck(input: {
 
     intraoral_occlusal: () => {
       const imgs = [
-        makeImg(imgIntraUpper, 0.6, 1.55, 3.8, 2.5, "Maxillary Occlusal"),
-        makeImg(imgIntraLower, 0.6, 4.2, 3.8, 2.5, "Mandibular Occlusal"),
+        overlayOrAsset("intraoral_upper", imgIntraUpper, 0.6, 1.55, 3.8, 2.5, "Maxillary Occlusal"),
+        overlayOrAsset("intraoral_lower", imgIntraLower, 0.6, 4.2, 3.8, 2.5, "Mandibular Occlusal"),
       ].filter((x): x is EmbeddedSlideImage => x !== null);
       const missingFdi = Object.values(record.clinicalExam.teeth)
         .filter((t) => t.status === "missing" || t.status === "extracted")
@@ -630,9 +661,9 @@ export function buildCasePresentationDeck(input: {
 
     intraoral_buccal: () => {
       const imgs = [
-        makeImg(imgIntraRight, 0.5, 1.55, 4.0, 2.35, "Right Buccal"),
-        makeImg(imgIntraFront, 4.65, 1.55, 4.0, 2.35, "Frontal"),
-        makeImg(imgIntraLeft, 8.8, 1.55, 4.0, 2.35, "Left Buccal"),
+        overlayOrAsset("intraoral_right", imgIntraRight, 0.5, 1.55, 4.0, 2.35, "Right Buccal"),
+        overlayOrAsset("intraoral", imgIntraFront, 4.65, 1.55, 4.0, 2.35, "Frontal"),
+        overlayOrAsset("intraoral_left", imgIntraLeft, 8.8, 1.55, 4.0, 2.35, "Left Buccal"),
       ].filter((x): x is EmbeddedSlideImage => x !== null);
       const bullets = [
         `Molar Relation: Right (${record.clinicalExam.intraoral.molarRight || "—"}) · Left (${record.clinicalExam.intraoral.molarLeft || "—"})`,
@@ -850,8 +881,8 @@ export function buildCasePresentationDeck(input: {
     },
 
     bolton_analysis: () => {
-      const u6 = [13, 12, 11, 21, 22, 23].map((f) => String(record.clinicalExam.teeth[String(f)]?.widthMm ?? "—"));
-      const l6 = [43, 42, 41, 31, 32, 33].map((f) => String(record.clinicalExam.teeth[String(f)]?.widthMm ?? "—"));
+      const u6 = [13, 12, 11, 21, 22, 23].map((f) => String(mergedTeeth[String(f)]?.widthMm ?? "—"));
+      const l6 = [43, 42, 41, 31, 32, 33].map((f) => String(mergedTeeth[String(f)]?.widthMm ?? "—"));
       const formulaBullets =
         boltonAnt.status === "calculated"
           ? [
