@@ -6,6 +6,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoginPhotoEditor } from "@/components/settings/LoginPhotoEditor";
 import { LOGIN_PHOTO_KEYS } from "@/lib/login-photo";
 import { ClinicHoursEditor } from "@/components/settings/ClinicHoursEditor";
+import { PatientNumberingEditor } from "@/components/settings/PatientNumberingEditor";
+import type { PatientNumberingSnapshot } from "@/lib/patient-numbering";
 import { AnnouncementsManager } from "@/components/AnnouncementsManager";
 import { InstallApp } from "@/components/InstallApp";
 import { PageHeader } from "@/components/PageHeader";
@@ -31,6 +33,7 @@ interface SettingsSnapshot {
   values: Record<string, string>;
   versions: Record<string, string | null>;
   secrets: Record<string, boolean>;
+  patientNumbering?: PatientNumberingSnapshot;
 }
 
 interface MePayload { role?: string | null; displayName?: string | null; }
@@ -100,7 +103,10 @@ function parseSettingsPayload(payload: Record<string, unknown>): SettingsSnapsho
   const secrets = payload.__secrets && typeof payload.__secrets === "object"
     ? payload.__secrets as Record<string, boolean>
     : {};
-  return { values, versions, secrets };
+  const numbering = payload.__patientNumbering as Partial<PatientNumberingSnapshot> | undefined;
+  const patientNumbering = typeof numbering?.prefix === "string" && typeof numbering.nextNumber === "string"
+    ? { prefix: numbering.prefix, nextNumber: numbering.nextNumber, ...(numbering.perPrefix === true && { perPrefix: true as const }) } : undefined;
+  return { values, versions, secrets, patientNumbering };
 }
 
 async function readJson(response: Response): Promise<Record<string, unknown>> {
@@ -440,6 +446,13 @@ export default function SettingsPage() {
                 })}
               </div>
             )}
+
+            {!query && selectedCategory === "patient_workflow" && snapshot.patientNumbering ? (
+              <PatientNumberingEditor
+                initial={snapshot.patientNumbering}
+                onSaved={(patientNumbering) => setSnapshot((current) => ({ ...current, patientNumbering }))}
+              />
+            ) : null}
 
             {!query && selectedCategory === "backup" && canManageCategory(role, "backup") ? (
               <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">

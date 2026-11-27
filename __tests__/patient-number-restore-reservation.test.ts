@@ -1,0 +1,186 @@
+import { describe, expect, it } from "vitest";
+import type { PrefixSnapshot } from "../lib/patient-numbering-policy";
+import type { IndependentNumberingWatermark } from "../lib/restore/numbering-floor-policy";
+import {
+  reserveRestoredNumber,
+  type IndependentReservationBackend,
+  type IndependentReservationTransaction,
+} from "../lib/restore/numbering-reservation";
+
+const archive: PrefixSnapshot = {
+  prefix: "P",
+  allocatedThrough: 7027n,
+  historicalThrough: 7027n,
+  pendingNext: null,
+  historyComplete: true,
+  revision: "synthetic-r1",
+};
+const binding = { lineage: "synthetic_lineage_001", generation: "synthetic_generation_002" };
+
+/** Synthetic model of a serial, independently committed store. Not durable. */
+function model(initial: IndependentNumberingWatermark | null) {
+  let watermark = initial;
+  let tail: Promise<void> = Promise.resolve();
+  let conflict = false;
+  let loseResponse = false;
+  let writes = 0;
+  const backend: IndependentReservationBackend = {
+    async transaction<T>(expected: typeof binding, work: (tx: IndependentReservationTransaction) => Promise<T>): Promise<T> {
+      const previous = tail;
+      let release!: () => void;
+      tail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        if (watermark && (watermark.lineage !== expected.lineage || watermark.generation !== expected.generation)) {
+          throw new Error("fenced");
+        }
+        let staged = watermark;
+        const result = await work({
+          readFresh: async () => staged,
+          advance: async (prior, next) => {
+            if (conflict || prior !== staged || next <= prior.reservedThrough) return false;
+            staged = { ...prior, reservedThrough: next };
+            return true;
+          },
+        });
+        if (staged !== watermark) {
+          watermark = staged;
+          writes++;
+        }
+        if (loseResponse) {
+          loseResponse = false;
+          throw new Error("lost commit response");
+        }
+        return result;
+      } finally {
+        release();
+      }
+    },
+  };
+  return {
+    backend,
+    watermark: () => watermark,
+    writes: () => writes,
+    conflict: () => {
+      conflict = true;
+    },
+    loseResponse: () => {
+      loseResponse = true;
+    },
+  };
+}
+const initial = (): IndependentNumberingWatermark => ({ ...binding, prefix: "P", reservedThrough: 7029n });
+
+describe("independent reservation contract (synthetic model only)", () => {
+  it("serializes concurrent reservations above restored and external high-water", async () => {
+    const store = model(initial());
+    const results = await Promise.all(
+      Array.from({ length: 3 }, () => reserveRestoredNumber(archive, binding, store.backend)),
+    );
+    expect(results).toEqual(["7030", "7031", "7032"].map((reserved) => ({ ok: true, prefix: "P", reserved })));
+    expect(store.watermark()?.reservedThrough).toBe(7032n);
+  });
+
+  it("reserves BRW-01503 after restoring BRW-01500 when 1501 committed and 1502 rolled back", async () => {
+    const brwArchive: PrefixSnapshot = {
+      prefix: "BRW",
+      allocatedThrough: 1500n,
+      historicalThrough: 1500n,
+      pendingNext: null,
+      historyComplete: true,
+      revision: "synthetic-brw-r1",
+    };
+    const store = model({ ...binding, prefix: "BRW", reservedThrough: 1502n });
+    expect(await reserveRestoredNumber(brwArchive, binding, store.backend)).toEqual({
+      ok: true,
+      prefix: "BRW",
+      reserved: "1503",
+    });
+    expect(store.watermark()?.reservedThrough).toBe(1503n);
+  });
+
+  it("does not expose a number on an ambiguous commit and never retries that number", async () => {
+    const store = model(initial());
+    store.loseResponse();
+    expect(await reserveRestoredNumber(archive, binding, store.backend)).toEqual({
+      ok: false,
+      reason: "watermark-reservation-unconfirmed",
+    });
+    expect(store.watermark()?.reservedThrough).toBe(7030n);
+    expect(await reserveRestoredNumber(archive, binding, store.backend)).toEqual({
+      ok: true,
+      prefix: "P",
+      reserved: "7031",
+    });
+  });
+
+  it("does not expose a number or advance on CAS conflict", () =>
+    (async () => {
+      const store = model(initial());
+      store.conflict();
+      expect(await reserveRestoredNumber(archive, binding, store.backend)).toEqual({
+        ok: false,
+        reason: "watermark-reservation-conflict",
+      });
+      expect(store.writes()).toBe(0);
+    })());
+
+  it("fails closed without a backend or watermark", async () => {
+    expect(await reserveRestoredNumber(archive, binding, null)).toEqual({
+      ok: false,
+      reason: "independent-reservation-unavailable",
+    });
+    const store = model(null);
+    expect(await reserveRestoredNumber(archive, binding, store.backend)).toEqual({
+      ok: false,
+      reason: "independent-watermark-unavailable",
+    });
+    expect(store.writes()).toBe(0);
+  });
+
+  it("does not advance for an old generation", async () => {
+    const store = model(initial());
+    expect(
+      await reserveRestoredNumber(archive, { ...binding, generation: "synthetic_generation_001" }, store.backend),
+    ).toEqual({ ok: false, reason: "watermark-reservation-unconfirmed" });
+    expect(store.writes()).toBe(0);
+  });
+
+  it("does not let a queued caller replace unverified archive evidence while waiting for admission", async () => {
+    const store = model(initial());
+    const mutable = { ...archive, historyComplete: false };
+    const pending = reserveRestoredNumber(mutable, binding, store.backend);
+    mutable.historyComplete = true;
+    expect(await pending).toEqual({ ok: false, reason: "history-unverified" });
+    expect(store.writes()).toBe(0);
+  });
+
+  it("pins the generation, prefix and archive floor before asynchronous admission", async () => {
+    const store = model(initial());
+    const mutableBinding = { ...binding };
+    const mutableArchive = { ...archive, pendingNext: 7050n };
+    const pending = reserveRestoredNumber(mutableArchive, mutableBinding, store.backend);
+    mutableBinding.generation = "synthetic_generation_003";
+    mutableArchive.prefix = "BRW";
+    mutableArchive.pendingNext = 7030n;
+    expect(await pending).toEqual({ ok: true, prefix: "P", reserved: "7050" });
+    expect(store.watermark()?.reservedThrough).toBe(7050n);
+  });
+
+  it("honors the pending 7000 floor with no earlier reservation above it", async () => {
+    const store = model({ ...initial(), reservedThrough: 42n });
+    const start = { ...archive, allocatedThrough: 42n, historicalThrough: 42n, pendingNext: 7000n };
+    expect(await reserveRestoredNumber(start, binding, store.backend)).toEqual({
+      ok: true,
+      prefix: "P",
+      reserved: "7000",
+    });
+    expect(await reserveRestoredNumber(start, binding, store.backend)).toEqual({
+      ok: true,
+      prefix: "P",
+      reserved: "7001",
+    });
+  });
+});

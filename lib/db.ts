@@ -1543,9 +1543,15 @@ export function ensureSchema(): Promise<void> {
       SELECT setval('patient_number_seq', GREATEST(existing.max_number, 7000), existing.max_number >= 7000)
       FROM (SELECT COALESCE(MAX(${counterIdentifierBigintSql("patient_number")}), 0) AS max_number FROM patients) existing,
            patient_number_seq current_number
-      WHERE current_number.last_value < 7000
+      -- The independently managed series validate their own history after
+      -- migrations. A suffix from another series must never advance P here.
+      WHERE pg_catalog.to_regnamespace('numbering_bridge') IS NULL
+        AND NOT EXISTS (SELECT FROM pg_catalog.pg_constraint
+          WHERE conrelid = pg_catalog.to_regclass('public.patient_numbering_policy')
+            AND conname = 'patient_numbering_managed_first_range')
+        AND (current_number.last_value < 7000
          OR existing.max_number > current_number.last_value
-         OR (existing.max_number = current_number.last_value AND NOT current_number.is_called);
+         OR (existing.max_number = current_number.last_value AND NOT current_number.is_called));
       SELECT setval('invoice_number_seq', GREATEST(
         (SELECT last_value FROM invoice_number_seq),
         (SELECT COALESCE(MAX(${counterIdentifierBigintSql("invoice_number")}), 0) FROM invoices)
@@ -2936,9 +2942,10 @@ async function resolveVisitPatientDetailed(
   }
   if (!patientId) {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    const numberSql = await resolvePatientNumberSql(client);
     const { rows } = await client.query(
       `INSERT INTO patients (patient_number, full_name, phone)
-       VALUES (${PATIENT_NUMBER_SQL}, $1, $2)
+       VALUES (${numberSql}, $1, $2)
        RETURNING id`,
       [visit.patient_name, phone],
     );
@@ -3608,12 +3615,20 @@ const PATIENT_IMPORT_LOCK_KEY = "patient_import";
 export const PATIENT_CREATE_SHARED_LOCK_SQL = `SELECT pg_advisory_xact_lock_shared(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
 const PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('${PATIENT_IMPORT_LOCK_KEY}'))`;
 
+async function resolvePatientNumberSql(client: { query: (text: string, values?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> }): Promise<string> {
+  const { rows } = await client.query(
+    "SELECT pg_catalog.to_regprocedure('public.aqlan_next_patient_number()') IS NOT NULL AS managed",
+  );
+  return rows[0]?.managed === true ? "public.aqlan_next_patient_number()" : PATIENT_NUMBER_SQL;
+}
+
 async function insertPatientRow(client: DbClient, input: PatientInput): Promise<PatientRow> {
+  const numberSql = await resolvePatientNumberSql(client);
   const { rows } = await client.query<PatientRow>(
     `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                            birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
      VALUES (
-       ${PATIENT_NUMBER_SQL},
+       ${numberSql},
        $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
        $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
      RETURNING ${PATIENT_COLUMNS}`,
@@ -3718,13 +3733,14 @@ export async function commitPatientImport(input: {
       row.patient && (row.status === "new" || (input.includePossibleDuplicates && row.status === "possible_duplicate")));
     const created: { line: number; id: number; patientNumber: string; fullName: string }[] = [];
     let balances = 0;
+    const numberSql = toCreate.length > 0 ? await resolvePatientNumberSql(client) : PATIENT_NUMBER_SQL;
     for (const row of toCreate) {
       const patient = row.patient!;
       const inserted = await client.query<{ id: number; patient_number: string }>(
         `INSERT INTO patients (patient_number, full_name, phone, alt_phone, gender, birth_year, address, medical_alert, note,
                                birth_date, guardian_name, guardian_phone, national_id, referral_source, referred_by)
          VALUES (
-           ${PATIENT_NUMBER_SQL},
+           ${numberSql},
            $1, $2::text, $3::text, $4, $5::int, $6::text, $7::text, $8::text,
            $9::date, $10::text, $11::text, $12::text, $13::text, $14::text)
          RETURNING id, patient_number`,
@@ -5189,10 +5205,11 @@ export async function confirmBookingRequest(
   let patientId = existing[0]?.id;
   if (!patientId) {
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+    const numberSql = await resolvePatientNumberSql(client);
     const { rows: created } = await client.query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name, phone)
        VALUES (
-         ${PATIENT_NUMBER_SQL},
+         ${numberSql},
          $1, $2)
        RETURNING id`,
       [request.full_name, request.phone],
@@ -16280,6 +16297,8 @@ export async function isPeriodLocked(date: string): Promise<boolean> {
 // ─── النسخة الاحتياطية الكاملة ───────────────────────────────────────────────
 
 import { backupSelectColumns, insertStatement, insertionOrder, sequenceResets } from "./backup";
+import { patientNumberBackupSql } from "./patient-number-backup-sql";
+import { managedPatientNumberRestoreGuard, patientNumberRestoreGuard } from "./restore/sql.mjs";
 
 /**
  * يبني ملف النسخة الاحتياطية سطرًا سطرًا.
@@ -16321,11 +16340,46 @@ export async function* backupSqlLines(source?: Queryable): AsyncGenerator<string
 export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<string> {
 
   const { rows: tableRows } = (await pool.query(
-    `SELECT table_name FROM information_schema.tables
-      WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-      ORDER BY table_name`,
-  )) as { rows: { table_name: string }[] };
-  const tables = tableRows.map((row) => row.table_name);
+    `SELECT table_name::text AS table_name, false AS uncaptured_patients
+     FROM information_schema.tables
+     WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+     UNION ALL
+     SELECT NULL::text, true
+     WHERE EXISTS (
+       SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace
+       WHERE n.nspname='public' AND c.relname='patients'
+     ) AND NOT EXISTS (
+       SELECT 1 FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name = 'patients'
+     )
+     ORDER BY table_name`,
+  )) as { rows: { table_name: string | null; uncaptured_patients?: boolean }[] };
+  const tables = tableRows.map((row) => {
+    // information_schema is visibility-filtered; an existing public relation
+    // cannot masquerade as a deliberately patient-less export.
+    if (row.uncaptured_patients || row.table_name === null) throw new Error("Public patients table is not exportable");
+    return row.table_name;
+  });
+
+  const { rows: hiddenNumberingState } = await pool.query(
+    `SELECT 1 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relkind = 'r'
+       AND c.relname IN ('patient_numbering_policy', 'patient_number_retirements', 'audit_log')
+       AND NOT EXISTS (
+         SELECT 1 FROM information_schema.tables t
+         WHERE t.table_schema = 'public' AND t.table_type = 'BASE TABLE' AND t.table_name = c.relname
+       )`,
+  );
+  if (hiddenNumberingState.length) throw new Error("Patient numbering policy, patients and audit must be fully exportable");
+  const { rows: managedNumbering } = await pool.query(
+    `SELECT 1 WHERE pg_catalog.to_regnamespace('numbering_bridge') IS NOT NULL
+      OR EXISTS (SELECT FROM pg_catalog.pg_constraint
+        WHERE conrelid = pg_catalog.to_regclass('public.patient_numbering_policy')
+          AND conname = 'patient_numbering_managed_first_range')`,
+  );
+  if (managedNumbering.length && !tables.includes("patient_numbering_policy")) {
+    throw new Error("Managed patient numbering policy must be exportable");
+  }
 
   // الترتيب من مفاتيح القاعدة نفسها لا من قائمة مكتوبة بيد: قائمةٌ يدوية تنسى جدولًا
   // يُضاف غدًا، فتفشل الاستعادة بخطأ مفتاح أجنبي في أسوأ لحظة.
@@ -16337,6 +16391,9 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
       WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'`,
   )) as { rows: { child: string; parent: string }[] };
   const dependsOn = new Map(tables.map((table) => [table, new Set<string>()]));
+  // Historical numbers are inserted verbatim into a fresh target; installing the
+  // active policy first would cause its allocation guard to reject those rows.
+  dependsOn.get("patient_numbering_policy")?.add("patients");
   for (const row of fkRows) {
     // A patient's optional photo points back to a document owned by that patient.
     // Restore patients first with this one column null, then restore the link below.
@@ -16373,6 +16430,12 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
   yield `-- أُخذت: ${new Date().toISOString()}\n`;
   yield `-- الاستعادة: على قاعدة فارغة فتحها البرنامج مرة واحدة فأنشأ جداولها.\n`;
   yield `BEGIN;\n`;
+  if (tables.includes("patients")) {
+    // Also protects SQL downloads replayed directly in psql. Take locks before
+    // checking emptiness so a concurrent registration cannot interleave.
+    yield `${patientNumberRestoreGuard(tables.includes("patient_numbering_policy"))}\n`;
+    if (managedNumbering.length) yield `${managedPatientNumberRestoreGuard}\n`;
+  }
 
   // العدّادات تُعاد فقط لجداول لها عمود `id`. الجداول ذات المفتاح الطبيعي —
   // الإعدادات بمفتاحها النصّي، والأرصدة الافتتاحية برقم المريض — لا عدّاد لها،
@@ -16435,6 +16498,22 @@ export async function* backupSnapshotSqlLines(pool: Queryable): AsyncGenerator<s
     yield `UPDATE patient_families SET guarantor_patient_id = ${link.patientId} WHERE id = ${link.familyId};\n`;
   }
   for (const reset of sequenceResets(withSerialId)) yield `${reset}\n`;
+  // Only genuinely patient-less exports omit fixed-P state. In a patient
+  // export an absent, unreadable or malformed public cursor is a hard failure.
+  if (tables.includes("patients")) {
+    // Standalone numbering isn't an id-owned serial. Capture it last:
+    // sequence state is non-MVCC, even inside this row snapshot. A later
+    // observation can safely leave a gap; no backup can cover writes after it.
+    const { rows: patientNumberState } = await pool.query(
+      `SELECT p.last_value::text, p.is_called FROM public.patient_number_seq p
+       WHERE EXISTS (
+         SELECT 1 FROM pg_catalog.pg_sequence s
+         WHERE s.seqrelid=pg_catalog.to_regclass('public.patient_number_seq')
+       )`,
+    );
+    if (patientNumberState.length !== 1) throw new Error("Patient-number sequence snapshot unavailable");
+    yield `${patientNumberBackupSql(patientNumberState[0].last_value, patientNumberState[0].is_called)}\n`;
+  }
   yield `COMMIT;\n`;
 }
 

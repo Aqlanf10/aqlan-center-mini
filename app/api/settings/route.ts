@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
-import { getSettings, readStoredSettings, saveSettingsAudited } from "@/lib/db";
+import { getPool, getSettings, readStoredSettings, saveSettingsAudited } from "@/lib/db";
 import { ALL_SETTING_KEYS, SETTING_DEFAULTS, withDefaults, type SettingKey } from "@/lib/settings";
 import { settingDefinition } from "@/lib/settings-definitions";
 import { canManageCategory, denialMessage, roleCan } from "@/lib/settings-permissions";
 import { validateSettingSet, validateTypedSetting } from "@/lib/settings-validate";
 import { requireSession } from "@/lib/session";
+import { canPerformOwnerOperation } from "@/lib/staff-capabilities";
+import { loadPatientNumberingOwnerAccess } from "@/lib/patient-numbering-owner-provider";
+import { readPatientNumbering } from "@/lib/patient-numbering";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +54,11 @@ export async function GET() {
     return NextResponse.json({ message: "عرض الإعدادات غير مسموح لهذا الدور." }, { status: 403 });
   }
   try {
-    return await settingsSnapshot();
+    const ownerAccess = await loadPatientNumberingOwnerAccess(session);
+    const extra = ownerAccess && canPerformOwnerOperation(ownerAccess, "settings.security.change")
+      ? { __patientNumbering: await readPatientNumbering(getPool()) }
+      : {};
+    return await settingsSnapshot(extra);
   } catch {
     return NextResponse.json({ message: "تعذّر تحميل الإعدادات." }, { status: 500 });
   }

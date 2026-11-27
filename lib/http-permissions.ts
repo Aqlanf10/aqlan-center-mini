@@ -280,6 +280,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/settings/material-rates": { GET: CLINIC, POST: ADMIN },
   "/api/settings/messaging": { GET: ADMIN, PUT: ADMIN },
   "/api/settings/messaging/test": { POST: ADMIN },
+  "/api/settings/patient-numbering": { PATCH: ADMIN },
   "/api/settings/production-backup": { POST: ADMIN },
   "/api/settings/readiness": { GET: ADMIN },
   "/api/settings/reset": { GET: ADMIN, POST: ADMIN },
