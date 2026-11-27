@@ -5,6 +5,13 @@
  */
 import { CLINIC_BASE_CURRENCY, isCurrency, parseAmount, type Currency } from "./money";
 
+export class ReceptionOpeningDisabled extends Error {
+  constructor() {
+    super("تسجيل الرصيد السابق ليس من صلاحيتك — اتركه للمدير.");
+    this.name = "ReceptionOpeningDisabled";
+  }
+}
+
 export interface OpeningAccess {
   add: boolean;
   edit: boolean;

@@ -47,6 +47,12 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role === "reception") {
+    return NextResponse.json(
+      { message: "يمكن للاستقبال رفع المستندات الخارجية فقط دون عرض الصور السريرية." },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
   const id = await idFrom(context);
   if (!id) return NextResponse.json({ message: "رقم المستند غير صالح." }, { status: 400 });
 

@@ -32,7 +32,7 @@ async function stillOwner(tx: NumberingTransaction, first: Authenticated) {
     && fresh.sessionBinding === first.sessionBinding;
 }
 function postgresRevision(value: unknown) {
-  return revision(value) ? /^(\d{1,19}):([A-Z]):([A-Z]):([1-9][0-9]{0,17}):([01]):([0-9]{1,18}):([01])$/.exec(value) : null;
+  return revision(value) ? /^(\d{1,19}):([A-Z]{1,6}):([A-Z]{1,6}):([1-9][0-9]{0,17}):([01]):([0-9]{1,18}):([01])$/.exec(value) : null;
 }
 function validatedReceipt(raw: Awaited<ReturnType<NumberingTransaction["replay"]>>, currentRevision: string): AppliedNumbering | null {
   if (!raw || typeof raw.intent !== "string" || raw.intent.length > 4096 || !raw.result) return null;
@@ -122,7 +122,7 @@ export function createPatientNumberingSettings(dependencies: Dependencies | null
           if (!current.historyComplete) return refusal("history-unverified");
           const next = current.pendingNext ?? current.allocatedThrough + 1n;
           const exhausted = current.pendingNext === null && current.allocatedThrough === PATIENT_NUMBER_MAX;
-          if (!/^[A-Z]$/.test(current.prefix) || current.historicalThrough < 0n
+          if (!/^[A-Z]{1,6}$/.test(current.prefix) || current.historicalThrough < 0n
             || current.historicalThrough > PATIENT_NUMBER_MAX || current.allocatedThrough < 0n
             || (!exhausted && (next < 1n || next <= current.historicalThrough || next > PATIENT_NUMBER_MAX))) {
             return refusal("invalid-snapshot");

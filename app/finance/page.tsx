@@ -40,6 +40,7 @@ import { financeAccessFor } from "@/lib/finance-permissions";
 import { useLabBalanceOverview } from "@/components/finance/useLabBalanceOverview";
 import { EXPENSE_NOT_PERSISTED, EXPENSE_UNCERTAIN, beginExpenseAttempt, sendExpenseAttempt, sessionStorageOrNull } from "@/lib/expense-attempt";
 import PendingExpenseAttempts from "@/components/finance/PendingExpenseAttempts";
+import { ReceptionShift } from "./ReceptionShift";
 
 interface Feed {
   /** Resolved server zone; optional for compatibility with an older shift feed. */
@@ -133,6 +134,14 @@ interface SelectedCollectPatient {
 }
 
 export default function FinancePage() {
+  const session = useSession();
+  if (!session?.canonical && session?.role === "reception") {
+    return <ReceptionShift />;
+  }
+  return <AuthorizedFinanceWorkspace />;
+}
+
+function AuthorizedFinanceWorkspace() {
   const session = useSession();
   const principalKey = `${session?.username ?? ""}:${session?.role ?? ""}`;
   const admin = isAdmin(session?.role);

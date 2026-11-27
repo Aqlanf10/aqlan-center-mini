@@ -7,7 +7,7 @@ import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton, ReprintMark } from "@/components/PrintButton";
 import { VoucherAttachments } from "@/components/VoucherAttachments";
-import { canViewMoney } from "@/lib/roles";
+import { canReadExpenseVoucher } from "@/lib/expense-voucher-access";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,7 @@ export default async function VoucherPage({ params }: { params: Promise<{ id: st
   // الطبيب لا يرى السندات والفواتير: صفحة الطباعة بابٌ خلفي إلى المال لو تُركت
   // مفتوحة لكل من يملك جلسة.
   const session = await requireSession();
-  if (!session || !canViewMoney(session.role)) notFound();
+  if (!session || !canReadExpenseVoucher(session)) notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);

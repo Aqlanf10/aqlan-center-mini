@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { readReceptionPatientAccount } from "@/lib/reception-patient-account";
+import { CLINIC_BASE_CURRENCY } from "@/lib/money";
 import {
   getSettings, listPatientPlans, patientLedger, patientReceiptRemainders, patientReversedInstallmentRecoveries,
 } from "@/lib/db";
@@ -52,6 +54,75 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
 
   try {
+    if (session.role === "reception") {
+      const expanded = new URL(_request.url).searchParams.get("view") === "account";
+      const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+      const [account, settings, installmentRecovery, arrangements] = await Promise.all([
+        readReceptionPatientAccount(id, expanded),
+        getSettings().catch(() => null),
+        patientReversedInstallmentRecoveries(id),
+        listLegacyBalanceArrangements(id, today),
+      ]);
+      const openingAccess = openingBalanceAccess(session.role, settings?.["finance.reception_adds_opening_balance"] === "true");
+      const legacy = {
+        legacyBalanceArrangements: arrangements.map(({ id: arrId, currency, cadence, installmentMinor, startingDueMinor, firstDueDate, progress }) => ({
+          id: arrId,
+          currency,
+          cadence,
+          installmentMinor,
+          startingDueMinor,
+          firstDueDate,
+          progress,
+          note: null,
+        })),
+        legacyOpeningPositions: account.legacyOpeningPositions,
+        legacyArrangementAccess: { manage: true },
+      };
+      if (expanded && account.invoiceWorkspace) {
+        const ledger = account.invoiceWorkspace;
+        const receiptProvenance = await readReceiptProvenance(ledger.payments.map((payment) => payment.id));
+        return NextResponse.json(
+          {
+            ...ledger,
+            receiptProvenance,
+            ...legacy,
+            openingAccess,
+            clinicTimeZone: CLINIC_TIME_ZONE,
+            installmentRecovery,
+            opening: ledger.openings.find((row) => row.currency === CLINIC_BASE_CURRENCY) ?? null,
+          },
+          { headers: { "Cache-Control": "private, no-store" } },
+        );
+      }
+      const selectable = new Set(account.targets.invoices.map((item) => item.id));
+      return NextResponse.json(
+        {
+          ...legacy,
+          clinicTimeZone: CLINIC_TIME_ZONE,
+          installmentRecovery,
+          openingAccess,
+          openings: account.openings,
+          opening: account.openings.find((row) => row.currency === CLINIC_BASE_CURRENCY) ?? null,
+          invoices: account.invoices
+            .filter((item) => selectable.has(item.id))
+            .map((item) => ({
+              id: item.id,
+              invoiceNumber: item.number,
+              totalMinor: item.netMinor,
+              discountMinor: 0,
+              baseCurrency: item.currency,
+              status: item.status,
+            })),
+          plans: account.targets.plans.map((item) => ({
+            id: item.id,
+            title: `اتفاق #${item.id}`,
+            baseCurrency: item.currency,
+            status: "active",
+          })),
+        },
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
     const [
       { invoices, payments, openings }, plans, settings, receiptRemaining,

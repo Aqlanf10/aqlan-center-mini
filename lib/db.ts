@@ -144,6 +144,8 @@ import {
 import {
   DOCUMENT_PREFIX_SETTING, OTHER_KINDS_NUMBERS_SQL, documentKindOfSetting, documentNumberSql,
 } from "./document-numbers";
+import { auditSnapshot, PATIENT_AUDIT_FIELDS } from "./audit-diff";
+import { openingBalanceAccess, ReceptionOpeningDisabled, type OpeningInput } from "./opening-access";
 import { currentAuditSource } from "./audit-source";
 import { drawerBreakdown, drawerDifference, hasDifference, type Amounts, type DrawerBreakdown } from "./shift-close";
 import { hasManualCashLine, ManualCashEntryConflictError } from "./manual-cash-entry";
@@ -3852,20 +3854,108 @@ export async function createPatientWith(client: Pick<DbClient, "query">, input: 
   return toPatient(rows[0]);
 }
 
-/** Ordinary form registration: check against committed imports before allocating. */
+export interface RegistrationCommand {
+  actor: string;
+  actorId: number;
+  actorRole: string;
+  key: string | null;
+  opening: OpeningInput | null;
+  openingDateSpecified: boolean;
+}
+
+export type RegistrationAcknowledgment = Pick<Patient, "id" | "patientNumber" | "fullName" | "phone">;
+export type RegistrationResult =
+  | { ok: true; patient: Patient | RegistrationAcknowledgment }
+  | { ok: false; duplicates: DuplicateMatch[] }
+  | { ok: false; status: 403 | 409 | 410; message: string };
+
+/** Ordinary form registration: check against committed imports before allocating,
+ * and serialize Idempotency-Key retries against lost responses (#584/#585). */
 export async function createPatientWithDuplicateReview(
-  input: PatientInput, confirmed: boolean,
-): Promise<{ ok: true; patient: Patient } | { ok: false; duplicates: DuplicateMatch[] }> {
+  input: PatientInput,
+  confirmed: boolean,
+  command?: RegistrationCommand,
+): Promise<RegistrationResult> {
   await ensureSchema();
-  return withIsolation(getPool(), "READ COMMITTED", async (client) => {
-    // This lock can wait for CSV import. The following statement must see the
-    // completed import on this very connection, even with a different DB default.
+  if (!command) {
+    return withIsolation(getPool(), "READ COMMITTED", async (client) => {
+      await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
+      if (!confirmed) {
+        const duplicates = findDuplicates(input, await duplicateCandidatesWith(client, input));
+        if (duplicates.length > 0) return { ok: false, duplicates } as const;
+      }
+      return { ok: true, patient: await createPatientWith(client, input) } as const;
+    });
+  }
+
+  const { actor, actorRole, opening } = command;
+  const receipt = command.key === null ? null : createHash("sha256")
+    .update(JSON.stringify(["patient.register.v1", command.actorId, command.key])).digest("hex");
+  const intent = receipt && createHash("sha256").update(JSON.stringify([
+    receipt, input, opening && { ...opening, asOfDate: command.openingDateSpecified ? opening.asOfDate : null },
+  ])).digest("hex");
+
+  return withIsolation(getPool(), "READ COMMITTED", async (client): Promise<RegistrationResult> => {
+    const settings = opening ? await getSettingsWith(client) : null;
+    if (settings && !openingBalanceAccess(actorRole, settings["finance.reception_adds_opening_balance"] === "true").add) {
+      return { ok: false, status: 403, message: "تسجيل الرصيد السابق ليس من صلاحيتك — اتركه للمدير." };
+    }
+    if (receipt) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [receipt]);
+      const { rows: [prior] } = await client.query<{ id: string; number: string; intent: string }>(
+        `SELECT entity_id AS id, details->>'رقم_الملف' AS number, details->>'registrationIntent' AS intent
+           FROM audit_log WHERE action='patient.create' AND entity='patient'
+             AND details->>'registrationReceipt'=$1 LIMIT 1`,
+        [receipt],
+      );
+      if (prior) {
+        if (prior.intent !== intent) return { ok: false, status: 409, message: "استُخدم مفتاح التسجيل لطلب مختلف." };
+        const id = Number(prior.id);
+        const exists = await client.query("SELECT 1 FROM patients WHERE id=$1 AND patient_number=$2", [id, prior.number]);
+        if (!exists.rows.length) return { ok: false, status: 410, message: "اكتمل التسجيل سابقًا ولم يعد الملف متاحًا." };
+        return { ok: true, patient: { id, patientNumber: prior.number, fullName: input.fullName, phone: normalizePatientPhone(input.phone) } };
+      }
+    }
+    if (opening) {
+      const cutoff = settings?.["finance.locked_before"]?.trim();
+      if (cutoff && opening.asOfDate < cutoff) {
+        return { ok: false, status: 409, message: "تاريخ الرصيد السابق في فترة مقفلة. اختر تاريخًا بعد تاريخ الإقفال." };
+      }
+    }
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     if (!confirmed) {
       const duplicates = findDuplicates(input, await duplicateCandidatesWith(client, input));
-      if (duplicates.length > 0) return { ok: false, duplicates } as const;
+      if (duplicates.length > 0) return { ok: false, duplicates };
     }
-    return { ok: true, patient: await createPatientWith(client, input) } as const;
+    const patient = await createPatientWith(client, input);
+    const { id, fullName, patientNumber, phone } = patient;
+    await insertAuditRow(client, {
+      action: "patient.create",
+      entity: "patient",
+      entityId: id,
+      entityLabel: `${fullName} (${patientNumber})`,
+      details: {
+        ...auditSnapshot(patient as unknown as Record<string, unknown>, PATIENT_AUDIT_FIELDS),
+        تأكيد_رغم_التكرار: confirmed,
+        ...(receipt ? { registrationReceipt: receipt, registrationIntent: intent } : {}),
+      },
+      actor,
+      actorRole,
+    });
+    if (opening) {
+      const saved = await setPatientOpeningBalance({ ...opening, patientId: id, createdBy: actor, addOnly: true }, client);
+      if (!saved) throw new Error("Opening balance missing during registration");
+      await insertAuditRow(client, {
+        action: "opening_balance.set",
+        entity: "patient",
+        entityId: id,
+        entityLabel: fullName,
+        details: { المبلغ: opening.amountMinor, العملة: opening.currency, التاريخ: opening.asOfDate, ملاحظة: opening.note, عند_التسجيل: true },
+        actor,
+        actorRole,
+      });
+    }
+    return { ok: true, patient: receipt ? { id, fullName, patientNumber, phone } : patient };
   });
 }
 
@@ -21541,10 +21631,10 @@ const OPENING_SELECT = `SELECT o.patient_id, p.full_name, p.phone, o.currency, o
 
 /** رصيدٌ افتتاحي بعملةٍ بعينها (الأساس افتراضًا). */
 export async function getPatientOpeningBalance(
-  patientId: number, currency: Currency = CLINIC_BASE_CURRENCY,
+  patientId: number, currency: Currency = CLINIC_BASE_CURRENCY, client?: DbClient,
 ): Promise<OpeningBalance | null> {
-  await ensureSchema();
-  const { rows } = await getPool().query<OpeningRow>(
+  if (!client) await ensureSchema();
+  const { rows } = await (client ?? getPool()).query<OpeningRow>(
     `${OPENING_SELECT} WHERE o.patient_id = $1 AND o.currency = $2`,
     [patientId, currency],
   );
@@ -21848,14 +21938,21 @@ async function assertOpeningCorrectionAllowedInTx(
   if (!preview.allowed) throw new OpeningCorrectionRefused(preview.code!, preview.message!);
 }
 
-export async function setPatientOpeningBalance(input: SetOpeningBalanceInput): Promise<OpeningBalance | null> {
-  await ensureSchema();
+export async function setPatientOpeningBalance(input: SetOpeningBalanceInput, transaction?: DbClient): Promise<OpeningBalance | null> {
+  if (!transaction) await ensureSchema();
   const currency = input.currency ?? CLINIC_BASE_CURRENCY;
   const saved = await withTransaction(getPool(), async (client): Promise<number | null> => {
+    if (input.addOnly) {
+      const { rows: [actor] } = await client.query<{ role: string }>("SELECT role FROM users WHERE username = $1 FOR SHARE", [input.createdBy]);
+      if (actor?.role === "reception") {
+        const settings = await getSettingsWith(client);
+        if (settings["finance.reception_adds_opening_balance"] !== "true") throw new ReceptionOpeningDisabled();
+      }
+    }
     if (!input.addOnly) await assertOpeningCorrectionAllowedInTx(client, input.patientId, currency, input.amountMinor);
     return (await setPatientOpeningBalanceInTx(client, input))?.patientId ?? null;
-  });
-  return saved === null ? null : getPatientOpeningBalance(saved, currency);
+  }, transaction);
+  return saved === null ? null : getPatientOpeningBalance(saved, currency, transaction);
 }
 
 /** (INV-LEGACY) قلب المسح داخل معاملةٍ قائمة — يعيد سطر السجلّ، أو null إن لم يكن رصيد. */

@@ -1,4 +1,5 @@
 import "server-only";
+import { createHash } from "node:crypto";
 import { CLINIC_TIME_ZONE, PATIENT_CREATE_SHARED_LOCK_SQL, createPatientWith, duplicateCandidatesWith, getPatientWith, getPool, getSettingsWith, insertAuditRow, patientInDoctorScopeWith, recordContactConsentWith, updatePatientWith, type DbClient } from "./db";
 import { PATIENT_AUDIT_FIELDS, auditChanges, auditSnapshot } from "./audit-diff";
 import { duplicateWarning, findDuplicates, type DuplicateMatch } from "./duplicates";
@@ -27,15 +28,37 @@ import { staffOperationCapabilities, staffOperationIdentity, staffOperationPatie
  */
 export type CanonicalPatientCreateResult =
   | { readonly kind: "created"; readonly patient: { id: number; patientNumber: string; fullName: string } }
-  | { readonly kind: "duplicates"; readonly message: string; readonly duplicates: readonly DuplicateMatch[]; readonly disclosed: boolean };
+  | { readonly kind: "duplicates"; readonly message: string; readonly duplicates: readonly DuplicateMatch[]; readonly disclosed: boolean }
+  | { readonly kind: "conflict"; readonly status: 409 | 410; readonly message: string };
 
 export async function commandCanonicalPatientCreate(
   session: VerifiedDurableSession,
   input: PatientInput,
   confirmDuplicate: boolean,
   pool = getPool(),
+  requestKey: string | null = null,
 ): Promise<CanonicalPatientCreateResult> {
   return withStaffOperation(pool, session, "patients.create", async (client, handle) => {
+    const actor = await staffOperationIdentity(client, handle, "patients.create");
+    const receipt = requestKey === null ? null : createHash("sha256")
+      .update(JSON.stringify(["patient.register.canonical.v1", actor.username, requestKey])).digest("hex");
+    const intent = receipt && createHash("sha256").update(JSON.stringify([receipt, input])).digest("hex");
+    if (receipt) {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [receipt]);
+      const { rows: [prior] } = await client.query<{ id: string; number: string; intent: string }>(
+        `SELECT entity_id AS id, details->>'رقم_الملف' AS number, details->>'registrationIntent' AS intent
+           FROM audit_log WHERE action='patient.create' AND entity='patient'
+             AND details->>'registrationReceipt'=$1 LIMIT 1`,
+        [receipt],
+      );
+      if (prior) {
+        if (prior.intent !== intent) return { kind: "conflict", status: 409, message: "استُخدم مفتاح التسجيل لطلب مختلف." };
+        const id = Number(prior.id);
+        const exists = await client.query("SELECT 1 FROM patients WHERE id=$1 AND patient_number=$2", [id, prior.number]);
+        if (!exists.rows.length) return { kind: "conflict", status: 410, message: "اكتمل التسجيل سابقًا ولم يعد الملف متاحًا." };
+        return { kind: "created", patient: { id, patientNumber: prior.number, fullName: input.fullName } };
+      }
+    }
     await client.query(PATIENT_CREATE_SHARED_LOCK_SQL);
     if (!confirmDuplicate) {
       const matches = findDuplicates(input, await duplicateCandidatesWith(client, input));
@@ -45,11 +68,14 @@ export async function commandCanonicalPatientCreate(
       }
     }
     const created = await createPatientWith(client, input);
-    const actor = await staffOperationIdentity(client, handle, "patients.create");
     await insertAuditRow(client, {
       action: "patient.create",
       entity: "patient", entityId: created.id, entityLabel: `${created.fullName} (${created.patientNumber})`,
-      details: { ...auditSnapshot(created as unknown as Record<string, unknown>, PATIENT_AUDIT_FIELDS), تأكيد_رغم_التكرار: confirmDuplicate },
+      details: {
+        ...auditSnapshot(created as unknown as Record<string, unknown>, PATIENT_AUDIT_FIELDS),
+        تأكيد_رغم_التكرار: confirmDuplicate,
+        ...(receipt ? { registrationReceipt: receipt, registrationIntent: intent } : {}),
+      },
       actor: actor.username, actorRole: actor.role,
     });
     return { kind: "created", patient: { id: created.id, patientNumber: created.patientNumber, fullName: created.fullName } };

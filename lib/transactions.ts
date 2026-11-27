@@ -20,7 +20,10 @@ import type { DbClient, DbPool } from "./db";
 export async function withTransaction<T>(
   pool: DbPool,
   work: (client: DbClient) => Promise<T>,
+  existingTransaction?: DbClient,
 ): Promise<T> {
+  // The caller owns commit, rollback and release when composing multiple writes.
+  if (existingTransaction) return work(existingTransaction);
   return runOwnedTransaction(pool, "BEGIN", work);
 }
 

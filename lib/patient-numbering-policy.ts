@@ -2,7 +2,9 @@
  * No production caller until trusted owner binding and transactional integration
  * are reviewed. Every snapshot must be read under the future allocator lock.
  */
-// Existing portal accepts at most 20 characters: one letter + hyphen + 18 digits.
+// Existing portal and archive invariants accept at most 20 characters total (e.g. P-07000, BRW-07429).
+export const MAX_PATIENT_NUMBER_LENGTH = 20;
+export const PATIENT_PREFIX_PATTERN = /^[A-Z]{1,6}$/;
 export const PATIENT_NUMBER_MAX = 999999999999999999n;
 export interface NumberingRequest { prefix: string; next: string }
 export interface PrefixSnapshot {
@@ -21,19 +23,25 @@ export type NumberingPlan =
   | { ok: false; reason: string }
   | { ok: true; prefix: string; next: string; preview: string; expectedRevision: string };
 
+export function formatCanonicalPatientNumber(prefix: string, numericText: string): string {
+  return `${prefix}-${numericText.padStart(5, "0")}`;
+}
+
 export function parseNumberingRequest(rawPrefix: unknown, rawNext: unknown): NumberingRequest | null {
   if (typeof rawPrefix !== "string" || typeof rawNext !== "string") return null;
   const prefix = rawPrefix.trim().toUpperCase();
   const next = rawNext.trim();
   // No scientific notation, signs, fractions, Unicode lookalikes or JS rounding.
-  if (!/^[A-Z]$/.test(prefix) || !/^[1-9][0-9]*$/.test(next) || next.length > 18) return null;
+  if (!PATIENT_PREFIX_PATTERN.test(prefix) || !/^[1-9][0-9]*$/.test(next) || next.length > 18) return null;
+  if (formatCanonicalPatientNumber(prefix, next).length > MAX_PATIENT_NUMBER_LENGTH) return null;
   if (BigInt(next) > PATIENT_NUMBER_MAX) return null;
   return { prefix, next };
 }
 
 /** Only call with a stored canonical identifier, NEVER an import note/phone. */
 export function parseCanonicalPatientNumber(stored: string): { prefix: string; number: bigint } | null {
-  const match = /^([A-Z])-([0-9]{5,18})$/.exec(stored);
+  if (typeof stored !== "string" || stored.length > MAX_PATIENT_NUMBER_LENGTH) return null;
+  const match = /^([A-Z]{1,6})-([0-9]{5,18})$/.exec(stored);
   if (!match) return null;
   const number = BigInt(match[2]);
   if (number < 1n || number > PATIENT_NUMBER_MAX) return null;
@@ -47,7 +55,7 @@ export function planPatientNumbering(
 ): NumberingPlan {
   const parsed = parseNumberingRequest(request.prefix, request.next);
   if (!parsed) return { ok: false, reason: "invalid-input" };
-  if (snapshot.prefix !== parsed.prefix || !/^[A-Z]$/.test(snapshot.prefix)
+  if (snapshot.prefix !== parsed.prefix || !PATIENT_PREFIX_PATTERN.test(snapshot.prefix)
     || snapshot.allocatedThrough < 0n || snapshot.historicalThrough < 0n
     || snapshot.allocatedThrough > PATIENT_NUMBER_MAX || snapshot.historicalThrough > PATIENT_NUMBER_MAX
     || (snapshot.pendingNext !== null && (snapshot.pendingNext < 1n || snapshot.pendingNext > PATIENT_NUMBER_MAX))) {
@@ -61,5 +69,5 @@ export function planPatientNumbering(
     return { ok: false, reason: "would-reuse-or-rewind" };
   }
   return { ok: true, prefix: parsed.prefix, next: parsed.next,
-    preview: `${parsed.prefix}-${parsed.next.padStart(5, "0")}`, expectedRevision };
+    preview: formatCanonicalPatientNumber(parsed.prefix, parsed.next), expectedRevision };
 }

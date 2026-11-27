@@ -18,7 +18,7 @@ export interface ShiftCloseInfo {
   sealed?: boolean;
 }
 
-export function ShiftCloseStatus({ shift, compact = false }: { shift: ShiftCloseInfo; compact?: boolean }) {
+export function ShiftCloseStatus({ shift, compact = false, canPrintReport = true }: { shift: ShiftCloseInfo; compact?: boolean; canPrintReport?: boolean }) {
   if (shift.status === "open") {
     return (
       <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
@@ -66,14 +66,16 @@ export function ShiftCloseStatus({ shift, compact = false }: { shift: ShiftClose
       {!compact && off.length > 0 && shift.differenceReason ? (
         <span className="text-[10px] text-slate-500">السبب: {shift.differenceReason}</span>
       ) : null}
-      <a
-        href={`/print/shift/${shift.id}`}
-        target="_blank"
-        rel="noopener"
-        className="text-[10px] font-bold text-brand-blue hover:underline"
-      >
-        تقرير الإقفال
-      </a>
+      {canPrintReport ? (
+        <a
+          href={`/print/shift/${shift.id}`}
+          target="_blank"
+          rel="noopener"
+          className="text-[10px] font-bold text-brand-blue hover:underline"
+        >
+          تقرير الإقفال
+        </a>
+      ) : null}
     </span>
   );
 }

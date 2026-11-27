@@ -52,7 +52,7 @@ export class PatientNumberingPostgresBackend implements NumberingBackend {
       : dependencies.owner??(async()=>null);
   }
   protected seq(prefix:string) {
-    if (!/^[A-Z]$/.test(prefix)) throw new Error('Invalid fixed prefix');
+    if (!/^[A-Z]{1,6}$/.test(prefix)) throw new Error('Invalid fixed prefix');
     return `${this.schema}.seq_${prefix.toLowerCase()}`;
   }
   async snapshot(c:PatientNumberingQueryClient,prefix:string):Promise<PrefixSnapshot>{
