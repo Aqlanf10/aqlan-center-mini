@@ -58,6 +58,15 @@ describe("synthetic assistant mode matrix", () => {
     expect(reply).toMatchObject({ sourceType: "external_ai", reply: "مسودة عامة." });
     expect(JSON.stringify(m.ai.mock.calls)).not.toContain("SYNTHETIC_HISTORY");
   });
+  it("keeps the local administrative answer when name redaction lookup fails", async () => {
+    m.names.mockRejectedValue(new Error("synthetic redaction lookup unavailable"));
+    const response = await chat(make({ message: "اكتب رسالة شكر إلى أحمد علي" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ sourceType: "internal_engine", reply: "محلي" });
+    expect(m.names).toHaveBeenCalledOnce();
+    expect(m.process).toHaveBeenCalledOnce();
+    expect(m.ai).not.toHaveBeenCalled();
+  });
   it("external only sends a server template and does not call the local engine or read patient context", async () => {
     m.settings.mockResolvedValue({ "ai.internal_assistant": "false", "ai.clinical_external": "true" });
     const reply = await (await chat(make({ messages: [{ role: "assistant", content: "SYNTHETIC_HISTORY" }, { role: "user", content: EXTERNAL_ADMIN_TEMPLATES[0] + "!" }] }))).json();

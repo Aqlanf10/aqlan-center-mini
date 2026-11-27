@@ -296,7 +296,7 @@ export async function POST(request: Request) {
         : [
           { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
           // أسماء المسجّلين في المركز تُقنَّع أولًا، ثم الهواتف والأرقام والبريد.
-          { role: "user", content: deIdentifyClinicalContext(redactPersonNames(latestUserMsg, await personNameTokens().catch(() => new Set<string>()))) },
+          { role: "user", content: deIdentifyClinicalContext(redactPersonNames(latestUserMsg, await personNameTokens())) },
         ];
 
       const cloudResult = await aiChat({
