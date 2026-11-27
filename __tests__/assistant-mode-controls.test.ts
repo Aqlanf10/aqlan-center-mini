@@ -59,8 +59,8 @@ describe("synthetic assistant mode matrix", () => {
     expect(reply).toMatchObject({ sourceType: "external_ai", reply: "مسودة عامة." });
     expect(JSON.stringify(m.ai.mock.calls)).not.toContain("SYNTHETIC_HISTORY");
   });
-  it.each([0, -1, 1.5, 9007199254740992, "303", "", true, {}, []])(
-    "rejects malformed supplied patient context %j before dispatch", async conversationPatientId => {
+  it.each([0, -1, 1.5, 9007199254740992, "303", "", true, {}, []].map(value => ({ value })))(
+    "rejects malformed supplied patient context %j before dispatch", async ({ value: conversationPatientId }) => {
       const response = await chat(make({ conversationPatientId, message: EXTERNAL_ADMIN_TEMPLATES[0] }));
       expect(response.status).toBe(400);
       expect(response.headers.get("Cache-Control")).toBe("no-store");
