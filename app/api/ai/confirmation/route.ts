@@ -31,13 +31,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
 
-  let body: Record<string, unknown>;
+  let body: unknown;
   try {
-    body = (await readJsonBody<Record<string, unknown>>(request, AI_CHAT_BODY_LIMIT_BYTES));
+    body = await readJsonBody(request, AI_CHAT_BODY_LIMIT_BYTES);
   } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
-  const token = body.token;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
+  const token = (body as Record<string, unknown>).token;
   if (typeof token !== "string" || token.length === 0) {
     return NextResponse.json({ message: "رمز التأكيد مفقود." }, { status: 400 });
   }
