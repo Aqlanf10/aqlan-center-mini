@@ -43,7 +43,8 @@ export function createIndependentPgReservationBackend(
         if (begun.command !== "BEGIN") throw new Error("Authority begin not confirmed");
         discard = false;
         active = true;
-        await client.query("SET LOCAL synchronous_commit = on");
+        const durability = await client.query("SET LOCAL synchronous_commit = on");
+        if (durability.command !== "SET") throw new Error("Authority durability setting not confirmed");
         const admitted = await client.query<{ generation: string }>(
           `SELECT generation FROM ${admission} WHERE lineage=$1 FOR UPDATE`, [lineage]);
         if (admitted.rows.length !== 1 || admitted.rows[0].generation !== generation) {
