@@ -28,7 +28,6 @@ import { PatientPlans } from "@/components/PatientPlans";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
 import { AdvancedOrthoWorkspace } from "@/components/ortho/AdvancedOrthoWorkspace";
-import { useOrthoPermissions } from "@/components/ortho/useOrthoPermissions";
 import { SPECIALTY_LABEL } from "@/lib/appointment-services";
 import { PatientEndo } from "@/components/PatientEndo";
 import { AssessmentBanner } from "@/components/AssessmentBanner";
@@ -132,14 +131,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const router = useRouter();
   const session = useSession();
   const admin = isAdmin(session?.role);
-  const orthoPerms = useOrthoPermissions({ enabled: Boolean(session), patientId: Number(id) || null });
-  const visibleTreatmentSubtabs = useMemo(
-    () =>
-      !orthoPerms.loading && !orthoPerms.moduleVisible
-        ? TREATMENT_SUBTABS.filter((t) => t.id !== "ortho")
-        : TREATMENT_SUBTABS,
-    [orthoPerms.loading, orthoPerms.moduleVisible],
-  );
+  const visibleTreatmentSubtabs = TREATMENT_SUBTABS;
   // (TD-05) الأساس دستوري من الكود.
   const base: Currency = CLINIC_BASE_CURRENCY;
 

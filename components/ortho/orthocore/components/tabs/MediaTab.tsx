@@ -1,4 +1,6 @@
-﻿"use client";
+"use client";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import React, { useState } from 'react';
 import {
   AlertCircle,
@@ -37,7 +39,7 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
   const [uploadStage, setUploadStage] = useState<RecordStage>('T0');
   const [uploadView, setUploadView] = useState<string>('intraoral_right');
   const [uploadKind, setUploadKind] = useState<MediaKind>('photo');
-  const [captureDate, setCaptureDate] = useState(new Date().toISOString().slice(0, 10));
+  const [captureDate, setCaptureDate] = useState(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [sourceNote, setSourceNote] = useState('كاميرا العيادة');
   const [uploading, setUploading] = useState(false);
 
@@ -125,7 +127,7 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
           stage: uploadStage,
           viewType: uploadView,
           captureDate,
-          uploadDate: new Date().toISOString().slice(0, 10),
+          uploadDate: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
           source: sourceNote,
           notes: '',
           originalUrl: uploaded.url,

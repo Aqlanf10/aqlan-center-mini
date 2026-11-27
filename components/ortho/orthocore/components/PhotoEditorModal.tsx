@@ -1,4 +1,6 @@
-﻿"use client";
+"use client";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowUpRight,
@@ -232,7 +234,7 @@ export const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({
         id: `med-derived-${Date.now()}`,
         title: `${media.title} (${state.anonymizeBar.enabled ? tr(lang, 'نسخة مجهولة الهوية', 'Anonymized') : tr(lang, 'نسخة معدلة', 'Edited')})`,
         originalUrl: res.url,
-        uploadDate: new Date().toISOString().slice(0, 10),
+        uploadDate: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
         isDerivedCopy: true,
         parentMediaId: media.id,
         editorState: { ...state, updatedAt: new Date().toISOString() },
@@ -291,7 +293,7 @@ export const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({
         id: `med-board-${Date.now()}`,
         title: tr(lang, 'لوحة سريرية مجمعة (2×2)', 'Clinical Composite Board (2×2)'),
         originalUrl: res.url,
-        uploadDate: new Date().toISOString().slice(0, 10),
+        uploadDate: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
         isDerivedCopy: true,
         parentMediaId: media.id,
         editorState: { rotationDeg: 0, tiltDeg: 0, brightness: 100, contrast: 100, anonymizeBar: { enabled: false, yPct: 24, hPct: 10 }, annotations: [] },

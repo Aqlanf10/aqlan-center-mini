@@ -1,4 +1,6 @@
 "use client";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
  * AQLAN Center Mini — Secure OrthoCore API Adapter
@@ -60,7 +62,7 @@ export const api = {
         : "photo");
     form.set("kind", inferredKind);
     form.set("title", opts?.title || file.name);
-    form.set("takenOn", new Date().toISOString().slice(0, 10));
+    form.set("takenOn", clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
     if (opts?.photoStage) form.set("photoStage", opts.photoStage);
     if (opts?.photoView) form.set("photoView", opts.photoView);
     if (opts?.note) form.set("note", opts.note);

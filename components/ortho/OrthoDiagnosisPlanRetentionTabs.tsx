@@ -1,4 +1,6 @@
 "use client";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 import React, { useState } from "react";
 import type { OrthoProblemItem, OrthoWorkspaceRecord } from "@/lib/ortho-workspace-types";
@@ -606,7 +608,7 @@ export function OrthoRetentionTab({
   onChange: (next: OrthoWorkspaceRecord) => void;
 }) {
   const ret = record.retention;
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [intervalLabel, setIntervalLabel] = useState("شهر واحد");
   const [compliance, setCompliance] = useState<"excellent" | "good" | "fair" | "poor">("good");
   const [integrity, setIntegrity] = useState<"intact" | "debonded" | "cracked" | "lost" | "replaced">("intact");
