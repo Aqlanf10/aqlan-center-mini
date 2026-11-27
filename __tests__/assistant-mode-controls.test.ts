@@ -235,6 +235,40 @@ describe("synthetic assistant mode matrix", () => {
     expect(m.execute).not.toHaveBeenCalled();
     expect(m.audit).not.toHaveBeenCalled();
   });
+  it("does not restore a removed clinical identity from the session for chat", async () => {
+    m.session.mockResolvedValue({ userId: 22, username: "synthetic-admin", role: "admin", partyId: 17 });
+    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", role: "admin", isActive: true, partyId: null, permissions: { canUseAiChat: true } });
+    m.settings.mockResolvedValue({ "ai.clinical_external": "true" });
+    const response = await chat(make({ message: "ألم الأسنان" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ sourceType: "internal_engine" });
+    expect(m.process.mock.calls[0][1].doctorPartyId).toBeNull();
+    expect(m.ai).not.toHaveBeenCalled();
+  });
+  it("checks patient scope with the reloaded party instead of the stale session party", async () => {
+    vi.stubEnv("USE_LOCAL_DB", "true");
+    vi.stubEnv("DATABASE_URL", "postgresql://synthetic.invalid/test");
+    try {
+      m.session.mockResolvedValue({ userId: 22, username: "synthetic-admin", role: "admin", partyId: 17 });
+      m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", role: "admin", isActive: true, partyId: null, permissions: { canUseAiChat: true } });
+      m.access.mockResolvedValue(false);
+      const response = await chat(make({ conversationPatientId: 303, message: "ألم الأسنان" }));
+      expect(response.status).toBe(200);
+      expect(m.access).toHaveBeenCalledWith(expect.objectContaining({ partyId: null }), 303);
+      expect(m.process.mock.calls[0][1].conversationPatientId).toBeNull();
+      expect(m.ai).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it("does not restore a removed clinical identity for confirmed local tools", async () => {
+    m.session.mockResolvedValue({ userId: 22, username: "synthetic-admin", role: "admin", partyId: 17 });
+    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", role: "admin", isActive: true, partyId: null, permissions: { canUseAiChat: true } });
+    m.verify.mockReturnValue({ userId: 22, tool: "book_appointment", params: { patientId: 303 } });
+    m.execute.mockResolvedValue({ success: true, textSummary: "synthetic success" });
+    expect((await confirmation(make({ token: "synthetic-signed-preview" }))).status).toBe(200);
+    expect(m.execute.mock.calls[0][2].doctorPartyId).toBeNull();
+  });
   it("allows the authorized local confirmation without a cloud key when both switches are on", async () => {
     m.master.mockResolvedValue({ enabled: true, hasKey: false });
     m.verify.mockReturnValue({ userId: 22, tool: "book_appointment", params: { patientId: 303 } });
