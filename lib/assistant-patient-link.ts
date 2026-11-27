@@ -5,7 +5,7 @@ import type { AiToolContext, ToolExecutionResult } from "./ai-tools/types";
 
 export async function findAuthorizedPatientLink(term: string, context: AiToolContext): Promise<ToolExecutionResult> {
   const missing = { success: false, textSummary: "لم أجد ملفًا مطابقًا ومتاحًا لك. جرّب رقم الملف كاملًا." };
-  if (!context.userId || !context.username || term.length > 150) return missing;
+  if (!context.userId || !context.username || !context.role || term.length > 150) return missing;
   const scoped = context.role === "doctor" && !context.canViewAllPatients;
   if (scoped && !context.doctorPartyId) return missing;
   const candidates = await searchPatients(term, 8, scoped ? context.doctorPartyId : null);

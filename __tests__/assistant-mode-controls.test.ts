@@ -114,6 +114,11 @@ describe("opening an existing patient", () => {
     m.access.mockResolvedValue(false);
     expect((await findAuthorizedPatientLink("P-00303", context)).actions).toBeUndefined();
   });
+  it("does not query for a patient link without an authenticated role", async () => {
+    expect((await findAuthorizedPatientLink("P-00303", { ...context, role: undefined })).actions).toBeUndefined();
+    expect(m.search).not.toHaveBeenCalled();
+    expect(m.access).not.toHaveBeenCalled();
+  });
   it("does not guess between matching names", async () => {
     m.search.mockResolvedValue([303, 304].map(id => ({ id, patientNumber: `P-${id}`, fullName: "حالة اصطناعية" })));
     expect((await findAuthorizedPatientLink("حالة اصطناعية", context)).actions).toBeUndefined();
