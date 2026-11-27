@@ -140,7 +140,10 @@ export async function POST(request: Request) {
   }
 
   // التحقق من تفعيل خدمة الذكاء الاصطناعي
-  const settings = await getAiSettings();
+  const settings = await getAiSettings().catch(() => null);
+  if (!settings) {
+    return NextResponse.json({ message: "تعذّر التحقق من إعدادات خدمة الذكاء الاصطناعي. أعد المحاولة لاحقًا." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   if (!settings.enabled) {
     return NextResponse.json(
       {
