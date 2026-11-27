@@ -75,6 +75,33 @@ describe("P3-6 — expense voucher attachments", () => {
     expect(rows[0]?.actor).toBe("secreception");
   });
 
+  it("applies voucher ownership to reception listing, download and upload", async () => {
+    const auth = (cookie: string) => ({ headers: { Cookie: cookie } });
+    const desk = auth(h.sessions.reception.cookie), admin = auth(h.sessions.admin.cookie);
+    const myAttachment = await upload(h.sessions.reception.cookie, expenseId, VALID_PNG);
+    expect(myAttachment.status).toBe(201);
+    const myId = (await myAttachment.json()).id;
+    expect((await fetch(`${baseUrl}/api/expenses/${expenseId}/attachments`, desk)).status).toBe(200);
+    expect((await fetch(`${baseUrl}/api/expense-attachments/${myId}?download=1`, desk)).status).toBe(200);
+    const { rows: [foreign] } = await db.query<{ id: number }>(
+      `INSERT INTO expenses (voucher_number, category, payee_text, shift_id, amount_minor, currency,
+                             exchange_rate, base_amount_minor, base_currency, created_by)
+       SELECT voucher_number || '-ADMIN', category, payee_text, shift_id, amount_minor, currency,
+              exchange_rate, base_amount_minor, base_currency, 'secadmin' FROM expenses WHERE id = $1 RETURNING id`,
+      [expenseId],
+    );
+    const attachment = await upload(h.sessions.admin.cookie, foreign.id, VALID_PNG);
+    expect(attachment.status).toBe(201);
+    const foreignBytes = `${baseUrl}/api/expense-attachments/${(await attachment.json()).id}`;
+    const foreignList = `${baseUrl}/api/expenses/${foreign.id}/attachments`;
+    expect((await fetch(foreignList, desk)).status).toBe(404);
+    expect((await fetch(foreignBytes, desk)).status).toBe(404);
+    expect((await upload(h.sessions.reception.cookie, foreign.id, VALID_PNG)).status).toBe(404);
+    expect((await fetch(foreignList, admin)).status).toBe(200);
+    expect((await fetch(foreignBytes, admin)).status).toBe(200);
+    expect((await db.query("SELECT id FROM expense_attachments WHERE expense_id = $1", [foreign.id])).rowCount).toBe(1);
+  });
+
   it("a doctor can neither attach nor view", async () => {
     expect((await upload(h.sessions.doctorA.cookie, expenseId, VALID_PNG)).status).toBe(403);
     const list = await fetch(`${baseUrl}/api/expenses/${expenseId}/attachments`, { headers: { Cookie: h.sessions.doctorA.cookie } });

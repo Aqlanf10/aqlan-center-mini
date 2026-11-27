@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import FinancePage from "../app/finance/page";
+import FinancePage from "./helpers/render-finance-workspace";
 import { FinanceKpis } from "../components/finance/FinanceKpis";
 import { AccountingReportsTab } from "../components/finance/AccountingReportsTab";
 import type { Role } from "../lib/roles";

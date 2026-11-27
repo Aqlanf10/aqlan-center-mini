@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { chromium } from "playwright";
 import { Client } from "pg";
-import { authedGet, authedMutation, harness, loginStaff } from "./_server";
+import { baseUrl, authedGet, authedMutation, harness, loginStaff } from "./_server";
 
 /**
  * (P0-F) المساعد السريري على التطبيق المبني: يُنهي زيارة اليوم التي وثّقها الطبيب **باسمه هو**
@@ -50,6 +51,7 @@ beforeAll(async () => {
   todayVisit = (await db.query<{ id: number }>(
     `INSERT INTO visits (patient_id, patient_name, doctor_id, diagnosis) VALUES ($1, 'م', $2, 'تسوّس 16') RETURNING id`,
     [todayPatient, doctorParty])).rows[0].id;
+  await db.query("UPDATE patients SET national_id = 'SYNTHETIC-PRIVATE-ID', medical_alert = 'SYNTHETIC-SAFETY' WHERE id = $1", [todayPatient]);
   await db.query(`INSERT INTO visit_procedures (visit_id, service_id, doctor_id, tooth_code, quantity, unit_price_minor)
                   VALUES ($1, $2, $3, 16, 1, 25000)`, [todayVisit, serviceId, doctorParty]);
   oldVisit = (await db.query<{ id: number }>(
@@ -62,9 +64,31 @@ afterAll(async () => { await db?.end(); });
 describe("(P0-F) the clinical assistant finalizes today's visit under their own name", () => {
   it("reads today's visit, but not another patient's file or an old visit", async () => {
     expect((await get(`/api/visits/${todayVisit}/clinical`)).status).toBe(200);
-    expect((await get(`/api/patients/${todayPatient}`)).status).toBe(200);
+    const shell = await get(`/api/patients/${todayPatient}`);
+    expect(shell.status).toBe(200);
+    expect(shell.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await shell.json()).toEqual({
+      patient: { id: todayPatient, patientNumber: expect.any(String), fullName: "مريض T",
+        medicalAlert: "SYNTHETIC-SAFETY", phone: null, flags: [] },
+      visits: [{ id: todayVisit, arrivedAt: expect.any(String), status: expect.any(String), chair: null }],
+      appointments: [],
+    });
     await expectArabicDenied(await get(`/api/patients/${otherPatient}`));
     await expectArabicDenied(await get(`/api/visits/${oldVisit}/clinical`));
+  });
+
+  it("opens the today workspace in Chromium with the assistant's real session", async () => {
+    const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
+    try {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+      const split = assistant.cookie.indexOf("=");
+      await context.addCookies([{ name: assistant.cookie.slice(0, split), value: assistant.cookie.slice(split + 1), url: baseUrl }]);
+      const page = await context.newPage();
+      await page.goto(baseUrl + `/patients/${todayPatient}?tab=today`);
+      await page.getByTestId("patient-medical-alert-banner").getByText("SYNTHETIC-SAFETY", { exact: true }).waitFor();
+      await page.getByText("مريض T", { exact: true }).first().waitFor();
+      expect(await page.getByText("SYNTHETIC-PRIVATE-ID").count()).toBe(0);
+    } finally { await browser.close(); }
   });
 
   it("cannot change procedures, prices or the treating doctor", async () => {

@@ -39,7 +39,13 @@ export async function GET() {
     }
 
     const rows = classifyFollowups({ cases: board, today });
-    const groups = groupByBucket(rows);
+    const groups = groupByBucket(session.role === "reception" ? rows.map(row => ({
+      caseId: row.caseId, patientId: row.patientId, patientName: row.patientName, patientPhone: row.patientPhone,
+      status: row.status, phase: "", startDate: row.startDate, lastAdjustmentDate: row.lastAdjustmentDate,
+      nextWeeks: row.nextWeeks, dueDate: row.dueDate, daysSinceLast: row.daysSinceLast, buckets: row.buckets,
+      nextAppointment: row.nextAppointment, bookingContext: row.bookingContext, lastWasNoShow: row.lastWasNoShow,
+      upperWire: null, lowerWire: null,
+    })) : rows);
     const buckets = BUCKET_ORDER.map((bucket) => ({
       bucket,
       count: groups.get(bucket)?.length ?? 0,

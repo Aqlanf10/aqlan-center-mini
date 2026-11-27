@@ -39,7 +39,7 @@ describe("CASE-1 — legacy baseline permissions", () => {
   it("reception cannot record a baseline (Arabic 403) and nothing is written", async () => {
     const response = await post("reception", "/api/ortho/baseline", baseline());
     expect(response.status).toBe(403);
-    expect(await messageOf(response)).toContain("للطبيب والمدير");
+    expect(await messageOf(response)).toMatch(/[؀-ۿ]/);
     const { rows } = await db.query(`SELECT 1 FROM ortho_cases WHERE patient_id = $1`, [patientId]);
     expect(rows).toEqual([]);
   });
@@ -78,9 +78,9 @@ describe("CASE-1 — legacy baseline permissions", () => {
     expect(again.status).toBe(409);
     expect(await messageOf(again)).toContain("مفتوحة");
 
-    // الاستقبال يقرأ الحالة (للمتابعة) ولا يكتب اللقطة.
+    // قائمة المواعيد منفصلة عن تفاصيل الحالة السريرية.
     const read = await authedGet(`/api/ortho?patientId=${patientId}`, h.sessions.reception);
-    expect(read.status).toBe(200);
+    expect(read.status).toBe(403);
   });
 
   it("a repeated adjustment for the same visit returns the same row (200), not a second one", async () => {

@@ -22,7 +22,7 @@ export async function GET() {
   try {
     const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
     const followUpDays = followUpDaysFrom((await getSettings())["followup.proposal_days"]);
-    const rows = await listPendingProposals({ includeMoney: canViewMoney(session.role) });
+    const rows = await listPendingProposals({ includeMoney: session.role !== "reception" && canViewMoney(session.role) });
     const proposals = sortProposals(rows.map((row) => ({
       ...row,
       timing: proposalTiming({ createdOn: row.createdOn, lastContactOn: row.lastContactOn, today, followUpDays }),

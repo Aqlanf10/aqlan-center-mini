@@ -53,7 +53,13 @@ describe("workflow GET case projection authorization", () => {
     expect(visit.rebookReferralReceiverId).toBe(71);
   });
 
-  it.each(["admin", "reception", "doctor"])("allows owned case projections for %s", async (role) => {
+  it("directs reception to the patient-scoped reception summary before reading clinical data", async () => {
+    boundary.requireSession.mockResolvedValue({ username: "synthetic-reception", role: "reception" });
+    expect((await GET(request(), context())).status).toBe(403);
+    expect(boundary.patientWorkflow).not.toHaveBeenCalled();
+  });
+
+  it.each(["admin", "doctor"])("allows owned case projections for %s", async (role) => {
     const session = { username: `synthetic-${role}`, role };
     boundary.requireSession.mockResolvedValue(session);
     const response = await GET(request(), context());

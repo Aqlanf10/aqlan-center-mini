@@ -40,10 +40,12 @@ beforeAll(async () => {
   browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined });
 }, 240_000);
 afterAll(async () => { await browser?.close(); });
-describe("built patient walkout verifies balances for reception", () => {
+// The clinical workspace can restore the last signed visit. The reception-specific
+// exact visit journey exercises the selected handoff without opening clinical history.
+describe("clinical patient workspace verifies restored walkout balances", () => {
   it("reopens adjustment-only work with 180000, keeps currencies separate, and contains read failures", async () => {
     const context = await browser.newContext({ viewport: { width: 1280, height: 1100 }, locale: "ar-YE", serviceWorkers: "block" });
-    const [name, ...value] = h.sessions.reception.cookie.split("=");
+    const [name, ...value] = h.sessions.admin.cookie.split("=");
     await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
     const unexpected: string[] = [], errors: string[] = [], writes: string[] = [];
     let paidInvoice = false;
@@ -67,7 +69,7 @@ describe("built patient walkout verifies balances for reception", () => {
         await json(route, paymentAttempts.length === 1 ? { message: "Synthetic retry" } : {
           id: 98785, receiptNumber: "SYNTHETIC-RECEIPT-98785", patientId, kind: "payment", amountMinor,
           currency: submitted.currency, invoiceId: null, planId: null, openingCurrency: submitted.openingCurrency ?? null, method: "cash", note: null,
-          createdBy: "secreception", shiftId: 1, createdAt: "2026-10-14T09:00:00Z", baseCurrency: "YER",
+          createdBy: "secadmin", shiftId: 1, createdAt: "2026-10-14T09:00:00Z", baseCurrency: "YER",
           baseAmountMinor: toBaseAmount(amountMinor, submitted.currency, "YER", exchangeRate), exchangeRate, idempotencyKey: request.headers()["idempotency-key"],
         }, paymentAttempts.length === 1 ? 500 : 200);
         return; // Synthetic fulfillment; no payment request reaches the application server.
@@ -166,7 +168,7 @@ describe("built patient walkout verifies balances for reception", () => {
       else if (path === "/api/booking-requests") await json(route, []);
       else if (path === "/api/lab") await json(route, { late: 0 });
       else if (path === "/api/messages") await json(route, { unread: 0, urgent: 0 });
-      else if (path === "/api/auth/me") await json(route, { username: "secreception", role: "reception" });
+      else if (path === "/api/auth/me") await json(route, { username: "secadmin", role: "admin" });
       else if (path.startsWith("/api/") || path.startsWith("/print/")) {
         unexpected.push(`${method} ${path}`); await json(route, {}, 404);
       } else await route.continue();

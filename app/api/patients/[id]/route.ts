@@ -1,3 +1,5 @@
+import { getAssistantPatientFile } from "@/lib/assistant-patient-file";
+import { receptionRead } from "./reception-read";
 import { NextResponse } from "next/server";
 import { patientAppointmentsResponse } from "@/lib/patient-appointments-response";
 import { JSON_BODY_LIMIT_BYTES } from "@/lib/security-limits";
@@ -52,29 +54,53 @@ async function doctorBlocked(patientId: number, skipAllGrant = false): Promise<s
 }
 
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+  const privateHeaders = { "Cache-Control": "private, no-store" };
   const session = await requireSession();
-  if (!session) return denied();
+  if (!session) return NextResponse.json({ message: "انتهت الجلسة." }, { status: 401, headers: privateHeaders });
   const { id: rawId } = await context.params;
+  const query = new URL(_request.url).searchParams;
+  const mode = query.get("projection");
+  if (mode === "reception" || mode === "reception-money" || mode === "reception-booking") return receptionRead(_request, session, rawId);
   const id = readId(rawId);
-  if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400 });
+  if (id === null) return NextResponse.json({ message: "رقم المريض غير صالح." }, { status: 400, headers: privateHeaders });
+
+  // The clinical assistant uses this same URL for the chairside shell, but
+  // never receives the full record. This reader proves today's scope itself.
+  const projectionRequested = query.has("projection");
+  if (!projectionRequested && session.role === "assistant") {
+    try {
+      const shell = await getAssistantPatientFile(id);
+      return NextResponse.json(shell ?? { message: "المساعد السريري يرى مرضى زيارات اليوم وحدهم." },
+        { status: shell ? 200 : 403, headers: privateHeaders });
+    } catch {
+      return NextResponse.json({ message: "تعذّر التحقق من ملف زيارة اليوم." }, { status: 500, headers: privateHeaders });
+    }
+  }
+  // Other roles must use an explicit scope-limited projection.
+  if (!projectionRequested && session.role !== "admin" && session.role !== "doctor") {
+    return NextResponse.json(
+      { message: "الملف السريري الكامل متاح فقط للطبيب المخوّل والإدارة؛ استخدم واجهات المواعيد أو التحصيل المصرّح بها." },
+      { status: 403, headers: privateHeaders },
+    );
+  }
 
   const blocked = await doctorBlocked(id);
   if (blocked) {
-    return NextResponse.json({ message: blocked }, { status: blocked.includes("جلسة") ? 401 : 403 });
+    return NextResponse.json({ message: blocked }, { status: blocked.includes("جلسة") ? 401 : 403, headers: privateHeaders });
   }
 
   // The existing patient authorization runs first. This explicit, bounded read mode
   // never invokes the full patient/financial file and does not change ordinary GET.
-  if (new URL(_request.url).searchParams.has("projection")) {
+  if (projectionRequested) {
     return patientAppointmentsResponse(_request, session, rawId);
   }
 
   try {
     const file = await getPatientFile(id);
-    if (!file) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404 });
-    return NextResponse.json(file);
+    if (!file) return NextResponse.json({ message: "لا يوجد مريض بهذا الرقم." }, { status: 404, headers: privateHeaders });
+    return NextResponse.json(file, { headers: privateHeaders });
   } catch {
-    return NextResponse.json({ message: "تعذّر تحميل ملف المريض." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر تحميل ملف المريض." }, { status: 500, headers: privateHeaders });
   }
 }
 
@@ -180,6 +206,10 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
         details: changes,
         actor: session.username, actorRole: session.role,
       });
+    }
+    if (session.role === "reception") {
+      const { id, fullName, patientNumber, phone } = updated;
+      return NextResponse.json({ id, fullName, patientNumber, phone }, { headers: { "Cache-Control": "private, no-store" } });
     }
     return NextResponse.json(updated);
   } catch {

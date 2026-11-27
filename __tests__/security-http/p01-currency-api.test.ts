@@ -169,11 +169,18 @@ describe("P-01 على HTTP: /api/finance/debts صفٌّ لكل (مريض × عم
     expect(report.status).toBe(403);
   });
 
-  it("والاستقبال — من يقبض المال — يقرأ المديونية (200)", async () => {
+  it("يرى الاستقبال مديونية المريض بكل عملة وتُحجب عنه مديونية العيادة", async () => {
     const response = await fetch(`${baseUrl}/api/finance/debts`, {
       headers: { Cookie: h.sessions.reception.cookie },
       redirect: "manual",
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(403);
+    const account = await fetch(`${baseUrl}/api/patients/${patientId}?projection=reception-money`, {
+      headers: { Cookie: h.sessions.reception.cookie },
+    });
+    expect(account.status).toBe(200);
+    expect(await account.json()).toMatchObject({ id: patientId, balances: expect.arrayContaining([
+      { currency: "YER", dueMinor: 100000 }, { currency: "SAR", dueMinor: 100000 }, { currency: "USD", dueMinor: 10000 },
+    ].map(row => expect.objectContaining(row))) });
   });
 });

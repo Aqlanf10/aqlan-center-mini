@@ -37,7 +37,7 @@ export async function GET(request: Request) {
 
   /* صلاحيات الوكيل المساعد: أسعار تكلفة المعامل من «المالية المخفية» — تُحجب
      عن الطبيب ما لم يصرّح المدير. الطلب نفسه يبقى مرئيًا: مسار العمل سريري. */
-  let hideCosts = false;
+  let hideCosts = session.role === "reception";
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
     if (!canDoctorViewCostPrices(user?.permissions, session.role)) hideCosts = true;
@@ -55,7 +55,7 @@ export async function GET(request: Request) {
       withServices ? listLabServices() : Promise.resolve([]),
     ]);
     const orders = hideCosts
-      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null }))
+      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null }))
       : rawOrders;
     return NextResponse.json({ orders, labs, ...(withServices ? { labServices } : {}) });
   } catch {

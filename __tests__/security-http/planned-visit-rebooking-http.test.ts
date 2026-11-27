@@ -107,8 +107,9 @@ async function noReplacement(f: Fixture) {
   expect((await db.query("SELECT appointment_id FROM planned_visits WHERE id = $1", [f.planned])).rows[0].appointment_id).toBe(f.old);
 }
 async function projection(f: Fixture, session: Session, canRebook: boolean) {
-  for (const endpoint of ["workflow", "plans"]) {
-    const response = await authedGet(`/api/patients/${f.patient}/${endpoint}`, session);
+  const paths = session === h.sessions.reception ? ["?projection=reception-booking"] : ["/workflow", "/plans"];
+  for (const suffix of paths) {
+    const response = await authedGet(`/api/patients/${f.patient}${suffix}`, session);
     expect(response.status).toBe(200);
     const payload = await response.json() as { plannedVisits: { id: number; appointmentStatus: string; canRebook: boolean; rebookGeneration: string }[] };
     const visit = payload.plannedVisits.find(visit => visit.id === f.planned)!;

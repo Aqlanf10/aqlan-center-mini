@@ -83,7 +83,8 @@ describe("patient lab GET canonical query boundary", () => {
   it.each(["admin", "reception"])("preserves the %s currency/cost projection", async (role) => {
     boundary.requireSession.mockResolvedValue({ username: "synthetic-reader", role });
     const response = await GET(request("?patientId=101"));
-    expect((await response.json()).orders).toEqual(orders);
+    expect((await response.json()).orders).toEqual(role === "admin" ? orders
+      : orders.map(order => ({ ...order, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null })));
     expect(boundary.findUserByUsername).not.toHaveBeenCalled();
   });
 
@@ -93,8 +94,7 @@ describe("patient lab GET canonical query boundary", () => {
     const response = await GET(request("?patientId=101"));
     expect(boundary.listLabOrders).toHaveBeenCalledExactlyOnceWith({ patientId: 101 });
     expect((await response.json()).orders).toEqual(canViewCostPrices
-      ? orders : orders.map((order) => ({ ...order, costMinor: null, costCurrency: null })));
-    // This bounded fix preserves the existing two-field mask; it does not redesign financial DTOs.
+      ? orders : orders.map((order) => ({ ...order, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null })));
     expect(orders.map((order) => order.costCurrency)).toEqual(["USD", "SAR", "YER"]);
   });
 
@@ -102,7 +102,7 @@ describe("patient lab GET canonical query boundary", () => {
     boundary.requireSession.mockResolvedValue({ username: "synthetic-doctor", role: "doctor" });
     boundary.findUserByUsername.mockRejectedValue(new Error("Synthetic lookup failure"));
     expect((await (await GET(request("?patientId=101"))).json()).orders)
-      .toEqual(orders.map((order) => ({ ...order, costMinor: null, costCurrency: null })));
+      .toEqual(orders.map((order) => ({ ...order, costMinor: null, costCurrency: null, baseAmountMinor: null, exchangeRate: null })));
   });
 
   it("retains unauthenticated admission without reads", async () => {

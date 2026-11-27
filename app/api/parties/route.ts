@@ -18,6 +18,9 @@ export async function GET(request: Request) {
   const kind = new URL(request.url).searchParams.get("kind");
   try {
     const parties = await listParties(isPartyKind(kind) ? kind : undefined);
+    if (session.role === "reception") {
+      return NextResponse.json(parties.map(({id, name, kind, isActive}) => ({ id, name, kind, isActive })));
+    }
     if (!isAdmin(session.role)) {
       return NextResponse.json(
         parties.map((p) => {

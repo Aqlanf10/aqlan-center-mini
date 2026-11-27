@@ -13,7 +13,7 @@ import { formatAmount } from "../../lib/money";
 type Category = "ortho" | "rct" | "crown";
 type Who = "reception" | "doctorA" | "admin";
 interface Link { planItemId: number; caseId: number; specialty: string }
-interface Invoice { id: number; totalMinor: number; discountMinor: number; clinical: { planId: number; links: Link[] } }
+interface Invoice { id: number; invoiceNumber: string; totalMinor: number; discountMinor: number; clinical: { planId: number; links: Link[] } }
 interface Planned { id: number; sequence: number; status: string; sessionStatus: string; visitId: number | null }
 interface Clinical {
   id: number; patientId: number; doctorId: number | null; status: string; signedAt: string | null;
@@ -294,13 +294,14 @@ async function signOnce(patientId: number, visitId: number, expectedInvoices: nu
 
 async function collectThroughUi(patientId: number, target: Invoice, loseResponse = false) {
   const { context, page } = await open("reception", patientId);
-  await page.getByRole("button", { name: "قبض دفعة", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "تحصيل دفعة", exact: true });
-  await dialog.getByLabel("فاتورة الهدف", { exact: true }).selectOption(String(target.id));
-  await dialog.getByLabel("المبلغ", { exact: true }).fill(formatAmount(target.totalMinor - target.discountMinor, "YER"));
+  const panel = page.getByTestId("debt-repayment-panel");
+  const invoice = panel.locator("article").filter({ has: page.getByRole("heading", { name: new RegExp(target.invoiceNumber) }) });
+  await invoice.getByRole("button", { name: "تحصيل دفعة فعلية", exact: true }).click();
+  await panel.getByLabel("مبلغ تحصيل القسط", { exact: true }).fill(formatAmount(target.totalMinor - target.discountMinor, "YER"));
+  const collection = `**/api/patients/${patientId}/debt-repayments/*/collect`;
   const keys: string[] = [];
   let dropped = false;
-  await page.route("**/api/payments", async (route) => {
+  await page.route(collection, async (route) => {
     if (route.request().method() !== "POST") { await route.continue(); return; }
     keys.push(route.request().headers()["idempotency-key"] ?? "");
     if (loseResponse && !dropped) {
@@ -309,17 +310,17 @@ async function collectThroughUi(patientId: number, target: Invoice, loseResponse
       await route.abort("failed");
     } else await route.continue();
   });
-  const submit = dialog.getByRole("button", { name: "سجّل الدفعة واطبع السند", exact: true });
+  const submit = panel.getByRole("button", { name: "تأكيد التحصيل وإصدار السند", exact: true });
   if (loseResponse) {
     await submit.click();
-    await dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة", exact: true }).waitFor();
-    expect(await submit.isDisabled()).toBe(true);
-    expect(await q(`SELECT id FROM payments WHERE patient_id = $1 AND invoice_id = $2`, [patientId, target.id])).toHaveLength(1);
+    await panel.getByRole("button", { name: "إعادة نفس طلب السداد", exact: true }).waitFor();
+    expect(await submit.count() === 0 || await submit.isDisabled()).toBe(true);
+    await expect.poll(async () => (await q(`SELECT id FROM payments WHERE patient_id = $1 AND invoice_id = $2`, [patientId, target.id])).length).toBe(1);
   }
-  const response = page.waitForResponse((candidate) => candidate.url().endsWith("/api/payments") && candidate.request().method() === "POST");
-  await (loseResponse ? dialog.getByRole("button", { name: "إعادة التحقق من العملية السابقة", exact: true }) : submit).click();
+  const response = page.waitForResponse((candidate) => candidate.url().endsWith("/collect") && candidate.request().method() === "POST");
+  await (loseResponse ? panel.getByRole("button", { name: "إعادة نفس طلب السداد", exact: true }) : submit).click();
   expect((await response).status()).toBe(loseResponse ? 200 : 201);
-  await dialog.waitFor({ state: "hidden" });
+  await panel.getByText("ثُبّت التحصيل بسند قبض.").waitFor();
   expect(new Set(keys).size).toBe(1);
   expect(keys).toHaveLength(loseResponse ? 2 : 1);
   expect(keys[0]).toMatch(/^[A-Za-z0-9._:-]{8,128}$/);
@@ -330,8 +331,10 @@ async function collectThroughUi(patientId: number, target: Invoice, loseResponse
 async function checkoutAndNext(patientId: number, visitId: number, nextId: number, expectedInvoices: number) {
   const before = await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId]);
   const checkout = await read<{ lines: { billingClass: string }[]; summary: { currency: string; currentBalanceMinor: number; dueNowMinor: number }[] }>(
-    "reception", `/api/visits/${visitId}/walkout`);
-  expect(checkout.lines).toEqual([expect.objectContaining({ billingClass: "INCLUDED" })]);
+    "reception", `/api/visits/${visitId}/walkout?patientId=${patientId}`);
+  expect(checkout.lines).toEqual([]);
+  const clinical = await read<{ lines: { billingClass: string }[] }>("admin", `/api/visits/${visitId}/walkout`);
+  expect(clinical.lines).toEqual([expect.objectContaining({ billingClass: "INCLUDED" })]);
   expect(checkout.summary.find((line) => line.currency === "YER")).toMatchObject({ currentBalanceMinor: 0, dueNowMinor: 0 });
   expect(await q(`SELECT id FROM invoices WHERE patient_id = $1`, [patientId])).toEqual(before);
   expect(before).toHaveLength(expectedInvoices);
@@ -348,7 +351,7 @@ async function checkoutAndNext(patientId: number, visitId: number, nextId: numbe
     .toEqual([{ id: booking.appointmentId, patient_id: patientId, status: "booked", scheduled_date: scheduledDate }]);
   expect((await q(`SELECT status, appointment_id, visit_id FROM planned_visits WHERE id = $1`, [nextId]))[0])
     .toEqual({ status: "scheduled", appointment_id: booking.appointmentId, visit_id: null });
-  const after = await read<{ nextAppointment: { date: string; time: string } }>("reception", `/api/visits/${visitId}/walkout`);
+  const after = await read<{ nextAppointment: { date: string; time: string } }>("reception", `/api/visits/${visitId}/walkout?patientId=${patientId}`);
   expect(after.nextAppointment).toMatchObject({ date: scheduledDate, time: "17:00" });
 }
 

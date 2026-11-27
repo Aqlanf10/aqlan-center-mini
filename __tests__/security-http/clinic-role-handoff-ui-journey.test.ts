@@ -306,7 +306,10 @@ describe("real clinic role handoff on one synthetic patient", () => {
     await reception.page.getByRole("button", { name: /بدء زيارة اليوم/ }).click();
     const started = await startedResponse;
     expect(started.status()).toBe(201);
-    const visit = await started.json() as { id: number; patientId: number; status: string };
+    const createdVisits = await db.query<{ id: number; patientId: number; status: string }>(
+      'SELECT id, patient_id AS "patientId", status FROM visits WHERE patient_id = $1', [patient.id]);
+    expect(createdVisits.rows).toHaveLength(1);
+    const visit = createdVisits.rows[0];
     expect(visit.patientId).toBe(patient.id);
     expect(visit.status).toBe("waiting");
     await reception.page.getByRole("region", { name: "زيارة اليوم", exact: true }).waitFor();

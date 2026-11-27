@@ -3,6 +3,8 @@
 import { clinicDateString } from "@/lib/schedule";
 import { HistoricalClinicalNote } from "@/components/HistoricalClinicalNote";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
+import { ReceptionWorkspace } from "./ReceptionWorkspace";
+import { patientAppointmentId } from "@/lib/patient-appointments-contract";
 import { useRouter } from "next/navigation";
 import { use, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { patientAlertScope, type ConfirmedPatientAlert } from "@/lib/chair-readiness";
@@ -59,7 +61,7 @@ import { PatientCockpit } from "@/components/patient/PatientCockpit";
 import { useDismissibleDetails } from "@/components/useDismissibleDetails";
 import { CLINIC_BASE_CURRENCY, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import { nextStep } from "@/lib/workflow";
-import { useSession } from "@/components/SessionProvider";
+import { useSession, useSessionActions } from "@/components/SessionProvider";
 import { useSetting } from "@/components/SettingsProvider";
 import { isAdmin, canViewMoney, canHandleMoney } from "@/lib/roles";
 import { readPatientAccountHeader } from "@/lib/patient-account-header";
@@ -124,7 +126,16 @@ export default function PatientFilePage({ params, searchParams }: {
 }) {
   const { id } = use(params);
   const query = searchParams ? use(searchParams) : undefined;
-  return <PatientFileWorkspace key={id} id={id} checkoutVisitRequest={readCheckoutVisitRequest(query?.checkoutVisit)} />;
+  const { session, ready } = useSessionActions();
+  const checkoutVisitRequest = readCheckoutVisitRequest(query?.checkoutVisit);
+  if (!session) return <main role="status">{ready ? <a href="/login">سجّل الدخول لفتح الملف</a> : "جارٍ التحقق من الجلسة…"}</main>;
+  if (session.role === "reception") {
+    const patientId = patientAppointmentId(id);
+    if (patientId === null) return <main role="alert">رقم الملف غير صالح.</main>;
+    return <ReceptionWorkspace key={JSON.stringify([id, session.username, session.permissions])}
+      id={patientId} checkout={checkoutVisitRequest} accountTab={query?.tab === "account"} todayTab={query?.tab === "today"} />;
+  }
+  return <PatientFileWorkspace key={id} id={id} checkoutVisitRequest={checkoutVisitRequest} />;
 }
 
 function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checkoutVisitRequest: CheckoutVisitRequest }) {

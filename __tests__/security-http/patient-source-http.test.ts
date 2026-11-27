@@ -31,7 +31,9 @@ describe("P3-8ب — مصدر المريض", () => {
     const response = await authedMutation(`/api/patients/${patientId}`, h.sessions.reception, "PATCH",
       JSON.stringify({ referralSource: "توصية مريض", referredBy: "أم خالد" }));
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ referralSource: "توصية مريض", referredBy: "أم خالد" });
+    expect(await response.json()).toMatchObject({ id: patientId });
+    const file = await (await authedGet(`/api/patients/${patientId}`, h.sessions.admin)).json();
+    expect(file.patient).toMatchObject({ referralSource: "توصية مريض", referredBy: "أم خالد" });
     const { rows } = await db.query<{ details: Record<string, unknown> }>(
       `SELECT details FROM audit_log WHERE action = 'patient.update' AND entity_id = $1 ORDER BY id DESC LIMIT 1`,
       [String(patientId)],
@@ -42,7 +44,9 @@ describe("P3-8ب — مصدر المريض", () => {
   it("تعديل حقلٍ آخر لا يمحو المصدر", async () => {
     const response = await authedMutation(`/api/patients/${patientId}`, h.sessions.reception, "PATCH",
       JSON.stringify({ note: "ملاحظة" }));
-    expect(await response.json()).toMatchObject({ referralSource: "توصية مريض" });
+    expect(await response.json()).toMatchObject({ id: patientId });
+    const file = await (await authedGet(`/api/patients/${patientId}`, h.sessions.admin)).json();
+    expect(file.patient).toMatchObject({ referralSource: "توصية مريض" });
   });
 
   it("تقرير المرضى الجدد يعرض المصدر ويعدّ المرضى بحسبه", async () => {

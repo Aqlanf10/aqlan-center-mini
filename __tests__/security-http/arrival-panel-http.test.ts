@@ -48,7 +48,7 @@ describe("(P0-D) arrival panel access", () => {
     expect(cashier).toMatchObject({ appointments: [], cases: [], ortho: null, activeVisit: null, canCollect: true });
     expect(JSON.stringify(cashier)).not.toContain("019×025");
     const reception = await (await get("reception", ownedId)).json() as { ortho: { upperWire: string } | null; canCollect: boolean };
-    expect(reception).toMatchObject({ ortho: { upperWire: "019×025 SS" }, canCollect: true });
+    expect(reception).toMatchObject({ ortho: null, canCollect: true });
   });
 
   it("a doctor sees only own patients, and no money without the payments permission", async () => {

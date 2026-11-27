@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CLINIC_BASE_CURRENCY, isCurrency, type Currency } from "@/lib/money";
 import { useClinicName, useSetting } from "@/components/SettingsProvider";
+import { ReceptionShift } from "./ReceptionShift";
 import { useSession } from "@/components/SessionProvider";
 import { canHandleMoney, canViewFinancialReports, isAdmin } from "@/lib/roles";
 import { expectedInBox, type ExpenseCategory } from "@/lib/expenses";
@@ -125,6 +126,13 @@ interface SelectedCollectPatient {
 }
 
 export default function FinancePage() {
+  const session = useSession();
+  if (!session) return <p role="status">جارٍ التحقق من الجلسة…</p>;
+  if (session.role === "reception") return <ReceptionShift />;
+  return <FinanceWorkspace />;
+}
+
+function FinanceWorkspace() {
   const session = useSession();
   const principalKey = `${session?.username ?? ""}:${session?.role ?? ""}`;
   const admin = isAdmin(session?.role);

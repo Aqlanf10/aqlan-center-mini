@@ -1,3 +1,4 @@
+import { canReadExpenseVoucher } from "@/lib/expense-voucher-access";
 import { PrintMetadata } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
 import { getExpense, getSettingsSafe, printCount } from "@/lib/db";
@@ -24,8 +25,8 @@ export default async function VoucherPage({ params }: { params: Promise<{ id: st
   if (!Number.isInteger(id) || id <= 0) notFound();
 
   const [expense, settings] = await Promise.all([getExpense(id), getSettingsSafe()]);
+  if (!expense || !canReadExpenseVoucher(session, expense)) notFound();
   const printed = await printCount("voucher", id);
-  if (!expense) notFound();
 
   // (TD-05) الأساس دستوري من الكود.
   const base = CLINIC_BASE_CURRENCY;

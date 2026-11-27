@@ -290,6 +290,21 @@ async function restrictedRoleVerdict(request: NextRequest, bearer: string | null
   const access = (cookieToken ? await verifiedSessionAccess(cookieToken) : null)
     ?? (bearer ? await verifiedSessionAccess(bearer) : null);
   const role = access?.role;
+  if (role === "reception") {
+    const clinicFinance = /^\/api\/(?:accounting|executive|reports|export|payables|finance\/(?:report|commissions|commission-overrides|debts|lab-accounting|lab-reconciliation|reconciliation)|lab\/pricing)(?:\/|$)/.test(pathname);
+    const dailyTransactions = /^\/api\/(?:payments|expenses)\/?$/.test(pathname) && ["GET", "HEAD"].includes(request.method);
+    const clinicalMedia = /^\/api\/(?:ortho|ceph|patients\/[^/]+\/(?:photo|ceph))(?:\/|$)/.test(pathname);
+    const operationalReport = pathname === "/api/reports" || pathname === "/api/reports/saved";
+    const bookingRead = ["GET", "HEAD"].includes(request.method)
+      && (pathname === "/api/ortho/followups" || /^\/api\/ortho\/\d+\/return-booking$/.test(pathname));
+    const agreementLink = request.method === "PATCH" && /^\/api\/ortho\/\d+$/.test(pathname);
+    if ((clinicFinance && !operationalReport) || dailyTransactions || (clinicalMedia && !bookingRead && !agreementLink)) {
+      return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+    }
+    if (pathname !== "/ortho" && pathname !== "/print/report" && /^\/(?:finance\/(?:plans|debts|lab-accounting|reports|reconciliation|accounting|commissions|fx)|reports|executive|ortho|ceph|print\/(?:shift|report|party|commission-statement|dossier|ceph|ceph-compare))(?:\/|$)/.test(pathname)) {
+      return NextResponse.redirect(new URL("/patients", request.url));
+    }
+  }
   if (!isGatedRole(role) || restrictedRouteAllowed(role, pathname, request.method, access?.financeAccess)) return null;
   if (pathname.startsWith("/api/")) {
     return NextResponse.json({ message: RESTRICTED_ROUTE_DENIED }, { status: 403 });

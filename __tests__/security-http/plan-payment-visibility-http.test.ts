@@ -157,7 +157,7 @@ describe("plan receipt visibility over actual authenticated HTTP", () => {
     for (const who of ["admin", "reception", "cashier", "accountant"] as const) {
       const body = await response(genericPath(), h.sessions[who]);
       expect(body).toMatchObject({ canSeeFinancial: true, plans: [{ paidMinor: 16000 }] });
-      if (who === "cashier" || who === "accountant") {
+      if (who !== "admin") {
         expect(body.plans[0]).not.toHaveProperty("items");
         expect(body.plans[0]).not.toHaveProperty("consentNote");
         expect((await authedGet(patientPath(), h.sessions[who])).status).toBe(403);

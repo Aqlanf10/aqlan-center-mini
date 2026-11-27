@@ -36,6 +36,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
+  if (session.role === "reception") return NextResponse.json({ message: "استخدم الاتفاقات المالية في حساب المريض." }, { status: 403 });
   const patientId = await idFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم ملف غير صالح." }, { status: 400 });
   if (!(await canAccessPatient(session, patientId, session.role === "doctor" ? "canViewPlans" : undefined))) {

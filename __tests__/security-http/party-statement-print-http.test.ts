@@ -38,8 +38,8 @@ afterAll(async () => {
 });
 
 describe("كشف حساب جهة — الطباعة", () => {
-  it("الإدارة والاستقبال والمحاسب يطبعون الكشف بالاسم والتوقيع ولكل عملة سطرها", async () => {
-    for (const session of [h.sessions.admin, h.sessions.reception, h.sessions.accountant]) {
+  it("الإدارة والمحاسب يطبعون الكشف بالاسم والتوقيع ولكل عملة سطرها", async () => {
+    for (const session of [h.sessions.admin, h.sessions.accountant]) {
       const response = await get(`/print/party/${supplierId}`, session.cookie);
       expect(response.status).toBe(200);
       const html = await response.text();
@@ -54,6 +54,9 @@ describe("كشف حساب جهة — الطباعة", () => {
 
   it("الطبيب بلا صلاحية مال لا يرى الورقة، والكاشير خارج حدوده يُعاد إلى الصندوق", async () => {
     expect((await get(`/print/party/${supplierId}`, h.sessions.doctorA.cookie)).status).toBe(404);
+    const reception = await get(`/print/party/${supplierId}`, h.sessions.reception.cookie);
+    expect(reception.status).toBe(307);
+    expect(new URL(reception.headers.get("location")!, baseUrl).pathname).toBe("/patients");
     const cashier = await get(`/print/party/${supplierId}`, h.sessions.cashier.cookie);
     expect(cashier.status).toBe(307);
     expect(cashier.headers.get("location")).toContain("/finance");
@@ -76,7 +79,8 @@ describe("كشف حساب جهة — الواجهة البرمجية", () => {
   });
 
   it("الإجمالي لكل عملة بعملتها", async () => {
-    const response = await get(`/api/payables?partyId=${supplierId}`, h.sessions.reception.cookie);
+    expect((await get(`/api/payables?partyId=${supplierId}`, h.sessions.reception.cookie)).status).toBe(403);
+    const response = await get(`/api/payables?partyId=${supplierId}`, h.sessions.accountant.cookie);
     const payload = await response.json() as { totals: { currency: string; owedMinor: number; remainingMinor: number }[] };
     expect(payload.totals.map((row) => [row.currency, row.owedMinor, row.remainingMinor])).toEqual([
       ["YER", 80_000, 80_000],

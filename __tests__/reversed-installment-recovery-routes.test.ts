@@ -5,6 +5,9 @@ const mock = vi.hoisted(() => ({
   settings: vi.fn(), audit: vi.fn(), plan: vi.fn(), funded: vi.fn(), payment: vi.fn(),
   readRecovery: vi.fn(), ledger: vi.fn(), plans: vi.fn(), access: vi.fn(),
 }));
+vi.mock("@/lib/reception-patient-account", () => ({
+  readReceptionPatientAccount: vi.fn().mockResolvedValue({ targets: { invoices: [], plans: [] }, openings: [], invoices: [] }),
+}));
 vi.mock("@/lib/session", () => ({ requireSession: mock.session }));
 vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden", getSettings: mock.settings,

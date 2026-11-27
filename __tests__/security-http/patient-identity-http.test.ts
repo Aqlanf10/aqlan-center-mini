@@ -28,7 +28,9 @@ describe("(PAT-3) patient flags and email via PATCH /api/patients/[id]", () => {
     const ok = await authedMutation(`/api/patients/${patientId}`, h.sessions.reception, "PATCH",
       JSON.stringify({ flags: ["VIP"], email: "Patient@Example.com", preferredChannel: "whatsapp" }));
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toMatchObject({ flags: ["VIP"], email: "patient@example.com", preferredChannel: "whatsapp" });
+    expect(Object.keys(await ok.json()).sort()).toEqual(["fullName", "id", "patientNumber", "phone"]);
+    const file = await (await authedGet(`/api/patients/${patientId}`, h.sessions.admin)).json();
+    expect(file.patient).toMatchObject({ flags: ["VIP"], email: "patient@example.com", preferredChannel: "whatsapp" });
     for (const body of [{ flags: ["علم مخترع"] }, { email: "x@" }, { preferredChannel: "fax" }]) {
       const bad = await authedMutation(`/api/patients/${patientId}`, h.sessions.reception, "PATCH", JSON.stringify(body));
       expect(bad.status).toBe(400);
@@ -131,11 +133,12 @@ describe("(PAT-3) PUT /api/patients/[id]/photo", () => {
     const { rows: [document] } = await db.query<{ id: number }>(
       `INSERT INTO patient_documents (patient_id, kind, title, mime_type, size_bytes, sha256, storage_key, uploaded_by)
        VALUES ($1, 'photo', 'صورة', 'image/jpeg', 10, repeat('b', 64), 'k/' || gen_random_uuid(), 'x') RETURNING id`, [other.id]);
-    const foreign = await authedMutation(`/api/patients/${patientId}/photo`, h.sessions.reception, "PUT", JSON.stringify({ documentId: document.id }));
+    expect((await authedMutation(`/api/patients/${other.id}/photo`, h.sessions.reception, "PUT", JSON.stringify({ documentId: document.id }))).status).toBe(403);
+    const foreign = await authedMutation(`/api/patients/${patientId}/photo`, h.sessions.admin, "PUT", JSON.stringify({ documentId: document.id }));
     expect(foreign.status).toBe(404);
     expect((await foreign.json() as { message: string }).message).toMatch(arabic);
     expect((await authedMutation(`/api/patients/${patientId}/photo`, h.sessions.cashier, "PUT", JSON.stringify({ documentId: null }))).status).toBe(403);
-    const own = await authedMutation(`/api/patients/${other.id}/photo`, h.sessions.reception, "PUT", JSON.stringify({ documentId: document.id }));
+    const own = await authedMutation(`/api/patients/${other.id}/photo`, h.sessions.admin, "PUT", JSON.stringify({ documentId: document.id }));
     expect(own.status).toBe(200);
     expect(await own.json()).toMatchObject({ photoDocumentId: document.id });
   });

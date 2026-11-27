@@ -122,8 +122,17 @@ describe("actual ortho route, proxy and canonical patient guard", () => {
     expect(patientCases).toHaveBeenCalledWith(101, expect.any(String));
   });
 
-  it.each(["admin", "reception"] as const)("preserves full authorized %s data without a doctor lookup", async (role) => {
-    const req = request(role);
+  it("denies reception before reading clinical cases or their images", async () => {
+    const req = request("reception");
+    expect((await proxy(req)).status).toBe(403);
+    expect((await list(req)).status).toBe(403);
+    expect((await detail(req, context(22))).status).toBe(403);
+    expect(globalCases).not.toHaveBeenCalled();
+    expect(caseById).not.toHaveBeenCalled();
+  });
+
+  it("preserves full authorized admin data without a doctor lookup", async () => {
+    const req = request("admin");
     expect((await proxy(req)).headers.get("x-middleware-next")).toBe("1");
     expect((await (await list(req)).json()).cases).toEqual(cases.map((row) => ({ ...row, photosVisible: true })));
     expect(await (await detail(req, context(22))).json()).toEqual({ ...cases[1], photosVisible: true });

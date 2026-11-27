@@ -6,18 +6,10 @@ import { buildCheckoutDueRecommendation, readCheckoutDueRecommendation } from ".
 import { formatMoney } from "../../lib/money";
 
 let browser: Browser, h: Awaited<ReturnType<typeof harness>>;
-const patientId = 98801, firstId = 98802, secondId = 98803, openId = 98804, invoiceId = 98805;
+const patientId = 98801, firstId = 98802, secondId = 98803, invoiceId = 98805;
 const patient = { id: patientId, patientNumber: "SYN-EXACT-HANDOFF", fullName: "مريض تحصيل الزيارة المحددة اصطناعياً",
   phone: null, altPhone: null, gender: "unknown", birthYear: null, birthDate: null, address: null, medicalAlert: null,
   note: null, createdAt: "2026-10-09T08:00:00Z", photoDocumentId: null, flags: [], email: null, preferredChannel: null };
-const money = (balanceMinor: number) => ({ balanceMinor, invoicedMinor: 0, paidMinor: 0, openingMinor: balanceMinor,
-  agreedMinor: 999999, treatmentDoneMinor: 0, remainingTreatmentMinor: 999999, approvedAgreements: null, classicInstallments: { count: 1, totalMinor: 999999, paidMinor: 0, remainingMinor: 999999 } });
-const workflow = () => ({ patient,
-  openVisit: { id: openId, arrivedAt: "2026-10-09T11:00:00Z", status: "waiting", chair: null, plannedTitle: null },
-  lastVisit: { id: secondId, date: "2026-10-09", treatmentDone: "زيارة أحدث", proceduresSummary: null, nextPlan: null },
-  nextAppointment: null, activePlans: [], plannedVisits: [], counts: { visits: 3, openLabOrders: 0, documents: 0, orthoCase: false },
-  financial: { ...money(180000), byCurrency: { YER: money(180000), SAR: money(5000), USD: money(2300) } },
-  alerts: [], canSeeFinancial: true, assessmentCases: [], legacyCases: [] });
 function walkout(id: number, collected = false, yer = 180000) {
   const sar = collected ? 0 : 5000;
   const selectedInvoiceId = invoiceId + (id - firstId);
@@ -82,13 +74,18 @@ describe("exact reception checkout on the built patient workspace", () => {
           idempotencyKey: request.headers()["idempotency-key"] }); return; // Canonical synthetic acknowledgement; never a real payment write.
       }
       if (!["GET", "HEAD", "OPTIONS"].includes(method)) { unexpected.push(`${method} ${path}`); await route.abort(); return; }
-      if (path === `/api/patients/${patientId}/workflow`) { await json(route, workflow()); return; }
-      if (path === `/api/patients/${patientId}`) { await json(route, { patient, visits: [], appointments: [] }); return; }
+      if (path === `/api/patients/${patientId}`) {
+        const mode = url.searchParams.get("projection");
+        if (mode === "reception") { await json(route, { id:patientId, fullName:patient.fullName, phone:null, patientNumber:patient.patientNumber }); return; }
+        if (mode === "reception-money") { await json(route, { id:patientId, balances:[], agreements:[], receipts:[], history:[],
+          invoices:[], schedules:[], targets:{ invoices:[],plans:[],openings:[] }, canCollect:true }); return; }
+        if (mode === "appointments") { await json(route, { patientId, view:url.searchParams.get("view"), requestCursor:null, today:"2026-10-14", nextCursor:null, appointments:[] }); return; }
+      }
       const visit = path.match(/^\/api\/visits\/(\d+)\/walkout$/);
       if (visit) {
         const id = Number(visit[1]); reads.push(id);
         if (![firstId, secondId].includes(id)) { unexpected.push(`${method} ${path}`); await route.abort(); return; }
-        const body = { ...walkout(id, collected, nextYer), receptionHandoff: { status: handled ? "handled" : collected ? "collected" : "pending", handledReason: handled ? "معالجة موثقة مع بقاء الدين" : null } }, thisMode = mode;
+        const body = { ...walkout(id, collected, nextYer), receptionHandoff: { status: handled ? "handled" : collected ? "collected" : "pending", handledReason: null } }, thisMode = mode;
         if (thisMode === "foreign") body.patientId++;
         if (thisMode === "unsigned") (body as { signedAt: unknown }).signedAt = null;
         if (thisMode === "malformed") delete (body.checkout.current as Partial<typeof body.checkout.current>).USD;
@@ -121,7 +118,7 @@ describe("exact reception checkout on the built patient workspace", () => {
       try {
         await page.goto(urlFor(firstId), { waitUntil: "domcontentloaded" }); await verified();
         expect(reads.every(id => id === firstId)).toBe(true);
-        expect(await page.getByRole("region", { name: "الزيارة المحددة للتحصيل" }).innerText()).toContain(`#${openId}`);
+        expect(await page.getByRole("region", { name: "الزيارة المحددة للتحصيل" }).innerText()).toContain(`#${firstId}`);
         expect(await page.getByRole("region", { name: "زيارة اليوم", exact: true }).count()).toBe(0);
         expect(await checkout(page).getByRole("link", { name: "🖨️ ملخّص المغادرة" }).getAttribute("href")).toBe(`/print/walkout/${firstId}`);
         for (const [currency, amount] of [["YER", 180000], ["SAR", 5000], ["USD", 2300]] as const) {
@@ -163,14 +160,13 @@ describe("exact reception checkout on the built patient workspace", () => {
         await expect.poll(() => checkout(page).innerText()).toContain("تمت المعالجة — لا تعني سداد الرصيد");
         expect(handoffWrites).toBe(3);
         await page.reload({ waitUntil: "domcontentloaded" }); await verified();
-        await expect.poll(() => checkout(page).innerText()).toContain("معالجة موثقة مع بقاء الدين");
+        await expect.poll(() => checkout(page).innerText()).toContain("تمت المعالجة — لا تعني سداد الرصيد");
         expect(await checkout(page).getByRole("button", { name: "تمت المعالجة", exact: true }).count()).toBe(0);
         for (const [currency, amount] of [["YER", 180000], ["SAR", 5000], ["USD", 2300]] as const) {
           expect(await checkout(page).locator(`[data-testid="checkout-current-balance"][data-currency="${currency}"]`).innerText()).toContain(formatMoney(amount, currency));
         }
-        // Header action stays within selected checkout rather than collecting another workflow target.
-        expect(await page.getByTestId("patient-primary-action").innerText()).toContain(`#${firstId}`);
-        await page.getByTestId("patient-primary-action").click();
+        // A selected visit has one checkout. The general account payment action is absent.
+        expect(await page.getByRole("button", {name:"تحصيل دفعة",exact:true}).count()).toBe(0);
         expect(await page.getByRole("dialog", { name: "تحصيل دفعة", exact: true }).count()).toBe(0);
         await checkout(page).getByRole("button", { name: "تحصيل وطباعة السند", exact: true }).click();
         const dialog = page.getByRole("dialog", { name: "تحصيل دفعة", exact: true }); await dialog.waitFor();
@@ -205,7 +201,7 @@ describe("exact reception checkout on the built patient workspace", () => {
         for (const bad of ["", "0", "-1", "1.5", "9007199254740992", `${firstId}&checkoutVisit=${secondId}`]) {
           reads.length = 0;
           await page.goto(`${baseUrl}/patients/${patientId}?tab=today&checkoutVisit=${bad}`, { waitUntil: "domcontentloaded" });
-          await page.getByRole("alert").filter({ hasText: "رابط تحصيل الزيارة غير صالح" }).waitFor();
+          await page.getByRole("alert").filter({ hasText: "رقم زيارة التحصيل غير صالح" }).waitFor();
           expect(await checkout(page).count()).toBe(0); expect(reads).toEqual([]);
         }
 

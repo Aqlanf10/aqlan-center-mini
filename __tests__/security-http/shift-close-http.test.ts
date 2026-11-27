@@ -6,8 +6,8 @@ import { authedMutation, baseUrl, harness } from "./_server";
  * (P1-3) إقفال الوردية على HTTP الحقيقي — التطبيق المبني نفسه.
  *
  * الجرد الأعمى: الخادم يحسب المتوقَّع لحظة الإقفال، فإن خالفه المعدود رفض برسالةٍ
- * عربية تكشف الفرق وتطلب سببه؛ ومع السبب يُقفَل ويُدقَّق بالمتوقَّع والفرق والسبب.
- * وتقرير الإقفال (Z) يُطبع للإدارة والاستقبال ولا يُفتح للطبيب.
+ * عربية تطلب سبب الفرق. ومع السبب يُقفَل ويُدقَّق بالمتوقَّع والفرق والسبب.
+ * وتقرير الإقفال (Z) يُطبع للإدارة ويُحجب عن الاستقبال والطبيب.
  */
 
 let h: Awaited<ReturnType<typeof harness>>;
@@ -41,20 +41,23 @@ afterAll(async () => {
 const close = (body: unknown) => authedMutation("/api/shifts", h.sessions.reception, "PATCH", JSON.stringify(body));
 
 describe("إقفال الوردية — جردٌ أعمى وفرقٌ لا يُقفَل بلا سبب", () => {
-  it("GET يعرض الدرج بالقاعدة الواحدة (نقدٌ فقط)", async () => {
+  it("تظهر الوردية للاستقبال وتفاصيل الدرج للإدارة", async () => {
     const response = await fetch(`${baseUrl}/api/shifts`, { headers: { cookie: h.sessions.reception.cookie } });
     expect(response.status).toBe(200);
     const payload = await response.json();
-    expect(payload.drawer?.expected).toBeTruthy();
+    expect(payload).toEqual({ open: { id: shiftId } });
+    const admin = await fetch(`${baseUrl}/api/shifts`, { headers: { cookie: h.sessions.admin.cookie } });
+    expect((await admin.json()).drawer?.expected).toBeTruthy();
   });
 
-  it("معدودٌ مخالف بلا سبب ⇒ 409 برسالة تكشف الفرق وتطلب سببه، والوردية تبقى مفتوحة", async () => {
+  it("معدودٌ مخالف بلا سبب ⇒ 409 برسالة تطلب سبب الفرق، والوردية تبقى مفتوحة", async () => {
     // المتوقَّع = الافتتاحي ١٠٠٠ (لا حركة في وردية الاختبار)؛ المعدود ١٧٧٧ ⇒ زيادة ٧٧٧.
     const response = await close({ id: shiftId, counted: { YER: "1777", SAR: "0", USD: "0" } });
     expect(response.status).toBe(409);
     const payload = await response.json();
     expect(payload.code).toBe("difference_reason_required");
-    expect(payload.message).toContain("زيادة");
+    expect(payload.message).toContain("سبب الفرق");
+    expect(payload.message).not.toMatch(/777|زيادة/);
     const { rows: [row] } = await db.query<{ status: string }>(`SELECT status FROM cashier_shifts WHERE id = $1`, [shiftId]);
     expect(row.status).toBe("open");
   });
@@ -66,8 +69,7 @@ describe("إقفال الوردية — جردٌ أعمى وفرقٌ لا يُق
     });
     expect(response.status).toBe(200);
     const closed = await response.json();
-    expect(closed.difference.YER).toBe(777);
-    expect(closed.differenceReason).toBe("مبلغ زائد تركه مريض للتسوية غدًا");
+    expect(closed).toEqual({ id: shiftId });
     const { rows: [audit] } = await db.query<{ details: Record<string, unknown> }>(
       `SELECT details FROM audit_log WHERE action = 'shift.close' AND entity_id = $1 ORDER BY id DESC LIMIT 1`,
       [String(shiftId)],
@@ -76,8 +78,10 @@ describe("إقفال الوردية — جردٌ أعمى وفرقٌ لا يُق
     expect((audit.details["الفرق"] as Record<string, number>).YER).toBe(777);
   });
 
-  it("تقرير الإقفال (Z) يُطبع للاستقبال ولا يُفتح للطبيب", async () => {
-    const ok = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions.reception.cookie } });
+  it("تقرير الإقفال (Z) يُطبع للإدارة ويُحجب عن الاستقبال والطبيب", async () => {
+    const reception = await fetch(`${baseUrl}/print/shift/${shiftId}`, { redirect: "manual", headers: { cookie: h.sessions.reception.cookie } });
+    expect(reception.status).toBe(307);
+    const ok = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions.admin.cookie } });
     expect(ok.status).toBe(200);
     const html = await ok.text();
     expect(html).toContain("تقرير إقفال الوردية");

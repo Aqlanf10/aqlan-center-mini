@@ -246,11 +246,13 @@ describe("case-scoped diagnosis on the built RTL patient page", () => {
     } finally { await f.context.close(); }
   });
 
-  it("keeps reception read-only in the diagnosis panel", async () => {
+  it("keeps clinical diagnoses outside the reception file", async () => {
     const f = await fixture(1280, h.sessions.reception); const before = await snapshot();
     try {
-      const panel = await f.open(); await panel.getByText(noteA, { exact: true }).waitFor();
-      expect(await panel.getByRole("button", { name: /تحديث التشخيص|سجّل تشخيص/ }).count()).toBe(0);
+      await f.page.goto(`${baseUrl}/patients/${patient}?tab=treatment&sub=ortho`, { waitUntil: "domcontentloaded" });
+      await f.page.getByRole("heading", { name: "حساب المريض", exact: true }).waitFor();
+      expect(await f.page.getByText(noteA, { exact: true }).count()).toBe(0);
+      expect(f.diagnosisReads).toEqual([]);
       expect(f.writes).toEqual([]); expect(await snapshot()).toEqual(before); expect(f.unexpected).toEqual([]); expect(f.pageErrors).toEqual([]);
     } finally { await f.context.close(); }
   });

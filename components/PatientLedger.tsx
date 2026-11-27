@@ -342,7 +342,10 @@ function restoreInvoiceCommand(command: FinancialCommand, patientId: number): In
   return { ...(value as unknown as InvoiceCommandState), outcome: "uncertain", editing: false };
 }
 
+const ignoreDebtHold = () => {};
+
 interface PatientLedgerProps {
+  receptionSchedules?: boolean;
   patientId: number;
   /** Trusted calling visit context; independent entry leaves this undefined. */
   visitId?:number;
@@ -354,7 +357,7 @@ interface PatientLedgerProps {
   accountDetails?: ReactNode;
 }
 
-export function PatientLedger({ patientId, visitId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, accountDetails }: PatientLedgerProps) {
+export function PatientLedger({ receptionSchedules, patientId, visitId, selectionContextKey = "", onClinicalChange, entryRequestKey = 0, onEntryRequestConsumed, onNavigationGuardChange, accountDetails }: PatientLedgerProps) {
   const session = useSession();
   // A fresh patient/principal/permission owner cannot reuse another owner's read.
   const scope = JSON.stringify([patientId, session, visitId??null]);
@@ -428,6 +431,17 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
   const recovery = recoveries.get(recoveryKey) ?? null;
   const reconciliationRecovery = reconciliationRecoveries.get(recoveryKey) ?? null;
   if (!session) return <p role="status" className="p-4 text-sm text-slate-500">غير مصرّح لك بعرض حساب المريض.</p>;
+  const changeDebtRecovery = (command: DebtRepaymentCommand | null) =>{
+      if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
+      setDebtRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
+  };
+  if (receptionSchedules) {
+    const held = !!(recovery || moneyRecoveries.get(recoveryKey) || historicalRecoveries.get(recoveryKey)
+      || revisionRecoveries.get(recoveryKey) || reconciliationRecovery);
+    return <DebtRepaymentPanel key={scope} patientId={patientId} refreshKey={patientId} financialRecovery={financialRecovery}
+      recovery={debtRecoveries.get(recoveryKey) ?? null} onRecoveryChange={changeDebtRecovery} onHold={ignoreDebtHold}
+      enabled={session.role === "reception" && financialRecovery.ready && !held} onChanged={onClinicalChange ?? ignoreDebtHold} />;
+  }
   return <PatientLedgerContent key={scope} reconciliationRecovery={reconciliationRecovery} patientId={patientId} visitId={visitId} selectionContextKey={selectionContextKey} onClinicalChange={onClinicalChange} entryRequestKey={entryRequestKey} onEntryRequestConsumed={onEntryRequestConsumed} onNavigationGuardChange={onNavigationGuardChange}
     accountDetails={accountDetails} financialRecovery={financialRecovery} restoredCommandKey={restoredCommandKey}
     debtRecovery={debtRecoveries.get(recoveryKey)??null}
@@ -445,10 +459,7 @@ export function PatientLedger({ patientId, visitId, selectionContextKey = "", on
       if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
       setRevisionRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
     }}
-    onDebtRecoveryChange={command=>{
-      if(recoveryLifetime.current.owner!==recoveryOwner||!recoveryLifetime.current.active)return;
-      setDebtRecoveries(current=>{const next=new Map(current);if(command)next.set(recoveryKey,command);else next.delete(recoveryKey);return next;});
-    }}
+    onDebtRecoveryChange={changeDebtRecovery}
     recovery={recovery?.patientId === patientId && recovery.principal === principal ? recovery.command : null}
     onRecoveryChange={command => {
       if (recoveryLifetime.current.owner !== recoveryOwner || !recoveryLifetime.current.active) return;
@@ -547,7 +558,7 @@ function PatientLedgerContent({ reconciliationRecovery, patientId, visitId, sele
         const nextServices: unknown = await response.json();
         if (current() && Array.isArray(nextServices)) setServices(nextServices);
       }).catch(() => {});
-      const ledgerResponse = await fetch(`/api/patients/${patientId}/ledger`, { cache: "no-store", signal: controller.signal });
+      const ledgerResponse = await fetch(`/api/patients/${patientId}/ledger${session?.role === "reception" ? "?view=account" : ""}`, { cache: "no-store", signal: controller.signal });
       if (!current()) return;
       // Retire denied data before awaiting an error body that may never arrive.
       if (!ledgerResponse.ok) {
@@ -566,7 +577,7 @@ function PatientLedgerContent({ reconciliationRecovery, patientId, visitId, sele
     } finally {
       if (current()) setLoading(false);
     }
-  }, [patientId]);
+  }, [patientId, session?.role]);
 
   const notifyFinancialChange = useCallback(() => {
     if (readRef.current.active) onClinicalChange?.();
@@ -670,10 +681,10 @@ function PatientLedgerContent({ reconciliationRecovery, patientId, visitId, sele
           className="min-h-11 rounded-xl bg-navy-800 px-4 py-2 text-xs font-bold text-white disabled:opacity-50">
           {mode === "entry" || mode === "invoice" || mode === "legacy" ? "إغلاق الفاتورة / الاتفاق" : "فاتورة / اتفاق علاج"}
         </button>
-        <button disabled={financialBlocked} onClick={() => {if(!financialBlocked&&!debtHeld.current&&!invoiceUnresolved.current)setCollectOpen(true);}}
+        {session?.role !== "reception" && <button disabled={financialBlocked} onClick={() => {if(!financialBlocked&&!debtHeld.current&&!invoiceUnresolved.current)setCollectOpen(true);}}
           className="rounded-xl bg-brand-orange px-4 py-2 text-xs font-bold text-white">
           قبض دفعة
-        </button>
+        </button>}
         <a href={`/print/statement/${patientId}`} target="_blank" rel="noopener"
           className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-navy-800">
           كشف حساب

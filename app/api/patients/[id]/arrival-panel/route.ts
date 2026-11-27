@@ -28,7 +28,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   try {
     const includeMoney = desk || await canViewPatientMoney(session, patientId);
-    const panel = await arrivalPanel(patientId, { includeMoney });
+    const panel = await arrivalPanel(patientId, { includeMoney, ...(session.role === "reception" ? { administrativeOnly: true } : {}) });
     if (!panel) return NextResponse.json({ message: "المريض غير موجود." }, { status: 404 });
     /* الرؤية ليست تحصيلًا: الطبيب لا يقبض، والكاشير الممنوع من التحصيل لا تظهر له أزراره. */
     const canCollect = desk && includeMoney && (!cashier || session.financeAccess?.collectPayments !== false);

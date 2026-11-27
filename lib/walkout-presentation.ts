@@ -11,8 +11,8 @@ export const WALKOUT_CLASS_LABEL: Record<BillingClassification, { text: string; 
 };
 export const PREVIOUS_BALANCE_LABEL = "الرصيد السابق (باستثناء فاتورة الزيارة ودفعات يومها)";
 export const PREVIOUS_BALANCE_NOTE = "رصيد مرجعي من الدفتر باستثناء فاتورة هذه الزيارة وجميع دفعات يوم وصولها؛ ليس لقطة لحظة التوقيع. الرصيد الحالي هو دين الحساب القائم، ومتـبقي الاتفاق مستقل عنه.";
-export function walkoutNeedsReview(value: Pick<VisitWalkout, "lines" | "orthoAdjustment">): boolean {
-  return value.lines.some(lineNeedsReview)
+export function walkoutNeedsReview(value: Pick<VisitWalkout, "lines" | "orthoAdjustment"> & { financialReviewRequired?: boolean }): boolean {
+  return value.financialReviewRequired === true || value.lines.some(lineNeedsReview)
     || value.orthoAdjustment?.pendingDecision === true
     || value.orthoAdjustment?.billingClass === "OUTSIDE_CONTRACT";
 }

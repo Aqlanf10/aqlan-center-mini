@@ -32,6 +32,7 @@ function OwnedTodayVisitTab({
   visits,
   canCollect,
   requestedCheckoutVisitId = null,
+  currentVisitId = null,
   onVisitStarted,
   onChanged,
   onOpenTabletMode,
@@ -46,6 +47,7 @@ function OwnedTodayVisitTab({
   visits: { id: number; arrivedAt: string; status: string; chair: number | null }[];
   canCollect: boolean;
   requestedCheckoutVisitId?: number | null;
+  currentVisitId?: number | null;
   onVisitStarted: () => void;
   onChanged: () => void;
   onOpenTabletMode?: () => void;
@@ -132,7 +134,7 @@ function OwnedTodayVisitTab({
     };
     try {
       const response = await fetch(visitId === null
-        ? `/api/patients/${patientId}/workflow` : `/api/visits/${visitId}/walkout`,
+        ? `/api/patients/${patientId}/workflow` : `/api/visits/${visitId}/walkout${requestedCheckoutVisitId !== null ? `?patientId=${patientId}` : ""}`,
         { cache: "no-store", signal: request.signal });
       if (!response.ok) throw new Error("Financial read failed");
       const payload: unknown = await response.json();
@@ -216,6 +218,7 @@ function OwnedTodayVisitTab({
    * ظهورٍ بعد التحميل ليس تبديلًا (الحالة الابتدائية نظيفة سلفًا). */
   // Retain only the editor identity during an unavailable workflow, never its action authority.
   const openVisit = summary ? summary.openVisit : retainedOpenVisit ?? null;
+  const otherVisitId = openVisit?.id ?? currentVisitId;
   // This only deduplicates a reference actually rendered by the loaded editor.
   // A new token retires late A→B→A callbacks without touching checkout ownership.
   const previousReferenceOwner = useMemo(() => ({
@@ -332,7 +335,7 @@ function OwnedTodayVisitTab({
         className="rounded-xl border border-emerald-300 bg-emerald-50 p-4">
         <h2 className="text-sm font-extrabold">تحصيل الزيارة #{requestedCheckoutVisitId} · {patientName}</h2>
         <p className="mt-1 text-xs text-slate-600">هذه الزيارة محددة من الاستقبال؛ الأرصدة الحالية من الدفتر، ولا يغيّر التوقيع اتفاق المريض أو رصيده السابق.</p>
-        {openVisit && openVisit.id !== requestedCheckoutVisitId ? <p className="mt-1 text-xs font-bold text-amber-800">توجد زيارة قائمة أخرى #{openVisit.id} لهذا المريض. التحصيل هنا يخص الزيارة المحددة أعلاه.</p> : null}
+        {otherVisitId && otherVisitId !== requestedCheckoutVisitId ? <p className="mt-1 text-xs font-bold text-amber-800">توجد زيارة قائمة أخرى #{otherVisitId} لهذا المريض. التحصيل هنا يخص الزيارة المحددة أعلاه.</p> : null}
         <div className="mt-2 flex flex-wrap gap-3 text-xs font-bold">
           <a href="/" className="underline">العودة إلى الاستقبال</a>
           <a href={`/patients/${patientId}?tab=today`} className="underline">فتح مساحة الزيارة الحالية</a>

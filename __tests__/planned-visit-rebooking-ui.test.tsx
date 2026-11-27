@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SummaryTab, type WorkflowSummary } from "../components/patient/SummaryTab";
+import { PlannedVisitBooking } from "../components/patient/PlannedVisitBooking";
+import type { WorkflowSummary } from "../components/patient/SummaryTab";
 
 type Slot = { value?: unknown; deps?: unknown[]; cleanup?: () => void };
 type Frame = { slots: Slot[]; cursor: number; effects: (() => void)[] };
@@ -47,7 +48,7 @@ function mount(timeZone = "Asia/Aden") {
   const frame: Frame = { slots: [], cursor: 0, effects: [] };
   const props = { summary: { ...summary(), timeZone }, patientId: 7, patientName: "اصطناعي", patientNumber: "SYNTH-7", patientPhone: null,
     base: "YER" as const, onVisitStarted: vi.fn(), onChanged: vi.fn(), onGoToTab: vi.fn(), workflowIsCurrent: () => true };
-  const render = () => { runtime.frame = frame; frame.cursor = 0; const tree = SummaryTab(props);
+  const render = () => { runtime.frame = frame; frame.cursor = 0; const tree = PlannedVisitBooking(props);
     frame.effects.splice(0).forEach(fn => fn()); return tree; };
   const find = (type: string, text?: string) => elements(render()).find(e => e.type === type && (!text || words(e.props.children as ReactNode) === text))!;
   const field = (name: string) => elements(render()).find(e => name === "reason" ? e.type === "textarea" : e.type === "input" && e.props.type === name)!;
