@@ -4,6 +4,7 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { findUserByUsername, recordAudit } from "@/lib/db";
 import { type Role, canUseAiChat } from "@/lib/roles";
+import { getAiSettings } from "@/lib/ai";
 import { verifyToolConfirmation } from "@/lib/ai-confirmation";
 import { executeAiTool } from "@/lib/ai-tools/registry";
 import { resolveToolPolicy } from "@/lib/ai-tools/policy";
@@ -75,6 +76,12 @@ export async function POST(request: Request) {
       { message: "ليس لديك صلاحية تنفيذ إجراءات المساعد الذكي." },
       { status: 403 },
     );
+  }
+
+  // Re-check the master switch for previously issued confirmations, without requiring a cloud key.
+  const masterSettings = await getAiSettings().catch(() => null);
+  if (masterSettings?.enabled !== true) {
+    return NextResponse.json({ message: "المساعد الذكي متوقف أو تعذّر التحقق من إعداداته. لم يُنفّذ الإجراء." }, { status: 503 });
   }
 
   const settings = await readAssistantControlSettings().catch(() => null);
