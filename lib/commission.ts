@@ -36,7 +36,11 @@ export interface DoctorShareItem {
   serviceName?: string;
   category?: string;
   labCostMinor?: number;
+  /** 0134: how this share's lab cost was allocated; absent = the line doctor carries it. */
+  labCostBasis?: LabCostBasis;
   materialCostMinor?: number;
+  /** 0141 (Charter §18): service exempt from specialty material-consumption rate deduction (e.g. consultation). */
+  materialConsumptionExempt?: boolean;
   /** (COMM-DETAIL-1) الحالة التخصصية للعمل — مشتقة: بند الفاتورة ← إجراء الزيارة ← بند الخطة. */
   caseId?: number;
   /** (COMM-DETAIL-1) خطة العلاج التي جاء منها العمل — مشتقة بالطريق نفسه. */
@@ -64,6 +68,8 @@ export interface DoctorCommission {
   accruedMinor: number;
   /** نسبته من المحصّل فعلًا — وهو المستحق للدفع — بعملة الاتفاق. */
   earnedMinor: number;
+  /** (Charter §17 / TD-10) نسبته من المحصّل بعد خصم إهلاك مواد التخصص من أساس العمولة قبل ضرب نسبة الطبيب. */
+  netEarnedAfterMaterialRateMinor?: number;
   /** ما صُرف له بعملته نفسها حصرًا — لا يُطرح منه ما صُرف بعملةٍ أخرى. */
   paidMinor: number;
   dueMinor: number;
@@ -486,12 +492,25 @@ export function discountGroupKey(group: { doctorId?: number | null; serviceId?: 
  * which doctor is recorded on the line. A `pending` decision is a review marker only (owner #483
  * 6905003552): the line is paid to its recorded doctor as with no decision, and listed as under review.
  */
-export interface CaseParticipant { doctorId: number; shareBp: number }
+/** 0134: `labCostBp` is the optional administrative allocation of the case's lab cost (all participants or none; 10,000 in total). */
+export interface CaseParticipant { doctorId: number; shareBp: number; labCostBp?: number }
+/** 0134: the basis a share's lab cost was allocated by. */
+export type LabCostBasis = "work_shares" | "admin_allocation" | "line_doctor";
+/** 0134: whether the participants carry a complete administrative lab-cost allocation. `null` = none carry one. */
+export function labCostAllocationProblem(participants: readonly CaseParticipant[]): "incomplete" | null {
+  const carrying = participants.filter(part => part.labCostBp !== undefined);
+  if (carrying.length === 0) return null;
+  if (carrying.length !== participants.length) return "incomplete";
+  if (carrying.some(part => !Number.isSafeInteger(part.labCostBp) || part.labCostBp! < 0 || part.labCostBp! > FULL_PARTICIPATION_BP)) return "incomplete";
+  return carrying.reduce((sum, part) => sum + part.labCostBp!, 0) === FULL_PARTICIPATION_BP ? null : "incomplete";
+}
 export interface CaseParticipation {
   caseId: number;
   status: "approved" | "pending";
   /** Empty while pending. */
   participants: readonly CaseParticipant[];
+  /** 0134: set by the reader from the owner's settings; absent = by work shares. */
+  labCostBasis?: LabCostBasis;
 }
 export type CaseParticipationResolver = (caseId: number, atIso: string) => CaseParticipation | undefined;
 export const FULL_PARTICIPATION_BP = 10_000;
@@ -533,10 +552,16 @@ export function splitShareByParticipation(share: DoctorShareItem, participation:
   }
   const weights = participation.participants.map(part => part.shareBp);
   const amounts = allocateByWeights(Math.max(0, share.amountMinor), weights);
-  const lab = share.labCostMinor ? allocateByWeights(share.labCostMinor, weights) : null;
+  const administrative = participation.labCostBasis === "admin_allocation" && participation.participants.every(part => part.labCostBp !== undefined)
+    && labCostAllocationProblem(participation.participants) === null;
+  const onLineDoctor = !administrative && participation.labCostBasis === "line_doctor" && participation.participants.some(part => part.doctorId === share.doctorId);
+  const labBasis: LabCostBasis = administrative ? "admin_allocation" : onLineDoctor ? "line_doctor" : "work_shares";
+  const labWeights = administrative ? participation.participants.map(part => part.labCostBp!)
+    : onLineDoctor ? participation.participants.map(part => (part.doctorId === share.doctorId ? 1 : 0)) : weights;
+  const lab = share.labCostMinor ? allocateByWeights(share.labCostMinor, labWeights) : null;
   const materials = share.materialCostMinor ? allocateByWeights(share.materialCostMinor, weights) : null;
   return participation.participants.map((part, index) => ({
-    ...share, doctorId: part.doctorId, amountMinor: amounts[index],
+    ...share, doctorId: part.doctorId, amountMinor: amounts[index], labCostBasis: labBasis,
     ...(lab ? { labCostMinor: lab[index] } : {}), ...(materials ? { materialCostMinor: materials[index] } : {}),
   }));
 }
@@ -616,6 +641,8 @@ export interface CommissionDetailLine {
   /** حصة الطبيب من البند قبل أي خصم. */
   amountMinor: number;
   labCostMinor: number;
+  /** 0134: how the lab cost reached this doctor. */
+  labCostBasis: LabCostBasis;
   materialCostMinor: number;
   labDeducted: boolean;
   materialDeducted: boolean;
@@ -641,6 +668,8 @@ export interface CommissionEngineOptions {
   participationAt?: CaseParticipationResolver;
   /** Called for every line share of a case whose participation decision is pending: paid to its line doctor, under review. */
   onUnderReview?: (line: ParticipationUnderReviewShare) => void;
+  /** (Charter §17 / TD-10) Resolves specialty material consumption rate (basis points) at payment event time so consumption is deducted from the commission base BEFORE multiplying by the doctor's commission percentage. */
+  materialRateAt?: (category: string, atIso: string) => number | null;
 }
 
 /**
@@ -665,19 +694,37 @@ export function commissionForPatientAtEventTime(
   policyAt: CommissionPolicyResolver,
   include?: (invoice: CommissionInvoice) => boolean,
   options: CommissionEngineOptions = {},
-): Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>> {
-  const result = new Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>>();
-  const bump = (doctorId: number, currency: Currency, accrued: number, earned: number) => {
-    const byCurrency = result.get(doctorId) ?? {
-      YER: { accruedMinor: 0, earnedMinor: 0 },
-      SAR: { accruedMinor: 0, earnedMinor: 0 },
-      USD: { accruedMinor: 0, earnedMinor: 0 },
-    };
+): Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number; netEarnedAfterMaterialRateMinor?: number }>> {
+  const result = new Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number; netEarnedAfterMaterialRateMinor?: number }>>();
+  const { overrideAt, sink, participationAt, onUnderReview, materialRateAt } = options;
+  const includeMaterialRateNet = typeof materialRateAt === "function";
+  const bump = (doctorId: number, currency: Currency, accrued: number, earned: number, netEarnedAfterRate: number) => {
+    const byCurrency = result.get(doctorId) ?? (includeMaterialRateNet
+      ? {
+          YER: { accruedMinor: 0, earnedMinor: 0, netEarnedAfterMaterialRateMinor: 0 },
+          SAR: { accruedMinor: 0, earnedMinor: 0, netEarnedAfterMaterialRateMinor: 0 },
+          USD: { accruedMinor: 0, earnedMinor: 0, netEarnedAfterMaterialRateMinor: 0 },
+        }
+      : {
+          YER: { accruedMinor: 0, earnedMinor: 0 },
+          SAR: { accruedMinor: 0, earnedMinor: 0 },
+          USD: { accruedMinor: 0, earnedMinor: 0 },
+        });
     byCurrency[currency].accruedMinor += accrued;
     byCurrency[currency].earnedMinor += earned;
+    if (includeMaterialRateNet) {
+      byCurrency[currency].netEarnedAfterMaterialRateMinor =
+        (byCurrency[currency].netEarnedAfterMaterialRateMinor ?? 0) + netEarnedAfterRate;
+    }
     result.set(doctorId, byCurrency);
   };
-  const { overrideAt, sink, participationAt, onUnderReview } = options;
+  const resolveShareMaterialRateBp = (share: DoctorShareItem, policy: ResolvedPolicy, atIso: string): number | null => {
+    if (!materialRateAt) return null;
+    if (share.materialConsumptionExempt === true) return null;
+    if (policy.deductMaterials && share.materialCostMinor && share.materialCostMinor > 0) return null;
+    if (!share.category) return null;
+    return materialRateAt(share.category, atIso);
+  };
   const overrideFor = (doctorId: number, share: DoctorShareItem, atIso: string) =>
     overrideAt && (share.caseId || share.planId) ? overrideAt(doctorId, share, atIso) : undefined;
 
@@ -713,13 +760,23 @@ export function commissionForPatientAtEventTime(
       const accrued = Math.round((shareBase(share, atInvoice) * atInvoice.percent) / 100);
 
       let earned = 0;
+      let netEarnedAfterRate = 0;
       const parts: CommissionEarnedPart[] = [];
       if (atInvoice.basis === "invoiced") {
         earned = accrued;
+        const invRateBp = resolveShareMaterialRateBp(share, atInvoice, invoice.createdAt);
+        if (invRateBp !== null && invRateBp > 0) {
+          const invConsumption = Math.round((Math.max(0, share.amountMinor) * invRateBp) / 10_000);
+          const invNetBase = Math.max(0, shareBase(share, atInvoice) - invConsumption);
+          netEarnedAfterRate = Math.round((invNetBase * atInvoice.percent) / 100);
+        } else {
+          netEarnedAfterRate = accrued;
+        }
       } else {
         /* الأجزاء تُجمع بحسب السياسة التي سرت عند دفعتها — فكل مجموعةٍ تُحسب
            بصيغتها الأصلية على ما غطّته هي وحدها. */
         const groups = new Map<string, { policy: ResolvedPolicy; covered: number; sources: Set<CommissionRuleSource>; overrides: Set<number> }>();
+        const netGroups = new Map<string, { policy: ResolvedPolicy; rateBp: number | null; covered: number }>();
         for (const chunk of covering) {
           const policy = policyAt(share.doctorId, chunk.sourceTime);
           if (!policy) continue;
@@ -732,6 +789,12 @@ export function commissionForPatientAtEventTime(
           group.sources.add(resolved.ruleSource);
           if (resolved.overrideId !== undefined) group.overrides.add(resolved.overrideId);
           groups.set(key, group);
+
+          const rateBp = resolveShareMaterialRateBp(share, resolved, chunk.sourceTime);
+          const netKey = `${key}|${rateBp ?? "none"}`;
+          const netGroup = netGroups.get(netKey) ?? { policy: resolved, rateBp, covered: 0 };
+          netGroup.covered += chunk.amount;
+          netGroups.set(netKey, netGroup);
         }
         for (const group of groups.values()) {
           if (group.policy.percent <= 0) continue;
@@ -745,6 +808,16 @@ export function commissionForPatientAtEventTime(
             coveredMinor: group.covered,
             earnedMinor: part,
           });
+        }
+        for (const netGroup of netGroups.values()) {
+          if (netGroup.policy.percent <= 0) continue;
+          const consumptionOnShare =
+            netGroup.rateBp !== null && netGroup.rateBp > 0
+              ? Math.round((Math.max(0, share.amountMinor) * netGroup.rateBp) / 10_000)
+              : 0;
+          const baseAfterMaterialRate = Math.max(0, shareBase(share, netGroup.policy) - consumptionOnShare);
+          const groupNetAccrued = Math.round((baseAfterMaterialRate * netGroup.policy.percent) / 100);
+          netEarnedAfterRate += Math.round(groupNetAccrued * Math.min(1, netGroup.covered / invoice.netMinor));
         }
       }
       if (sink) {
@@ -762,6 +835,7 @@ export function commissionForPatientAtEventTime(
           planId: share.planId ?? null,
           amountMinor: share.amountMinor,
           labCostMinor: share.labCostMinor ?? 0,
+          labCostBasis: share.labCostBasis ?? "line_doctor",
           materialCostMinor: share.materialCostMinor ?? 0,
           labDeducted: atInvoice.deductLab && Boolean(share.labCostMinor),
           materialDeducted: atInvoice.deductMaterials && Boolean(share.materialCostMinor),
@@ -776,7 +850,7 @@ export function commissionForPatientAtEventTime(
         });
       }
       if (accrued === 0 && earned === 0) continue;
-      bump(share.doctorId, invoice.currency, accrued, earned);
+      bump(share.doctorId, invoice.currency, accrued, earned, netEarnedAfterRate);
     }
   }
   return result;
@@ -816,21 +890,24 @@ export function commissionForPatient(
 
 /** (تصحيح ٢) يجمع نتائج عدة مرضى ويطرح ما دُفع للطبيب بعملته نفسها. */
 export function summarizeCommissions(
-  perPatient: Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>>[],
+  perPatient: Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number; netEarnedAfterMaterialRateMinor?: number }>>[],
   paidByDoctor: Map<number, Record<Currency, number>>,
 ): DoctorCommission[] {
   const emptyByCurrency = () => ({
-    YER: { accruedMinor: 0, earnedMinor: 0 },
-    SAR: { accruedMinor: 0, earnedMinor: 0 },
-    USD: { accruedMinor: 0, earnedMinor: 0 },
+    YER: { accruedMinor: 0, earnedMinor: 0, netEarnedAfterMaterialRateMinor: 0 },
+    SAR: { accruedMinor: 0, earnedMinor: 0, netEarnedAfterMaterialRateMinor: 0 },
+    USD: { accruedMinor: 0, earnedMinor: 0, netEarnedAfterMaterialRateMinor: 0 },
   });
-  const totals = new Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number }>>();
+  const totals = new Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number; netEarnedAfterMaterialRateMinor: number }>>();
   for (const entry of perPatient) {
     for (const [doctorId, byCurrency] of entry) {
       const current = totals.get(doctorId) ?? emptyByCurrency();
       for (const currency of CURRENCIES) {
+        const earned = byCurrency?.[currency]?.earnedMinor ?? 0;
+        const netAfterRate = byCurrency?.[currency]?.netEarnedAfterMaterialRateMinor ?? earned;
         current[currency].accruedMinor += byCurrency?.[currency]?.accruedMinor ?? 0;
-        current[currency].earnedMinor += byCurrency?.[currency]?.earnedMinor ?? 0;
+        current[currency].earnedMinor += earned;
+        current[currency].netEarnedAfterMaterialRateMinor += netAfterRate;
       }
       totals.set(doctorId, current);
     }
@@ -852,6 +929,7 @@ export function summarizeCommissions(
         currency,
         accruedMinor: value.accruedMinor,
         earnedMinor: value.earnedMinor,
+        netEarnedAfterMaterialRateMinor: value.netEarnedAfterMaterialRateMinor,
         paidMinor,
         dueMinor: value.earnedMinor - paidMinor,
       });

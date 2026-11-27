@@ -302,14 +302,15 @@ async function commissionDueForPayroll(client: DbClient, period: { start_date: s
          month's run is already approved, the collection waits for the next run. A run that is
          already approved keeps its place: its check is only that the whole ledger still covers it
          (the single horizon above), so paying an earlier month after a later one stays possible. */
-      const earnedAtHorizon = row?.earnedMinor ?? 0;
-      const earnedAtOwnEnd = horizon === periodEnd ? earnedAtHorizon : pick(await cumulative(periodEnd), doctorId)?.earnedMinor ?? 0;
+      const earnedAtHorizon = row?.netEarnedMinor ?? row?.earnedMinor ?? 0;
+      const ownRow = horizon === periodEnd ? row : pick(await cumulative(periodEnd), doctorId);
+      const earnedAtOwnEnd = ownRow?.netEarnedMinor ?? ownRow?.earnedMinor ?? 0;
       const earnedCapMinor = standing === "draft" ? Math.min(earnedAtOwnEnd, earnedAtHorizon) : earnedAtHorizon;
       const cumulativeDueMinor = earnedCapMinor - (row?.paidMinor ?? 0);
       const dueMinor = Math.max(0, cumulativeDueMinor - committedElsewhereMinor);
       return {
         dueMinor, committedElsewhereMinor, asOf: horizon, earnedAtOwnEndMinor: earnedAtOwnEnd,
-        cumulativeEarnedMinor: row?.earnedMinor ?? 0, cumulativePaidMinor: row?.paidMinor ?? 0,
+        cumulativeEarnedMinor: earnedAtHorizon, cumulativePaidMinor: row?.paidMinor ?? 0,
         /** What the period's own invoices contribute; the rest is later collections and adjustments of earlier months. */
         periodInvoicesDueMinor: Math.max(0, pick(ofPeriodInvoices, doctorId)?.dueMinor ?? 0),
       };

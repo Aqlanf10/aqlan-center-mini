@@ -14949,6 +14949,7 @@ export async function commissionReport(
       patient_id: number; invoice_id: number; net_minor: string; created_at: Date; created_at_us: string; issued_at: Date; issued_at_us: string;
       clinic_date: Date; doctor_id: number | null; share_minor: string; base_currency: string;
       service_id: number | null; category: string | null; service_name: string | null;
+      material_consumption_exempt: boolean;
       case_id: number | null; plan_id: number | null; allocation_origin_id: number | null;
     }>(
       `SELECT i.patient_id,
@@ -14976,6 +14977,7 @@ export async function commissionReport(
               it.service_id,
               s.category,
               COALESCE(s.name, it.description) AS service_name,
+              COALESCE((to_jsonb(s)->>'material_consumption_exempt') = 'true', FALSE) AS material_consumption_exempt,
               pi.case_id,
               /* فاتورة القسط لا تمرّ بإجراء زيارة: خطتها على الفاتورة نفسها (فتسري نسبة الخطة الخاصة عليها). */
               COALESCE(pi.plan_id, i.plan_id) AS plan_id,
@@ -15004,7 +15006,7 @@ export async function commissionReport(
                    WHERE correction.original_invoice_id=historical.id AND (d.created_at AT TIME ZONE $1)::date>$3::date))
                    AND (historical.created_at AT TIME ZONE $1)::date BETWEEN $2::date AND $3::date
               )
-        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, currency_origin.created_at, clinic_date, it.doctor_id, it.service_id, s.category, COALESCE(s.name, it.description), pi.case_id, COALESCE(pi.plan_id, i.plan_id)`,
+        GROUP BY i.patient_id, i.id, i.total_minor, i.discount_minor, i.base_currency, i.created_at, currency_origin.created_at, clinic_date, it.doctor_id, it.service_id, s.category, COALESCE(s.name, it.description), COALESCE((to_jsonb(s)->>'material_consumption_exempt') = 'true', FALSE), pi.case_id, COALESCE(pi.plan_id, i.plan_id)`,
       [CLINIC_TIME_ZONE, from, to],
     ),
     // (P-01 owner review — تصحيح ٢) المصروف للطبيب بعملته التي صُرف بها (سجلُّ
@@ -15062,6 +15064,7 @@ export async function commissionReport(
         serviceId: row.service_id ?? undefined,
         serviceName: row.service_name ?? undefined,
         category: row.category ?? undefined,
+        materialConsumptionExempt: row.material_consumption_exempt === true,
         caseId: row.case_id ?? undefined,
         planId: row.plan_id ?? undefined,
       };
@@ -15302,7 +15305,17 @@ export async function commissionReport(
   /* Doctors sharing a case (owner decision 2026-11-11, point 3): the centre's decision in force at
      the end of the report range. An approved split pays each participant at his own rate on his
      part of the line; a shared case without an approved split is held and paid to nobody. */
-  const caseParticipations = await loadCaseParticipationsAt(to, pool as Parameters<typeof loadCaseParticipationsAt>[1], CLINIC_TIME_ZONE);
+  const settings = await readSettings(pool);
+  const adminLabCostAllocation = {
+    byWorkShares: settings["commission.shared_lab_cost.by_work_shares"] !== "off",
+    adminAllocation: settings["commission.shared_lab_cost.admin_allocation"] === "on",
+  };
+  const caseParticipations = await loadCaseParticipationsAt(
+    to,
+    pool as Parameters<typeof loadCaseParticipationsAt>[1],
+    CLINIC_TIME_ZONE,
+    adminLabCostAllocation,
+  );
   const participationAt = caseParticipations.size > 0 ? (caseId: number) => caseParticipations.get(caseId) : undefined;
 
   /* (P0-1) تكلفة المختبر — تُخصم من حصة الطبيب **في الفاتورة التي جاء منها عمله**،
@@ -15547,6 +15560,7 @@ export async function commissionReport(
       {
         overrideAt,
         participationAt,
+        materialRateAt: (category, atIso) => materialRateAsOf(rateTimeline, category, atIso),
         onUnderReview: detail ? (line) => (detail.underReviewParticipations ??= []).push({ ...line, patientId }) : undefined,
         sink: detail ? (line) => detail.lines.push({ ...line, invoiceCreatedAt: new Date(line.invoiceCreatedAt).toISOString(), patientId }) : undefined,
       },
@@ -15559,6 +15573,7 @@ export async function commissionReport(
       const invoice = invoices.get(chunk.invoiceId);
       if (!invoice || !inRange(invoice.id) || invoice.netMinor <= 0) continue;
       for (const share of effectiveDoctorShares(invoice, participationAt)) {
+        if (share.materialConsumptionExempt === true) continue;
         /* (F-4) حصةٌ خُصمت تكلفة موادّها الفعلية بسياسة وقت هذه الدفعة لا تُقدَّر
            موادّها بنسبة التخصص مرّةً ثانية — لا خصمٌ مزدوج لموادّ عملٍ واحد. */
         if (share.materialCostMinor && share.materialCostMinor > 0) {
@@ -15577,7 +15592,6 @@ export async function commissionReport(
       }
     }
   }
-  const settings = await readSettings(pool);
   const materialRateApplied = settings["finance.commission_material_rate"] === "on";
   if (detail) {
     detail.unallocatedMaterials.push(...unallocatedMaterials);
@@ -15604,8 +15618,11 @@ export async function commissionReport(
         }
       }
     }
+    // (Charter §17 / TD-10): Specialty material consumption is deducted from the commission base
+    // BEFORE multiplying by the doctor's commission percentage (computed per event-time chunk in
+    // commissionForPatientAtEventTime), never subtracted 100% from the doctor's post-rate share.
     const netEarnedMinor = materialRateApplied
-      ? Math.max(0, row.earnedMinor - materialCostMinor)
+      ? Math.max(0, row.netEarnedAfterMaterialRateMinor ?? row.earnedMinor)
       : row.earnedMinor;
     return {
       doctorId: row.doctorId,

@@ -10,6 +10,8 @@ export async function loadCaseParticipationsAt(
   asOfClinicDate: string,
   runner: { query: <R>(sql: string, values?: unknown[]) => Promise<{ rows: R[] }> },
   clinicTimeZone: string,
+  /** 0134: the owner's two settings. Defaults = behaviour before 0134 (by work shares, no administrative allocation). */
+  labCost: { byWorkShares: boolean; adminAllocation: boolean } = { byWorkShares: true, adminAllocation: false },
 ): Promise<Map<number, CaseParticipation>> {
   const { rows } = await runner.query<{ case_id: number; status: "approved" | "pending" | "void"; participants: CaseParticipant[] }>(
     `SELECT DISTINCT ON (p.case_id) p.case_id, p.status, p.participants
@@ -19,7 +21,13 @@ export async function loadCaseParticipationsAt(
   const result = new Map<number, CaseParticipation>();
   for (const row of rows) {
     if (row.status === "void") continue;
-    result.set(row.case_id, { caseId: row.case_id, status: row.status, participants: row.participants });
+    const carries = row.participants.length > 0 && row.participants.every(part => part.labCostBp !== undefined);
+    result.set(row.case_id, {
+      caseId: row.case_id,
+      status: row.status,
+      participants: row.participants,
+      labCostBasis: labCost.adminAllocation && carries ? "admin_allocation" : labCost.byWorkShares ? "work_shares" : "line_doctor",
+    });
   }
   return result;
 }

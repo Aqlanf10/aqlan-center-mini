@@ -33,6 +33,8 @@ export type SettingKey =
   | "finance.locked_before"
   | "finance.owner_private_funding_account"
   | "finance.commission_material_rate"
+  | "commission.shared_lab_cost.by_work_shares"
+  | "commission.shared_lab_cost.admin_allocation"
   | "billing.max_discount_percent"
   | "documents.invoice_prefix"
   | "documents.receipt_prefix"
@@ -77,6 +79,7 @@ export type SettingKey =
   | "plans.specialty_templates"
   | "reminders.auto_template"
   | "reminders.auto_language"
+  | "ai.external_assistant"
   | "ai.clinical_external"
   /* مُرحَّلة من ثوابت الشيفرة في المرحلة ١أ — لكلٍّ مستهلكٌ فعليّ، وافتراضيُّها
      يساوي الثابت الذي كان مكتوبًا فلا يتغيّر سلوك العيادة يوم النشر. */
@@ -130,6 +133,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   /* خصم إهلاك المواد المقدَّر (نسب التخصصات) من العمولة — قرار المالك،
      والافتراض مغلق فلا يتغيّر رقمٌ قائم. "on" يفعّله بعد تحديد النسب. */
   "finance.commission_material_rate": "off",
+  "commission.shared_lab_cost.by_work_shares": "on",
+  "commission.shared_lab_cost.admin_allocation": "off",
   /* (P1-6) أقصى خصمٍ يمنحه غير المدير على سعر الدليل بسببٍ مكتوب. صفرٌ = لا خصم إلا
      بالمدير — الافتراضيّ الآمن حتى يقرّر المالك نسبةً. */
   "billing.max_discount_percent": "0",
@@ -211,6 +216,7 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "reminders.auto_language": "ar",
   // (P2-11 — قرار المالك) المزوّد الخارجي للمهام الإدارية فقط: النص السريري وتحليل
   // السيفالو لا يخرجان من المركز إلا بتفعيلٍ صريح من المدير.
+  "ai.external_assistant": "false",
   "ai.clinical_external": "false",
 
   // المُرحَّلة — القيم هي الثوابت نفسها التي كانت في lib/arrivals.ts وlib/flow.ts
@@ -505,7 +511,9 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "finance.rate.USD", label: "سعر الدولار", hint: "كم ريالًا يمنيًا يساوي دولارًا اليوم", kind: "number", group: "finance" },
   { key: "finance.locked_before", label: "قفل الدفاتر قبل تاريخ", hint: "لا يُقبل قيد أو تعديل قبل هذا التاريخ. اتركه فارغًا لإلغاء القفل.", kind: "date", group: "finance" },
   { key: "finance.owner_private_funding_account", label: "حساب ما يدفعه المالك من مصدره الخاص", hint: "الافتراضي 2108: مستحق للمالك على العيادة يُعاد إليه لاحقًا (قرار المالك). يقبل حساب حقوق ملكية أو التزامات من الدليل؛ يغيّره المالك وحده بسبب مكتوب، ولا يغيّر السندات السابقة. فارغ = الافتراضي 2108.", kind: "text", group: "finance" },
-  { key: "finance.commission_material_rate", label: "خصم إهلاك المواد من العمولة", hint: "on = خصم نسب التخصصات المحدَّدة في «نسب إهلاك المواد»؛ off = إبقاء الأرقام كما كانت.", kind: "text", group: "finance" },
+  { key: "finance.commission_material_rate", label: "خصم إهلاك المواد من العمولة", hint: "on = خصم نسب التخصصات المحدَّدة في «نسب إهلاك المواد» من أساس العمولة قبل ضرب نسبة الطبيب؛ off = إبقاء الأرقام كما كانت.", kind: "text", group: "finance" },
+  { key: "commission.shared_lab_cost.by_work_shares", label: "توزيع تكلفة المعمل في الحالة المشتركة بنسب العمل", hint: "on = تُوزَّع تكلفة المعمل بين الأطباء المشاركين بنسب العمل المعتمدة في قرار المشاركة.", kind: "text", group: "finance" },
+  { key: "commission.shared_lab_cost.admin_allocation", label: "توزيع إداري لتكلفة المعمل في الحالة المشتركة", hint: "on = يجوز أن يحمل قرار المشاركة توزيعًا خاصًا لتكلفة المعمل، ويُعمل به إن وُجد؛ off = لا يُقبل ولا يُستعمل.", kind: "text", group: "finance" },
 
   { key: "clinic.chairs", label: "عدد الكراسي", hint: "يحكم الحجز والانتظار وشاشة الصالة", kind: "number", group: "operations" },
   { key: "clinic.day_start", label: "بداية الدوام", kind: "time", group: "operations" },
@@ -514,6 +522,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "recall.lapse_weeks", label: "مدة اعتبار المريض منقطعًا (أسابيع)", kind: "number", group: "operations" },
   { key: "followup.proposal_days", label: "متابعة عرض العلاج بعد (أيام)", hint: "عرضٌ لم يوافق عليه المريض يظهر في «المتابعة» بعد هذه المدة من إعداده أو من آخر تواصل", kind: "number", group: "operations" },
   { key: "documents.max_megabytes", label: "أقصى حجم لملف الأشعة (ميغابايت)", kind: "number", group: "operations" },
+  { key: "ai.external_assistant", label: "تفعيل المزوّد الخارجي للمساعد الذكي (غير السريري)", hint: "false (الافتراضي) = يعمل المحرك المحلي فقط دون أي اتصال خارجي؛ true = يسمح بالمهام الإدارية والعلمية العامة غير السريرية فقط.", kind: "boolean", group: "operations" },
   { key: "ai.clinical_external", label: "إرسال الأسئلة السريرية للمزوّد الخارجي", hint: "false (الافتراضي) = المساعد الخارجي للمهام الإدارية فقط، والنص السريري لا يخرج من المركز", kind: "boolean", group: "operations" },
 
   { key: "backup.enabled", label: "تشغيل نظام النسخ الاحتياطي", hint: "true = النظام يعمل (يدوي ومجدول)؛ false = مغلق كليًا", kind: "boolean", group: "backup" },

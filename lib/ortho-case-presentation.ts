@@ -1332,11 +1332,13 @@ function buildStoredZip(files: ZipEntryInput[]): Uint8Array {
   const centralParts: Uint8Array[] = [];
 
   for (const e of entries) {
+    const isAsciiName = e.nameBytes.every((b) => b < 0x80);
+    const zipFlags = isAsciiName ? 0x0000 : 0x0800;
     const localHeader = new Uint8Array(30 + e.nameBytes.length);
     const lv = new DataView(localHeader.buffer);
     lv.setUint32(0, 0x04034b50, true);
     lv.setUint16(4, 20, true);
-    lv.setUint16(6, 0x0800, true); // UTF-8 filename flag
+    lv.setUint16(6, zipFlags, true);
     lv.setUint16(8, e.method, true);
     lv.setUint16(10, 0x0000, true);
     lv.setUint16(12, 0x5941, true);
@@ -1354,7 +1356,7 @@ function buildStoredZip(files: ZipEntryInput[]): Uint8Array {
     cv.setUint32(0, 0x02014b50, true);
     cv.setUint16(4, 20, true);
     cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0x0800, true); // UTF-8 filename flag
+    cv.setUint16(8, zipFlags, true);
     cv.setUint16(10, e.method, true);
     cv.setUint16(12, 0x0000, true);
     cv.setUint16(14, 0x5941, true);

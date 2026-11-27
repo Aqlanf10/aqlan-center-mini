@@ -1,8 +1,11 @@
 import { ensureSchema, getPool, insertAuditRow, CLINIC_TIME_ZONE, type DbClient, type DbPool } from "./db";
 import {
-  caseParticipationProblem, type CaseParticipant, type CaseParticipation, type CaseParticipationProblem, type CaseParticipationResolver,
+  caseParticipationProblem, labCostAllocationProblem, type CaseParticipant, type CaseParticipation, type CaseParticipationProblem, type CaseParticipationResolver,
 } from "./commission";
 import { loadCaseParticipationsAt } from "./commission-participation-read";
+
+/** 0134: the owner's switch for an administrative lab-cost allocation on a participation decision. */
+export const SHARED_LAB_COST_ADMIN_KEY = "commission.shared_lab_cost.admin_allocation";
 
 /**
  * Doctors sharing a case: storing and reading the centre's decision (owner decision 2026-11-11,
@@ -28,7 +31,7 @@ export interface DecideCaseParticipationInput {
   actor: { username: string; userId: number | null; role: string | null };
 }
 export type DecideCaseParticipationRefusal =
-  | "invalid_case" | "case_not_found" | "invalid_source" | "reason_required" | "stale_head" | "nothing_to_void" | "participants_not_allowed"
+  | "invalid_case" | "case_not_found" | "invalid_source" | "reason_required" | "stale_head" | "nothing_to_void" | "participants_not_allowed" | "lab_cost_allocation_disabled" | "lab_cost_allocation_incomplete"
   | "doctor_not_found" | CaseParticipationProblem;
 export type DecideCaseParticipationResult = { ok: true; record: CaseParticipationRecord } | { ok: false; reason: DecideCaseParticipationRefusal };
 
@@ -40,6 +43,8 @@ export const CASE_PARTICIPATION_MESSAGE: Record<DecideCaseParticipationRefusal, 
   stale_head: "تغيّر قرار مشاركة هذه الحالة منذ فتحه؛ أعد تحميله ثم راجع قرارك.",
   nothing_to_void: "لا يوجد قرار مشاركة ساري لهذه الحالة لإلغائه.",
   participants_not_allowed: "قرار التعليق أو الإلغاء لا يحمل نسبًا.",
+  lab_cost_allocation_disabled: "التوزيع الإداري لتكلفة المعمل غير مفعّل في الإعدادات؛ لم يُحفظ شيء.",
+  lab_cost_allocation_incomplete: "توزيع تكلفة المعمل يجب أن يشمل كل المشاركين وأن يساوي مجموعه 100٪؛ لم يُحفظ شيء.",
   doctor_not_found: "أحد المشاركين ليس طبيبًا مسجّلًا في المركز.",
   no_participants: "أضف طبيبًا مشاركًا واحدًا على الأقل.",
   duplicate_doctor: "لا يتكرر الطبيب نفسه في قرار المشاركة.",
@@ -78,10 +83,12 @@ export async function decideCaseParticipation(input: DecideCaseParticipationInpu
   if (!CASE_PARTICIPATION_SOURCES.includes(input.source)) return { ok: false, reason: "invalid_source" };
   const reason = typeof input.reason === "string" ? input.reason.trim().slice(0, 500) : "";
   if (reason.length < 3) return { ok: false, reason: "reason_required" };
-  const participants = input.participants.map(part => ({ doctorId: part.doctorId, shareBp: part.shareBp }));
+  const participants = input.participants.map(part => ({ doctorId: part.doctorId, shareBp: part.shareBp, ...(part.labCostBp === undefined ? {} : { labCostBp: part.labCostBp }) }));
+  const allocatesLabCost = participants.some(part => part.labCostBp !== undefined);
   if (input.status === "approved") {
     const problem = caseParticipationProblem(participants);
     if (problem) return { ok: false, reason: problem };
+    if (labCostAllocationProblem(participants)) return { ok: false, reason: "lab_cost_allocation_incomplete" };
   } else if (participants.length > 0) return { ok: false, reason: "participants_not_allowed" };
 
   await ensureSchema();
@@ -92,6 +99,10 @@ export async function decideCaseParticipation(input: DecideCaseParticipationInpu
     const { rows: [target] } = await client.query<{ id: number; patient_id: number; title: string | null }>(
       "SELECT id, patient_id, title FROM clinical_cases WHERE id = $1 FOR UPDATE", [input.caseId]);
     if (!target) return refuse("case_not_found");
+    if (allocatesLabCost) {
+      const { rows: [setting] } = await client.query<{ value: string }>("SELECT value FROM settings WHERE key = $1", [SHARED_LAB_COST_ADMIN_KEY]);
+      if ((setting?.value ?? "off") !== "on") return refuse("lab_cost_allocation_disabled");
+    }
     const { rows: [head] } = await client.query<{ id: string; status: CaseParticipationStatus }>(
       `SELECT p.id, p.status FROM commission_case_participations p
         WHERE p.case_id = $1 AND NOT EXISTS (SELECT 1 FROM commission_case_participations n WHERE n.supersedes_id = p.id)`, [input.caseId]);
