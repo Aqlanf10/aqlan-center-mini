@@ -51,12 +51,13 @@ export const QuestionnaireTab: React.FC<QuestionnaireTabProps> = ({ patient, lan
     const nextField = { ...prev, ...patch };
     const prevStr = `${prev.status}: ${prev.value}`;
     const nextStr = `${nextField.status}: ${nextField.value}`;
+    const nowIso = new Date().toISOString();
     const revisions =
       prevStr !== nextStr
         ? [
             {
-              id: `rev-${Date.now()}`,
-              timestamp: new Date().toISOString(),
+              id: `rev-${patient.questionnaire.revisions.length + 1}-${nowIso}`,
+              timestamp: nowIso,
               author: actorName,
               authorRole: role,
               source: 'clinic' as const,
@@ -111,7 +112,7 @@ export const QuestionnaireTab: React.FC<QuestionnaireTabProps> = ({ patient, lan
         customFields: [
           ...patient.questionnaire.customFields,
           {
-            id: `cf-${Date.now()}`,
+            id: `cf-${patient.questionnaire.customFields.length + 1}-${new Date().toISOString()}`,
             labelAr: newLabelAr.trim() || newLabelEn.trim(),
             labelEn: newLabelEn.trim() || newLabelAr.trim(),
             field: { status: 'unrecorded', value: '' },
