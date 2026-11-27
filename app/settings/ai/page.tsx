@@ -1,5 +1,6 @@
 "use client";
 
+import { AssistantModeControls } from "@/components/settings/AssistantModeControls";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import type { AiProviderView, AiProtocolType, AiTaskModels } from "@/lib/ai-providers/types";
@@ -317,9 +318,11 @@ export default function AiSettingsPage() {
           </div>
         )}
 
+        <AssistantModeControls />
+
         {/* (P2-11 — قرار المالك) نطاق المزوّد الخارجي */}
         <section className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 text-xs font-bold leading-6 text-sky-900" aria-label="نطاق المساعد الخارجي">
-          <p className="text-sm font-black">المساعد الخارجي (Claude) للمهام الإدارية فقط</p>
+          <p className="text-sm font-black">المزوّد الخارجي للمهام الإدارية افتراضيًا</p>
           <p>
             يُرسل إليه الطلب الإداري وحده (صياغة رسالة أو إعلان، تنظيم العمل) بعد حذف الأسماء والهواتف — بلا سجل
             المحادثة ولا بيانات المركز. أما الأسئلة السريرية وتحليل السيفالو فتبقى داخل المركز ويجيب عنها المحرك
@@ -358,7 +361,7 @@ export default function AiSettingsPage() {
           <div className="mt-4 flex flex-wrap items-center gap-2 py-1">
             {providers.filter((p) => p.enabled).length === 0 ? (
               <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 px-4 py-3 text-xs text-amber-800">
-                ⚠️ لا يوجد أي مزود سحابي مفعّل حالياً. يعمل المساعد الذكي كلياً عبر <strong>محرك مركز عقلان المدمج</strong>.
+                ⚠️ لا يوجد أي مزود سحابي مفعّل حالياً. تتوفر إجابات محرك مركز عقلان إذا كان المساعد الداخلي مفعّلًا.
               </div>
             ) : (
               providers
@@ -388,7 +391,7 @@ export default function AiSettingsPage() {
               </span>
               <div>
                 <div className="text-xs font-black text-emerald-900">محرك مركز عقلان الداخلي</div>
-                <div className="text-[10px] text-emerald-700">احتياطي دائم لا ينقطع أبداً (المادة 214)</div>
+                <div className="text-[10px] text-emerald-700">يعمل عند تفعيل المساعد الداخلي</div>
               </div>
             </div>
           </div>
