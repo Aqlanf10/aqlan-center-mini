@@ -80,8 +80,8 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!session) return denied();
   const { id: rawId } = await context.params;
   const query = new URL(_request.url).searchParams;
-  const mode = query.get("projection");
-  if (mode === "reception" || mode === "reception-money" || mode === "reception-booking") {
+  const projectionKind = query.get("projection");
+  if (projectionKind === "reception" || projectionKind === "reception-money" || projectionKind === "reception-booking") {
     return receptionRead(_request, session, rawId);
   }
   const id = readId(rawId);

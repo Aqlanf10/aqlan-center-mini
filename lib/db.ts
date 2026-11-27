@@ -24888,6 +24888,40 @@ type RecordDocumentInput = Parameters<typeof recordDocument>[0];
  * associations re-validated under their locks, then the row. */
 export async function recordDocumentOn(client: DbClient, input: RecordDocumentInput): Promise<PatientDocument> {
   await validateDocumentAssociations(input, client);
+  const normalizedNote = input.note?.trim() || null;
+  // (TD-07) Atomic deduplication for orthodontic/session media retries:
+  // lock per-patient document namespace so concurrent or retried identical uploads
+  // for the same (patient_id, ortho_case_id, adjustment_id, sha256, stage, view, note)
+  // return the existing non-removed row without creating duplicate records.
+  if (input.orthoCaseId != null || input.adjustmentId != null) {
+    await client.query("SELECT pg_advisory_xact_lock(91407, $1::int)", [input.patientId]);
+    const existing = await client.query<DocumentRow>(
+      `SELECT ${DOCUMENT_COLUMNS}
+       FROM patient_documents
+       WHERE patient_id = $1
+         AND sha256 = $2
+         AND COALESCE(ortho_case_id, 0) = COALESCE($3::int, 0)
+         AND COALESCE(adjustment_id, 0) = COALESCE($4::int, 0)
+         AND COALESCE(photo_stage, '') = COALESCE($5::text, '')
+         AND COALESCE(photo_view, '') = COALESCE($6::text, '')
+         AND COALESCE(note, '') = COALESCE($7::text, '')
+         AND removed_at IS NULL
+       ORDER BY id ASC
+       LIMIT 1`,
+      [
+        input.patientId,
+        input.sha256,
+        input.orthoCaseId ?? null,
+        input.adjustmentId ?? null,
+        input.photoStage ?? null,
+        input.photoView ?? null,
+        normalizedNote,
+      ],
+    );
+    if (existing.rows[0]) {
+      return toDocument(existing.rows[0]);
+    }
+  }
   const { rows } = await client.query<DocumentRow>(
     `INSERT INTO patient_documents
        (patient_id, visit_id, kind, title, mime_type, size_bytes, sha256, storage_key,
@@ -24899,7 +24933,7 @@ export async function recordDocumentOn(client: DbClient, input: RecordDocumentIn
     [
       input.patientId, input.visitId, input.kind, input.title.trim(), input.mimeType,
       input.sizeBytes, input.sha256, input.storageKey,
-      input.note?.trim() || null, input.takenOn, input.uploadedBy,
+      normalizedNote, input.takenOn, input.uploadedBy,
       input.orthoCaseId ?? null, input.adjustmentId ?? null,
       input.photoStage ?? null, input.photoView ?? null,
       input.width ?? null, input.height ?? null,

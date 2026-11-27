@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "0fe6a348b4c3f0d2cc4b2b6bc9bc2987d9c9877a289178fd2c9683c7c2845a00",
+  "sourceDigest": "05223f21544973b31ad377683a01678dedfa956e7c8c5c56d47385b95dfe3ef0",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -78,26 +78,27 @@
     "finance.shifts.review-opening"
   ],
   "summary": {
-    "routeMethods": 424,
+    "routeMethods": 433,
     "routeClassifications": {
       "public-separate-portal": 25,
-      "staff-legacy-held": 390,
+      "staff-legacy-held": 399,
       "canonical-ready": 0,
       "unknown": 9
     },
-    "pages": 97,
+    "pages": 98,
     "pageClassifications": {
       "public-separate-portal": 4,
-      "staff-legacy-held": 68,
+      "staff-legacy-held": 69,
       "canonical-ready": 0,
       "unknown": 25
     },
-    "legacyReferenceFiles": 253,
+    "legacyReferenceFiles": 258,
     "canonicalDirectReferences": 0
   },
   "sourceEntries": [
     "app/account/page.tsx",
     "app/api/accounting/route.ts",
+    "app/api/ai/aqlan-assistant/route.ts",
     "app/api/ai/chat/route.ts",
     "app/api/ai/confirmation/route.ts",
     "app/api/appointments/[id]/route.ts",
@@ -215,7 +216,10 @@
     "app/api/ortho/baseline/route.ts",
     "app/api/ortho/billing-decisions/route.ts",
     "app/api/ortho/followups/route.ts",
+    "app/api/ortho/my-permissions/route.ts",
+    "app/api/ortho/presentation/[patientId]/route.ts",
     "app/api/ortho/route.ts",
+    "app/api/ortho/workspace/[patientId]/route.ts",
     "app/api/parties/[id]/route.ts",
     "app/api/parties/route.ts",
     "app/api/party-openings/route.ts",
@@ -333,6 +337,7 @@
     "app/api/settings/material-rates/route.ts",
     "app/api/settings/messaging/route.ts",
     "app/api/settings/messaging/test/route.ts",
+    "app/api/settings/ortho-privacy/route.ts",
     "app/api/settings/patient-numbering/route.ts",
     "app/api/settings/production-backup/route.ts",
     "app/api/settings/readiness/route.ts",
@@ -465,6 +470,7 @@
     "app/settings/page.tsx",
     "app/settings/patient-numbering/page.tsx",
     "app/settings/plan-templates/page.tsx",
+    "app/settings/privacy/ortho/page.tsx",
     "app/settings/readiness/page.tsx",
     "app/settings/reset/page.tsx",
     "app/settings/service-materials/page.tsx",
@@ -494,6 +500,27 @@
         {
           "symbol": "requireSession",
           "line": 89
+        }
+      ]
+    },
+    {
+      "file": "app/api/ai/aqlan-assistant/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 60
+        },
+        {
+          "symbol": "requireSession",
+          "line": 87
+        },
+        {
+          "symbol": "requireSession",
+          "line": 143
         }
       ]
     },
@@ -2233,6 +2260,32 @@
       ]
     },
     {
+      "file": "app/api/ortho/my-permissions/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 20
+        }
+      ]
+    },
+    {
+      "file": "app/api/ortho/presentation/[patientId]/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 111
+        }
+      ]
+    },
+    {
       "file": "app/api/ortho/route.ts",
       "evidence": [
         {
@@ -2246,6 +2299,23 @@
         {
           "symbol": "requireSession",
           "line": 90
+        }
+      ]
+    },
+    {
+      "file": "app/api/ortho/workspace/[patientId]/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 66
+        },
+        {
+          "symbol": "requireSession",
+          "line": 137
         }
       ]
     },
@@ -3746,6 +3816,23 @@
       ]
     },
     {
+      "file": "app/api/settings/ortho-privacy/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 27
+        },
+        {
+          "symbol": "requireSession",
+          "line": 72
+        }
+      ]
+    },
+    {
       "file": "app/api/settings/patient-numbering/route.ts",
       "evidence": [
         {
@@ -4712,6 +4799,100 @@
         {
           "symbol": "requireSession",
           "line": 89
+        }
+      ]
+    },
+    {
+      "route": "/api/ai/aqlan-assistant",
+      "method": "GET",
+      "file": "app/api/ai/aqlan-assistant/route.ts",
+      "httpAccess": [
+        "admin",
+        "reception",
+        "doctor"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "excluded-ai-dot",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 60
+        },
+        {
+          "symbol": "requireSession",
+          "line": 87
+        },
+        {
+          "symbol": "requireSession",
+          "line": 143
+        }
+      ]
+    },
+    {
+      "route": "/api/ai/aqlan-assistant",
+      "method": "POST",
+      "file": "app/api/ai/aqlan-assistant/route.ts",
+      "httpAccess": [
+        "admin",
+        "reception",
+        "doctor"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "excluded-ai-dot",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 60
+        },
+        {
+          "symbol": "requireSession",
+          "line": 87
+        },
+        {
+          "symbol": "requireSession",
+          "line": 143
+        }
+      ]
+    },
+    {
+      "route": "/api/ai/aqlan-assistant",
+      "method": "PUT",
+      "file": "app/api/ai/aqlan-assistant/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "excluded-ai-dot",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 60
+        },
+        {
+          "symbol": "requireSession",
+          "line": 87
+        },
+        {
+          "symbol": "requireSession",
+          "line": 143
         }
       ]
     },
@@ -9718,6 +9899,112 @@
       ]
     },
     {
+      "route": "/api/ortho/my-permissions",
+      "method": "GET",
+      "file": "app/api/ortho/my-permissions/route.ts",
+      "httpAccess": [
+        "admin",
+        "reception",
+        "doctor",
+        "assistant"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "patient-clinical",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 20
+        }
+      ]
+    },
+    {
+      "route": "/api/ortho/presentation/[patientId]",
+      "method": "POST",
+      "file": "app/api/ortho/presentation/[patientId]/route.ts",
+      "httpAccess": [
+        "admin",
+        "doctor"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "patient-clinical",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 111
+        }
+      ]
+    },
+    {
+      "route": "/api/ortho/workspace/[patientId]",
+      "method": "GET",
+      "file": "app/api/ortho/workspace/[patientId]/route.ts",
+      "httpAccess": [
+        "admin",
+        "reception",
+        "doctor",
+        "assistant"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "patient-clinical",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 66
+        },
+        {
+          "symbol": "requireSession",
+          "line": 137
+        }
+      ]
+    },
+    {
+      "route": "/api/ortho/workspace/[patientId]",
+      "method": "PUT",
+      "file": "app/api/ortho/workspace/[patientId]/route.ts",
+      "httpAccess": [
+        "admin",
+        "reception",
+        "doctor",
+        "assistant"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "patient-clinical",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 2
+        },
+        {
+          "symbol": "requireSession",
+          "line": 66
+        },
+        {
+          "symbol": "requireSession",
+          "line": 137
+        }
+      ]
+    },
+    {
       "route": "/api/parties",
       "method": "GET",
       "file": "app/api/parties/route.ts",
@@ -14249,6 +14536,58 @@
       ]
     },
     {
+      "route": "/api/settings/ortho-privacy",
+      "method": "GET",
+      "file": "app/api/settings/ortho-privacy/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "other-review-required",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 27
+        },
+        {
+          "symbol": "requireSession",
+          "line": 72
+        }
+      ]
+    },
+    {
+      "route": "/api/settings/ortho-privacy",
+      "method": "PUT",
+      "file": "app/api/settings/ortho-privacy/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "other-review-required",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 27
+        },
+        {
+          "symbol": "requireSession",
+          "line": 72
+        }
+      ]
+    },
+    {
       "route": "/api/settings/patient-numbering",
       "method": "GET",
       "file": "app/api/settings/patient-numbering/route.ts",
@@ -16446,6 +16785,14 @@
       "file": "app/settings/plan-templates/page.tsx",
       "classification": "staff-legacy-held",
       "workflow": "other-review-required",
+      "reason": "Staff or print surface; proxy/root layout and data authorization require migration",
+      "directHelperEvidence": []
+    },
+    {
+      "route": "/settings/privacy/ortho",
+      "file": "app/settings/privacy/ortho/page.tsx",
+      "classification": "staff-legacy-held",
+      "workflow": "patient-clinical",
       "reason": "Staff or print surface; proxy/root layout and data authorization require migration",
       "directHelperEvidence": []
     },

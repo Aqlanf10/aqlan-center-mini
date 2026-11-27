@@ -16,6 +16,10 @@ import { AiStaffChatModal } from "./AiStaffChatModal";
 import { playNewMessageChime, playUrgentChime } from "./Chat";
 import { roleCan } from "@/lib/settings-permissions";
 import { isGatedRole, pageVisibleToRole } from "@/lib/role-routes";
+import { useOrthoPermissions } from "./ortho/useOrthoPermissions";
+
+const EXPERIMENTAL_BANNER_ENABLED =
+  process.env.NEXT_PUBLIC_EXPERIMENTAL_BANNER === "true";
 
 /**
  * قشرة البرنامج — تنقّل واحد لكل الشاشات مع شريط علوي ذكي وإجراءات سريعة عالمية.
@@ -70,9 +74,14 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
   const restricted = isGatedRole(session?.role);
   /* جلسة الهوية الموحّدة لها قشرتها: لا عدّادات ولا اختصارات تطرق مسارات قديمة. */
   const canonical = session?.canonical === true;
+  const bareEarly = BARE_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  const orthoNavPerms = useOrthoPermissions({
+    enabled: Boolean(session) && !bareEarly && !restricted && !canonical,
+  });
   const nav = NAV.filter((item) => {
     // (P2-1) الكاشير والمحاسب: القائمة هي قائمة السماح نفسها التي يحرسها الباب.
     if (restricted && !pageVisibleToRole(session?.role, item.href)) return false;
+    if (item.href === "/ortho" && !orthoNavPerms.loading && !orthoNavPerms.moduleVisible) return false;
     if (item.needs === "settings") return roleCan(session?.role, "settings.view");
     if (item.needs === "admin") return isAdmin(session?.role);
     if (item.needs === "money") return canHandleMoney(session?.role);
@@ -507,6 +516,16 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
             <Icon name="logout" className="h-4 w-4" />
           </button>
         </div>
+
+        {EXPERIMENTAL_BANNER_ENABLED ? (
+          <div
+            data-testid="experimental-env-banner"
+            role="status"
+            className="border-b border-amber-300 bg-amber-100 px-4 py-1.5 text-center text-xs font-black tracking-wide text-amber-950 print:hidden"
+          >
+            AQLAN CENTER — EXPERIMENTAL · بيئة تطوير وتجارب معزولة كليًا عن بيانات العيادة الفعلية
+          </div>
+        ) : null}
 
         <main className="flex-1">{children}</main>
       </div>

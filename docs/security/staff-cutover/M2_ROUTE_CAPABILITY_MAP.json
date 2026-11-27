@@ -29,6 +29,46 @@
   "note": "Manual journal entry; cash lines also require no open shift (unchanged rule)."
  },
  {
+  "route": "/api/ai/aqlan-assistant",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI/Dot is out of scope for this programme."
+ },
+ {
+  "route": "/api/ai/aqlan-assistant",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI/Dot is out of scope for this programme."
+ },
+ {
+  "route": "/api/ai/aqlan-assistant",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "excluded",
+  "note": "AI/Dot is out of scope for this programme."
+ },
+ {
   "route": "/api/ai/chat",
   "method": "POST",
   "legacyRoles": [
@@ -2319,7 +2359,14 @@
   "scope": "patient",
   "status": "canonical-done",
   "note": "M2 slice 66: record read read:lab.orders in one owning snapshot; the patient scope is applied in SQL before the list limit (own = the central DOCTOR_PATIENT_CONDITION; another patient answers like one without orders); summary=1 counts follow the scope; the clinical fields are an allowlist and the money group (cost, base amount, rate, payable, accounts, posting) is added only with finance.cost-prices.view. The shared list helper's daily window is now a WHERE condition (it was appended after the last LEFT JOIN and filtered nothing) and keeps remake orders — legacy and canonical alike. M2 slice 68: for actors holding clinical.lab.order the read also returns the creation form's directory (active lab parties and active doctors: id and name, lab phone; never money).",
-  "projection": {"legacy": "every admitted role read every clinic order; doctors without the cost permission lost only cost/currency (base amount and rate stayed visible).", "groups": {"clinical": "patient identity, work, teeth, shades, lab, doctor, dates, status, quality, remake, notes", "money": "cost, currency, base amount, rate, financial status, payable, expense/payable accounts, posting — only with finance.cost-prices.view"}, "rows": "patient scope all: every order in the daily window; own: the clinician's patients; none: refused"}
+  "projection": {
+   "legacy": "every admitted role read every clinic order; doctors without the cost permission lost only cost/currency (base amount and rate stayed visible).",
+   "groups": {
+    "clinical": "patient identity, work, teeth, shades, lab, doctor, dates, status, quality, remake, notes",
+    "money": "cost, currency, base amount, rate, financial status, payable, expense/payable accounts, posting — only with finance.cost-prices.view"
+   },
+   "rows": "patient scope all: every order in the daily window; own: the clinician's patients; none: refused"
+  }
  },
  {
   "route": "/api/lab",
@@ -2436,7 +2483,14 @@
   "scope": "patient",
   "status": "canonical-done",
   "note": "M2 slice 66: record read read:lab.backlog in one owning snapshot; the whole clinic's open lab work, so the WHOLE patient scope is required (own refused); linked tasks only with tasks.use (others' private tasks never); same SQL as the legacy admin snapshot.",
-  "projection": {"legacy": "the admin role label read the whole clinic's open lab work with linked tasks.", "groups": {"identity": "patient name and number, work, teeth, lab, doctor, dates, latest action", "tasks": "linked open task titles and assignees, only with tasks.use"}, "rows": "patient scope all only"}
+  "projection": {
+   "legacy": "the admin role label read the whole clinic's open lab work with linked tasks.",
+   "groups": {
+    "identity": "patient name and number, work, teeth, lab, doctor, dates, latest action",
+    "tasks": "linked open task titles and assignees, only with tasks.use"
+   },
+   "rows": "patient scope all only"
+  }
  },
  {
   "route": "/api/lab/pricing",
@@ -2454,7 +2508,13 @@
   "scope": null,
   "status": "canonical-done",
   "note": "M2 slice 70b. OWNER DECISION 2026-11-03 (#483 comment 6615071565): lab cost prices only with finance.cost-prices.view. One owning snapshot under clinical.lab.view; the list and resolve answers are refused (403) without finance.cost-prices.view — never a list with blanked prices; revocation refuses an earlier session.",
-  "projection": {"legacy": "every admitted role (doctor included) read every lab cost price.", "groups": {"prices": "rules with amounts and currency, resolved price — only with finance.cost-prices.view"}, "rows": "pricing rules (directory, not patient records)"}
+  "projection": {
+   "legacy": "every admitted role (doctor included) read every lab cost price.",
+   "groups": {
+    "prices": "rules with amounts and currency, resolved price — only with finance.cost-prices.view"
+   },
+   "rows": "pricing rules (directory, not patient records)"
+  }
  },
  {
   "route": "/api/lab/pricing",
@@ -2513,7 +2573,13 @@
   "scope": null,
   "status": "canonical-done",
   "note": "M2 slice 70a: one owning snapshot under clinical.lab.view; active services by default, all on request. The catalogue carries no prices.",
-  "projection": {"legacy": "every admitted role read the catalogue.", "groups": {"catalogue": "service name, code, category, tooth scope, shade requirement, default days, order counts — every clinical.lab.view holder"}, "rows": "the whole catalogue"}
+  "projection": {
+   "legacy": "every admitted role read the catalogue.",
+   "groups": {
+    "catalogue": "service name, code, category, tooth scope, shade requirement, default days, order counts — every clinical.lab.view holder"
+   },
+   "rows": "the whole catalogue"
+  }
  },
  {
   "route": "/api/lab/services",
@@ -2567,7 +2633,13 @@
   "scope": null,
   "status": "canonical-done",
   "note": "M2 slice 70a: as GET /api/lab/services for one service.",
-  "projection": {"legacy": "every admitted role read the service.", "groups": {"catalogue": "every clinical.lab.view holder"}, "rows": "one service"}
+  "projection": {
+   "legacy": "every admitted role read the service.",
+   "groups": {
+    "catalogue": "every clinical.lab.view holder"
+   },
+   "rows": "one service"
+  }
  },
  {
   "route": "/api/lab/services/[id]",
@@ -2597,7 +2669,13 @@
   "scope": null,
   "status": "canonical-done",
   "note": "M2 slice 70a: one owning snapshot under clinical.lab.order (the legacy route allowed admin/doctor labels); answers whether the lab work-intent schema is installed.",
-  "projection": {"legacy": "admin/doctor role labels.", "groups": {"capability": "supported: boolean — clinical.lab.order holders"}, "rows": "none"}
+  "projection": {
+   "legacy": "admin/doctor role labels.",
+   "groups": {
+    "capability": "supported: boolean — clinical.lab.order holders"
+   },
+   "rows": "none"
+  }
  },
  {
   "route": "/api/laboratories",
@@ -2614,7 +2692,14 @@
   "scope": null,
   "status": "canonical-done",
   "note": "M2 slice 70a: one owning snapshot under clinical.lab.view; the accounting group (currency, expense/payable accounts, automatic posting, custom account name) only with finance.payables.record (the legacy route showed it to every role).",
-  "projection": {"legacy": "every admitted role read every lab with its accounting configuration.", "groups": {"directory": "name, contact, delivery days, note, active flag, order counts — every clinical.lab.view holder", "accounting": "currency, expense and payable accounts, automatic posting, custom account name — only with finance.payables.record"}, "rows": "every lab (a directory, not patient records)"}
+  "projection": {
+   "legacy": "every admitted role read every lab with its accounting configuration.",
+   "groups": {
+    "directory": "name, contact, delivery days, note, active flag, order counts — every clinical.lab.view holder",
+    "accounting": "currency, expense and payable accounts, automatic posting, custom account name — only with finance.payables.record"
+   },
+   "rows": "every lab (a directory, not patient records)"
+  }
  },
  {
   "route": "/api/laboratories",
@@ -2659,7 +2744,14 @@
   "scope": null,
   "status": "canonical-done",
   "note": "M2 slice 70a: as GET /api/laboratories for one lab (404 laboratory_not_found).",
-  "projection": {"legacy": "every admitted role read the lab with its accounting configuration.", "groups": {"directory": "every clinical.lab.view holder", "accounting": "only with finance.payables.record"}, "rows": "one lab"}
+  "projection": {
+   "legacy": "every admitted role read the lab with its accounting configuration.",
+   "groups": {
+    "directory": "every clinical.lab.view holder",
+    "accounting": "only with finance.payables.record"
+   },
+   "rows": "one lab"
+  }
  },
  {
   "route": "/api/laboratories/[id]",
@@ -2900,7 +2992,13 @@
   "branches": {
    "values": {},
    "fields": [
-    { "field": "planId", "need": ["clinical.plans.view", "clinical.plans.edit"] }
+    {
+     "field": "planId",
+     "need": [
+      "clinical.plans.view",
+      "clinical.plans.edit"
+     ]
+    }
    ]
   },
   "note": "M2 slice64 completes the existing PATCH branches. Clinical phase/retainer/close preserve slice55. planId link/unlink additionally requires clinical.plans.view and clinical.plans.edit plus current patient scope, positive old/new same-patient plan parents, native non-cancelled target and active/retention case. Observed case version after locks, fresh authority after waits, awaited native audit and atomic rollback; minimal acknowledgment omits funding. No financial amount or signed history change; no durable receipt guarantee. Local checks recorded separately from hosted CI/review."
@@ -3140,6 +3238,70 @@
    },
    "rows": "Central patient predicate before first 300 open cases ordered by start_date,id, with hasMore. Separate appointment scope before booking/session expansion. Fenced RR READ ONLY; 2000 bookings/sessions and 2MiB selected-row transfer bounds."
   }
+ },
+ {
+  "route": "/api/ortho/my-permissions",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant"
+  ],
+  "need": [],
+  "anyOf": [],
+  "scope": null,
+  "status": "self",
+  "note": "Projection of the caller's own effective orthodontic workspace rights."
+ },
+ {
+  "route": "/api/ortho/presentation/[patientId]",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "doctor"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Academic case presentation export; educational anonymization additionally requires documented patient consent."
+ },
+ {
+  "route": "/api/ortho/workspace/[patientId]",
+  "method": "GET",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant"
+  ],
+  "need": [
+   "clinical.ortho.view"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Case-scoped orthodontic clinical workspace read with field/section privacy projection."
+ },
+ {
+  "route": "/api/ortho/workspace/[patientId]",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin",
+   "reception",
+   "doctor",
+   "assistant"
+  ],
+  "need": [
+   "clinical.ortho.edit"
+  ],
+  "anyOf": [],
+  "scope": "patient",
+  "status": "existing",
+  "note": "Case-scoped orthodontic clinical workspace write with strict expectedRevision CAS."
  },
  {
   "route": "/api/parties",
@@ -3806,7 +3968,15 @@
   "scope": "patient",
   "status": "canonical-done",
   "note": "M2 slice 95a (G4-2; contract section 15): read:patients.history in one read-only snapshot, outside = missing; the identity and lines' clinical description with the record read; every amount, term, source hash and history reason with finance.patient-ledger.view; correctionAvailable needs patients.history.correct and finance.opening-balances.manage.",
-  "projection": {"legacy": "admin and reception (a doctor with the payments permission on own patients) saw every document with amounts, terms and history.", "groups": {"identity": "id, version, revision, creator, as-of date; lines' service, doctor, description, tooth and site; history versions and authors — the record read", "money": "currency, totals, discount and reason, paid, remaining, note, reason, repayment, opening figures, source hash, schedule version, line prices — only with finance.patient-ledger.view", "access": "correctionAvailable needs patients.history.correct and finance.opening-balances.manage"}, "rows": "one patient inside the patient scope; outside = missing"}
+  "projection": {
+   "legacy": "admin and reception (a doctor with the payments permission on own patients) saw every document with amounts, terms and history.",
+   "groups": {
+    "identity": "id, version, revision, creator, as-of date; lines' service, doctor, description, tooth and site; history versions and authors — the record read",
+    "money": "currency, totals, discount and reason, paid, remaining, note, reason, repayment, opening figures, source hash, schedule version, line prices — only with finance.patient-ledger.view",
+    "access": "correctionAvailable needs patients.history.correct and finance.opening-balances.manage"
+   },
+   "rows": "one patient inside the patient scope; outside = missing"
+  }
  },
  {
   "route": "/api/patients/[id]/historical-documents",
@@ -3932,7 +4102,13 @@
   "scope": "patient",
   "status": "canonical-done",
   "note": "M2 slice 95a (G4-2; contract section 15): read:patients.history in one read-only snapshot, outside = missing; the old system's archive is money throughout: finance.patient-ledger.view inside the patient scope, else the legacy 403 (no projection).",
-  "projection": {"legacy": "the patient gate with the money read (admin, reception; a doctor with the payments permission on own patients) saw the whole archive.", "groups": {"archive": "treatments with prices, paid and remaining, and payments — only with finance.patient-ledger.view; without it the legacy 403"}, "rows": "one patient inside the patient scope; outside = missing"}
+  "projection": {
+   "legacy": "the patient gate with the money read (admin, reception; a doctor with the payments permission on own patients) saw the whole archive.",
+   "groups": {
+    "archive": "treatments with prices, paid and remaining, and payments — only with finance.patient-ledger.view; without it the legacy 403"
+   },
+   "rows": "one patient inside the patient scope; outside = missing"
+  }
  },
  {
   "route": "/api/patients/[id]/legacy-balance-arrangement",
@@ -3995,7 +4171,14 @@
   "scope": "patient",
   "status": "canonical-done",
   "note": "M2 slice 95a (G4-2; contract section 15): read:patients.history in one read-only snapshot, outside = missing; no amounts; the record read inside the patient scope; the plan, item and document sources with clinical.plans.view.",
-  "projection": {"legacy": "the patient gate showed the clinical steps; plan sources only to admin, reception or the owning doctor with plan reading.", "groups": {"clinical": "legacy flag, baseline step, adjustment class, warning — the record read", "sources": "financial reference sources, plan, item and document identities, the remaining steps — only with clinical.plans.view"}, "rows": "one patient inside the patient scope; outside = missing"}
+  "projection": {
+   "legacy": "the patient gate showed the clinical steps; plan sources only to admin, reception or the owning doctor with plan reading.",
+   "groups": {
+    "clinical": "legacy flag, baseline step, adjustment class, warning — the record read",
+    "sources": "financial reference sources, plan, item and document identities, the remaining steps — only with clinical.plans.view"
+   },
+   "rows": "one patient inside the patient scope; outside = missing"
+  }
  },
  {
   "route": "/api/patients/[id]/legacy-treatments",
@@ -4010,7 +4193,15 @@
   "scope": "patient",
   "status": "canonical-done",
   "note": "M2 slice 95a (G4-2; contract section 15): read:patients.history in one read-only snapshot, outside = missing; the clinical description with the record read; every amount, currency, opening and free text with finance.patient-ledger.view; action flags from canonical grants, not the label or the reception setting.",
-  "projection": {"legacy": "admin and reception (a doctor with the payments permission on own patients) saw every agreement with amounts; access flags by label and the reception setting.", "groups": {"identity": "service, tooth, specialty, plan, case, dates, status, coverage — the record read", "money": "currency, agreed, paid, remaining, opening effect and history, note, void reason — only with finance.patient-ledger.view", "access": "add by finance.legacy.record; edit also finance.opening-balances.manage; void by finance.legacy.void"}, "rows": "one patient inside the patient scope; outside = missing"}
+  "projection": {
+   "legacy": "admin and reception (a doctor with the payments permission on own patients) saw every agreement with amounts; access flags by label and the reception setting.",
+   "groups": {
+    "identity": "service, tooth, specialty, plan, case, dates, status, coverage — the record read",
+    "money": "currency, agreed, paid, remaining, opening effect and history, note, void reason — only with finance.patient-ledger.view",
+    "access": "add by finance.legacy.record; edit also finance.opening-balances.manage; void by finance.legacy.void"
+   },
+   "rows": "one patient inside the patient scope; outside = missing"
+  }
  },
  {
   "route": "/api/patients/[id]/legacy-treatments",
@@ -4040,7 +4231,13 @@
   "scope": "patient",
   "status": "canonical-done",
   "note": "M2 slice 95b (G4-1, G4-6; contract section 15): the impact preview under read:legacy.void with finance.patient-ledger.view (the amounts belong to the ledger, G4-1); the manager_authorized mode also needs finance.opening-balances.manage; the scope decided right after the patient row lock (outside = missing); legacy reasons, messages and statuses.",
-  "projection": {"legacy": "the administrator label read the whole void impact: opening principal, collections, remaining, history and the preview token.", "groups": {"impact": "every amount and the preview token — finance.legacy.void with finance.patient-ledger.view; the manager_authorized mode also finance.opening-balances.manage"}, "rows": "one agreement of one patient inside the patient scope; outside = missing"}
+  "projection": {
+   "legacy": "the administrator label read the whole void impact: opening principal, collections, remaining, history and the preview token.",
+   "groups": {
+    "impact": "every amount and the preview token — finance.legacy.void with finance.patient-ledger.view; the manager_authorized mode also finance.opening-balances.manage"
+   },
+   "rows": "one agreement of one patient inside the patient scope; outside = missing"
+  }
  },
  {
   "route": "/api/patients/[id]/legacy-treatments/[agreementId]/void",
@@ -6026,6 +6223,34 @@
   "note": ""
  },
  {
+  "route": "/api/settings/ortho-privacy",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.security.change"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Orthodontic privacy and permissions matrix read."
+ },
+ {
+  "route": "/api/settings/ortho-privacy",
+  "method": "PUT",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.security.change"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "owner-only",
+  "note": "Owner/authorized admin orthodontic privacy policy update."
+ },
+ {
   "route": "/api/settings/patient-numbering",
   "method": "GET",
   "legacyRoles": [
@@ -6155,6 +6380,21 @@
   "note": "Slice 26: canonical open and atomic audit with lifecycle lock and authority re-proof. State guard is not durable idempotency: a delayed retry after closing could open another shift. UI never automatically retries."
  },
  {
+  "route": "/api/shifts/opening-corrections",
+  "method": "POST",
+  "legacyRoles": [
+   "admin",
+   "reception"
+  ],
+  "need": [
+   "finance.shifts.review-opening"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "canonical-done",
+  "note": "0129 §8.4 (owner #483 6886911163): correct the OPEN shift's opening count, by the protected owner or the exact grant, never by the opener or the previous closer. Shift lifecycle lock then the shift row lock; one append-only shift_opening_corrections row per changed currency, the new opening and the audit row (shift.opening_correct) in one transaction; no cash movement; a negative expected drawer is refused. Canonical only: every legacy session is refused 403 and nothing is written."
+ },
+ {
   "route": "/api/shifts/opening-reviews",
   "method": "GET",
   "legacyRoles": [
@@ -6183,21 +6423,6 @@
   "scope": null,
   "status": "canonical-done",
   "note": "0129: one review per opening difference (reason and settlement text, no cash movement, no change to either shift), by the protected owner or the exact grant (granted to nobody by default; never implied by shifts.operate or reconciliation.manage). A non-owner may not review a shift they opened or whose previous close they made. Row lock, single conditional update, audit in the same transaction; a second review is 409. Canonical only."
- },
- {
-  "route": "/api/shifts/opening-corrections",
-  "method": "POST",
-  "legacyRoles": [
-   "admin",
-   "reception"
-  ],
-  "need": [
-   "finance.shifts.review-opening"
-  ],
-  "anyOf": [],
-  "scope": null,
-  "status": "canonical-done",
-  "note": "0129 §8.4 (owner #483 6886911163): correct the OPEN shift's opening count, by the protected owner or the exact grant, never by the opener or the previous closer. Shift lifecycle lock then the shift row lock; one append-only shift_opening_corrections row per changed currency, the new opening and the audit row (shift.opening_correct) in one transaction; no cash movement; a negative expected drawer is refused. Canonical only: every legacy session is refused 403 and nothing is written."
  },
  {
   "route": "/api/tasks",
@@ -6657,7 +6882,10 @@
    "assistant"
   ],
   "need": [],
-  "anyOf": ["clinical.visits.document", "finance.invoices.view"],
+  "anyOf": [
+   "clinical.visits.document",
+   "finance.invoices.view"
+  ],
   "scope": "patient",
   "status": "canonical-done",
   "note": "M2 slice 89: read:visits.financial-context (clinical.visits.document or finance.invoices.view) inside the patient scope; source references only with finance.invoices.view (redactVisitFinancialContext with the grant in place of the role label).",

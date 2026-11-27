@@ -163,6 +163,8 @@ const ASSISTANT_RULES: Rule[] = [
   { path: "/api/visits/[id]/clinical", methods: ["GET", "HEAD", "POST"] },
   { path: "/api/patients/[id]" },
   { path: "/api/patients/[id]/workflow" },
+  { path: "/api/ortho/my-permissions" },
+  { path: "/api/ortho/workspace/[id]", methods: ["GET", "HEAD", "PUT"] },
 ];
 
 function matches(rulePath: string, pathname: string): boolean {

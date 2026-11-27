@@ -99,9 +99,11 @@ export type AuditAction =
   | "ai.confirmation.execute"
   | "diagnosis.create" | "ortho.book_next"
   /* (CASE-1) حالة تقويمٍ سابقة (قبل النظام)، وشدّةٌ سُجّلت (من التبويب أو داخل توقيع الزيارة). */
-  | "ortho.followup_coverage.append" | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision"
+  | "ortho.followup_coverage.append" | "ortho.baseline" | "ortho.adjustment" | "ortho.plan_link" | "ortho.billing_decision" | "ortho.responsible_doctor"
   | "ortho.case_create" | "ortho.case_update" | "visit.create" | "visit.link"
   | "ortho.strategy_revision" | "ortho.assessment.append"
+  | "ortho.privacy_policy_update" | "ortho.access_denied"
+  | "ortho.workspace_update" | "ortho.presentation_export" | "ortho.ai_query"
   | "service_material.set" | "service_material.remove" | "recall.contact" | "plan.installment_reminder"
   | "appointment.create" | "appointment.update" | "lab_order.create"
   /* (M2 slice 21) معالجة طلبات الحجز الإلكتروني بالهوية الموحّدة: التأكيد والرفض. */
@@ -403,6 +405,12 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "ortho.followup_coverage.append": "اعتماد نطاق المتابعات الروتينية للتقويم",
   "ortho.plan_link": "ربط حالة التقويم باتفاقها المالي",
   "ortho.billing_decision": "قرار فوترة شدّة خارج العقد",
+  "ortho.responsible_doctor": "تعيين الطبيب المسؤول لحالة التقويم",
+  "ortho.privacy_policy_update": "تعديل سياسة الخصوصية والصلاحيات لوحدة التقويم",
+  "ortho.access_denied": "رفض وصول غير مصرح به في وحدة التقويم",
+  "ortho.workspace_update": "تحديث ملف مساحة عمل التقويم",
+  "ortho.presentation_export": "تصدير أو طباعة عرض حالة تقويم (Case Presentation)",
+  "ortho.ai_query": "استعلام عبر AQLAN AI Assistant",
   "appointment.create": "حجز موعد",
   "booking_request.confirm": "تأكيد طلب حجز إلكتروني",
   "booking_request.reject": "رفض طلب حجز إلكتروني",
@@ -448,6 +456,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "clinic_settings.secret.replace", "clinic_settings.secret.remove",
   "user.disable", "doctor.permissions.update", "user.finance-permissions.update", "doctor.commission.update",
   "staff.capabilities.update", "staff.account.update",
+  "ortho.privacy_policy_update", "ortho.access_denied",
   "commission.case_override.set", "commission.case_override.void",
   "commission.case_participation.set", "commission.case_participation.void",
   "backup.download", "export.download", "document.reprint",
