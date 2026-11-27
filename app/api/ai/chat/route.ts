@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { findUserByUsername, getSettingsSafe, personNameTokens, recordAudit } from "@/lib/db";
+import { findUserByUsername, personNameTokens, recordAudit } from "@/lib/db";
 import { type Role, canUseAiChat } from "@/lib/roles";
+import { readAssistantControlSettings } from "@/lib/assistant-mode-settings";
+import { assistantModes, EXTERNAL_ADMIN_TEMPLATES, externalOnlyTemplate, greetingReply } from "@/lib/assistant-modes";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import { aiChat, getAiSettings, type AiChatMessage } from "@/lib/ai";
 import { deIdentifyClinicalContext } from "@/lib/ai-tools/privacy";
@@ -157,6 +159,48 @@ export async function POST(request: Request) {
   }
 
   const started = Date.now();
+  const controlSettings = await readAssistantControlSettings().catch(() => null);
+  if (!controlSettings) {
+    return NextResponse.json({ message: "تعذّر التحقق من إعدادات المساعد. أعد المحاولة لاحقًا." }, { status: 503 });
+  }
+  const modes = assistantModes(controlSettings);
+  if (!modes.internal && !modes.external) {
+    return NextResponse.json({ message: "المساعد الداخلي والخارجي متوقفان من الإعدادات." }, { status: 503 });
+  }
+  const last = incomingMessages[incomingMessages.length - 1];
+  if (last.role !== "user") {
+    return NextResponse.json({ message: "اكتب رسالتك أو استفسارك أولاً." }, { status: 400 });
+  }
+  function simpleReply(answer: string, intent: string, model: string, sourceType: StructuredAiResponse["sourceType"]) {
+    return { answer, intent, model, sourceType, toolsUsed: [], generatedAt: new Date().toISOString(), latencyMs: Date.now() - started } satisfies StructuredAiResponse;
+  }
+
+  const greeting = greetingReply(last.content);
+  if (greeting) {
+    return replyWithAudit(simpleReply(greeting, "greeting", "aqlan-assistant-interface", "internal_engine"), started, user, session);
+  }
+  if (!modes.internal) {
+    const template = externalOnlyTemplate(last.content);
+    if (!template || source.conversationPatientId != null) {
+      const message = "المساعد الداخلي متوقف. فتح الملفات والحجز وحسابات المرضى تبقى داخل البرنامج. للتجربة مع المساعد الخارجي اختر طلبًا عامًا: " + EXTERNAL_ADMIN_TEMPLATES.join("، أو ") + ".";
+      return replyWithAudit(simpleReply(message, "internal_assistant_disabled", "aqlan-assistant-interface", "internal_engine"), started, user, session);
+    }
+    if (!settings.hasKey) {
+      return NextResponse.json({ message: "لا يوجد مزوّد خارجي مفعّل بمفتاح محفوظ." }, { status: 503 });
+    }
+    const external = await aiChat({
+      messages: [
+        { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
+        { role: "user", content: template },
+      ],
+      maxTokens: 300,
+      temperature: 0.3,
+    }).catch(() => null);
+    if (!external?.ok || !external.content.trim()) {
+      return NextResponse.json({ message: "تعذّر الاتصال بالمساعد الخارجي. الداخلي متوقف، ولم يُشغَّل بدلًا منه." }, { status: 503 });
+    }
+    return replyWithAudit(simpleReply(external.content.trim(), "administrative_template", external.model, "external_ai"), started, user, session);
+  }
   const doctorPartyId = user.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
   const todayISO = await dbTodayISO().catch(() => new Date().toISOString().slice(0, 10));
   const isDbConnected = isDatabaseOnline();
@@ -191,7 +235,7 @@ export async function POST(request: Request) {
     conversationPatientId,
   };
 
-  const latestUserMsg = incomingMessages[incomingMessages.length - 1]?.content || "";
+  const latestUserMsg = last.content;
 
   // تنفيذ المعالجة عبر محرك الاستعلامات الداخلي الموحد
   let response: StructuredAiResponse = await processAssistantQuery(
@@ -223,13 +267,11 @@ export async function POST(request: Request) {
     role: session.role,
     doctorPartyId,
   });
-  const clinicalExternalAllowed = settings.hasKey
-    ? (await getSettingsSafe().catch(() => null))?.["ai.clinical_external"] === "true"
-    : false;
+  const clinicalExternalAllowed = modes.external && controlSettings["ai.clinical_external"] === "true";
   const plan = externalConsultPlan({
     intent: response.intent,
     message: latestUserMsg,
-    hasKey: settings.hasKey,
+    hasKey: modes.external && settings.hasKey,
     clinicalExternalAllowed,
     clinicalIdentity: clinicalCapability.ok,
   });
@@ -277,6 +319,15 @@ export async function POST(request: Request) {
     }
   }
 
+  return replyWithAudit(response, started, user, session);
+}
+
+async function replyWithAudit(
+  response: StructuredAiResponse,
+  started: number,
+  user: { id: number; displayName?: string | null; username: string },
+  session: { role: string; username: string },
+) {
   // تسجيل تدقيق أمني للطلب
   try {
     await recordAudit({

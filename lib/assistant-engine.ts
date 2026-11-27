@@ -123,11 +123,11 @@ export function extractPhoneNumber(text: string): string | undefined {
  */
 export function extractActionDate(text: string, todayISO: string): string {
   const norm = text.toLowerCase();
-  if (norm.includes("بكرة") || norm.includes("غدا") || norm.includes("غداً") || norm.includes("tomorrow")) {
-    return addDays(todayISO, 1);
-  }
-  if (norm.includes("بعد بكرة") || norm.includes("بعد غد") || norm.includes("بعد غداً")) {
+  if (norm.includes("بعد بكرة") || norm.includes("بعد غد")) {
     return addDays(todayISO, 2);
+  }
+  if (norm.includes("بكرة") || norm.includes("غدا") || norm.includes("غداً") || norm.includes("غدًا") || norm.includes("tomorrow")) {
+    return addDays(todayISO, 1);
   }
   if (norm.includes("أمس") || norm.includes("البارحة")) {
     return addDays(todayISO, -1);
@@ -141,7 +141,6 @@ export function extractActionDate(text: string, todayISO: string): string {
  * استخراج الوقت من النص
  */
 export function extractActionTime(text: string): string {
-  const norm = text.toLowerCase();
   const timeMatch = text.match(/(?:الساعة\s*)?(\d{1,2})(?::(\d{2}))?\s*(صباحا|صباحاً|عصرا|عصراً|مساء|مساءً|م|ص)?/i);
   if (timeMatch) {
     let hours = parseInt(timeMatch[1], 10);
@@ -150,7 +149,7 @@ export function extractActionTime(text: string): string {
 
     if ((modifier.includes("عصر") || modifier.includes("مساء") || modifier === "م") && hours < 12) {
       hours += 12;
-    } else if (modifier.includes("صباح") && hours === 12) {
+    } else if ((modifier.includes("صباح") || modifier === "ص") && hours === 12) {
       hours = 0;
     } else if (!modifier && hours >= 1 && hours <= 8) {
       hours += 12;
@@ -362,10 +361,38 @@ async function processAssistantQueryImpl(
 
   // ─── 3. تنفيذ العمليات والإجراءات التشغيلية المباشرة (Operational Actions Execution) ──
 
+  // "Open" is navigation, never an alias for creating an existing patient's file.
+  const open = trimmed.match(/^(?:افتح|فتح)\s+ملف(?:\s+(?:المريض|المريضة|مريض|مريضة))?(?:\s+(.+?))?[.!؟?]*$/u);
+  if (open && !/^(?:افتح|فتح)\s+ملف(?:\s+(?:مريض|مريضة))?\s+جديد(?:ة)?(?:\s|$)/u.test(trimmed)) {
+    const rawTerm = open[1]?.trim() ?? "";
+    const term = rawTerm.replace(/^(?:رقم\s+(?:الملف\s+)?)|^#/u, "").trim();
+    const empty = !term || /^(?:ال)?مريض(?:ة)?$/.test(term);
+    let result: ToolExecutionResult = { success: false, textSummary: "اكتب اسم المريض الكامل أو رقم ملفه لفتح الملف." };
+    if (!empty && context.isDbConnected) {
+      const { findAuthorizedPatientLink } = await import("./assistant-patient-link");
+      result = await findAuthorizedPatientLink(term, context).catch(() => ({
+        success: false,
+        textSummary: "تعذّر البحث عن الملف الآن. جرّب مرة أخرى من شاشة المرضى.",
+      }));
+    } else if (!empty) {
+      result = { success: false, textSummary: "لا يمكن فتح الملف لأن قاعدة البيانات غير متاحة." };
+    }
+    return {
+      answer: result.textSummary,
+      intent: "open_existing_patient",
+      toolsUsed: result.success ? ["open_existing_patient"] : [],
+      actions: result.actions,
+      sourceType: result.success ? "live_database" : "internal_engine",
+      model: "aqlan-patient-engine",
+      latencyMs: Date.now() - started,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
   // أ) أمر تسجيل / إضافة مريض جديد
   if (
     (/(?:أضف|اضف|تسجيل|سجل|إضافة|اضافة)\s+(?:مريض|حالة|ملف)\s+(?:جديد|جديدة)?/i.test(norm) ||
-     /(?:فتح|افتح)\s+ملف\s+(?:مريض|جديد)/i.test(norm)) &&
+     /(?:فتح|افتح)\s+ملف(?:\s+(?:مريض|مريضة))?\s+جديد(?:ة)?/i.test(norm)) &&
     !norm.includes("كيف")
   ) {
     const pName = extractPatientNameFromAction(trimmed);
@@ -403,9 +430,27 @@ async function processAssistantQueryImpl(
      /(?:جلسة\s+شد|شد\s+تقويم)\s+(?:للمريض|له|لها)/i.test(norm)) &&
     !norm.includes("كيف") && !norm.includes("مواعيد اليوم")
   ) {
-    const pName = extractPatientNameWithHistory(trimmed, conversationHistory, context) || context.currentPatientName || undefined;
-    const pDate = extractActionDate(trimmed, context.todayISO || new Date().toISOString().slice(0, 10));
-    const pTime = extractActionTime(trimmed);
+    const digits = trimmed.replace(/[٠-٩۰-۹]/g, ch => String(ch.charCodeAt(0) % 16));
+    const fileNumber = digits.match(/\b[A-Z]{1,8}-\d{1,12}\b/i)?.[0];
+    const pName = fileNumber ?? (extractPatientNameWithHistory(digits, conversationHistory, context) || context.currentPatientName || undefined);
+    const timeText = digits.replace(/\b\d{4}-\d{2}-\d{2}\b/g, "").match(
+      /(?:الساعة\s*|الساعة:\s*)\d{1,2}(?::\d{2})?(?![\d:])(?:\s*(?:صباحًا|صباحاً|صباحا|صباح|عصرًا|عصراً|عصرا|مساءً|مساء|[مص])(?=\s|[.،؟!]|$))?|\b\d{1,2}:\d{2}\b/u,
+    )?.[0];
+    const knownDate = /(?:\b\d{4}-\d{2}-\d{2}\b|اليوم|بكرة|غدا|غداً|غدًا|بعد غد)/u.test(digits);
+    const clock = timeText?.match(/^(?:الساعة[:\s]+)?(\d{1,2}:\d{2})$/u)?.[1];
+    const pTime = clock ? clock.padStart(5, "0") : timeText ? extractActionTime(timeText.replace(/ً/g, "")) : "";
+    if (!pName || !knownDate || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(pTime)) {
+      return {
+        answer: "للحجز، اكتب اسم المريض أو رقم ملفه، والتاريخ والساعة. أعرض لك التفاصيل لتراجعها قبل التأكيد.",
+        intent: "booking_details_needed",
+        toolsUsed: [],
+        sourceType: "internal_engine",
+        model: "aqlan-action-engine",
+        latencyMs: Date.now() - started,
+        generatedAt: new Date().toISOString(),
+      };
+    }
+    const pDate = extractActionDate(digits, context.todayISO || new Date().toISOString().slice(0, 10));
     const pSpecialty = extractSpecialty(trimmed);
 
     const actionRes = await executeAiTool(

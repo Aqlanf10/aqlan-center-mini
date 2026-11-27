@@ -8,6 +8,8 @@ import { verifyToolConfirmation } from "@/lib/ai-confirmation";
 import { executeAiTool } from "@/lib/ai-tools/registry";
 import { resolveToolPolicy } from "@/lib/ai-tools/policy";
 import type { AiToolContext } from "@/lib/ai-tools/types";
+import { readAssistantControlSettings } from "@/lib/assistant-mode-settings";
+import { assistantModes } from "@/lib/assistant-modes";
 import { dbTodayISO } from "@/lib/reports";
 
 export const dynamic = "force-dynamic";
@@ -73,6 +75,11 @@ export async function POST(request: Request) {
       { message: "ليس لديك صلاحية تنفيذ إجراءات المساعد الذكي." },
       { status: 403 },
     );
+  }
+
+  const settings = await readAssistantControlSettings().catch(() => null);
+  if (!settings || !assistantModes(settings).internal) {
+    return NextResponse.json({ message: "المساعد الداخلي متوقف أو تعذّر التحقق من إعداداته. لم يُنفّذ الإجراء." }, { status: 503 });
   }
 
   const todayISO = await dbTodayISO().catch(() => new Date().toISOString().slice(0, 10));

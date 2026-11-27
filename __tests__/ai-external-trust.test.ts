@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
   recordAudit: vi.fn(),
   /* (P2-11) هذه الاختبارات تصف مسار الاستشارة السريرية حين يفعّلها المالك صراحةً —
      والافتراضي معطَّل (Claude للمهام الإدارية فقط، انظر ai-scope.test). */
-  getSettingsSafe: vi.fn(async () => ({ "ai.clinical_external": "true" })),
+  controlSettings: vi.fn(async () => ({ "ai.clinical_external": "true" })),
   getAiSettings: vi.fn(),
   aiChat: vi.fn(),
   createPatient: vi.fn(),
@@ -27,11 +27,12 @@ vi.mock("@/lib/db", async (importOriginal) => {
     ...actual,
     findUserByUsername: mocks.findUserByUsername,
     recordAudit: mocks.recordAudit,
-    getSettingsSafe: mocks.getSettingsSafe,
     createPatient: mocks.createPatient,
     recordPayment: mocks.recordPayment,
   };
 });
+
+vi.mock("@/lib/assistant-mode-settings", () => ({ readAssistantControlSettings: mocks.controlSettings }));
 
 vi.mock("@/lib/ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/ai")>();
@@ -47,7 +48,7 @@ import { POST as chatRoute } from "../app/api/ai/chat/route";
 
 beforeEach(() => {
   vi.resetAllMocks();
-    mocks.getSettingsSafe.mockResolvedValue({ "ai.clinical_external": "true" });
+    mocks.controlSettings.mockResolvedValue({ "ai.clinical_external": "true" });
   mocks.requireSession.mockResolvedValue({
     userId: 2,
     username: "dr.ahmed",
