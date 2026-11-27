@@ -186,6 +186,16 @@ describe("synthetic assistant mode matrix", () => {
     expect(reply.status).toBe(503);
     expect(m.process).not.toHaveBeenCalled();
   });
+  it("fails closed with a generic 503 when master settings cannot be read", async () => {
+    m.master.mockRejectedValue(new Error("SYNTHETIC_PRIVATE_SETTINGS_ERROR"));
+    const response = await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.text()).not.toContain("SYNTHETIC_PRIVATE_SETTINGS_ERROR");
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+    expect(m.names).not.toHaveBeenCalled();
+  });
   it.each(["disabled", "unreadable"])("does not run either engine when settings are %s", async mode => {
     if (mode === "unreadable") m.settings.mockRejectedValue(new Error("synthetic offline"));
     else m.settings.mockResolvedValue({ "ai.internal_assistant": "false", "ai.external_assistant": "false" });
