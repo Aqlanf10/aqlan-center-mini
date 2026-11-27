@@ -6,6 +6,7 @@ import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
 import { EXPENSE_CATEGORY_LABEL } from "@/lib/expenses";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import type { CanonicalShiftFeed } from "@/lib/canonical-shifts";
+import ShiftOpeningReviews from "./ShiftOpeningReviews";
 import type { ReceiptProvenance } from "@/lib/receipt-provenance";
 
 const empty = () => ({ YER: "", SAR: "", USD: "" });
@@ -44,6 +45,8 @@ export function CanonicalShifts({ username }: { username: string }) {
   const [note, setNote] = useState("");
   const [reason, setReason] = useState("");
   const [needsReason, setNeedsReason] = useState(false);
+  // 0129 §8 (blind count): the opening form is never prefilled; the count is committed in one step and a
+  // difference is recorded for review by the server, which shows its amount only to the owner or a reviewer.
   const sequence = useRef(0), inFlight = useRef(false);
   const previousShift = useRef<number | null | undefined>(undefined);
   // A tab-local reminder survives refresh/navigation; it is neither authority nor
@@ -99,7 +102,9 @@ export function CanonicalShifts({ username }: { username: string }) {
     markRecovery(true); // Also covers leaving this page while the request is pending.
     try {
       const response = await fetch("/api/shifts", { method: kind === "open" ? "POST" : "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(kind === "open" ? { opening } : { id: feed.open?.id, counted, note, differenceReason: reason }) });
+        body: JSON.stringify(kind === "open"
+          ? { opening }
+          : { id: feed.open?.id, counted, note, differenceReason: reason }) });
       const body = await response.json();
       if (response.status >= 500) throw new Error("uncertain");
       if (!response.ok) {
@@ -109,7 +114,11 @@ export function CanonicalShifts({ username }: { username: string }) {
       } else {
         if (!Number.isSafeInteger(body?.id) || !["open", "closed"].includes(body?.status)) throw new Error("uncertain");
         markRecovery(false); setNeedsReason(false); setCounted(empty()); setOpening(empty()); setReason(""); setNote("");
-        setMessage(kind === "open" ? "فُتحت الوردية وسُجّلت العملية." : "أُقفلت الوردية وسُجّل الجرد.");
+        setMessage(kind === "open"
+          ? (Array.isArray(body?.openingReviews) && body.openingReviews.length
+            ? "فُتحت الوردية بالعدّ المُدخل. سُجّل فرق في عدّ الافتتاح وأُحيل إلى المراجعة؛ لم تُنشأ أي حركة نقدية."
+            : "فُتحت الوردية وسُجّلت العملية.")
+          : "أُقفلت الوردية وسُجّل الجرد.");
       }
     } catch {
       markRecovery(true);
@@ -153,6 +162,9 @@ export function CanonicalShifts({ username }: { username: string }) {
           </table></div><p className="text-xs text-slate-500">المبالغ غير النقدية لا تدخل المتوقّع في الدرج. إخفاء التفاصيل لا يغيّر هذه الإجماليات.</p>
         </> : null}
       </section>
+      <ShiftOpeningReviews openShiftId={feed.open?.id ?? null} openShiftReviews={feed.open?.openingReviews ?? []}
+        openShiftCorrections={feed.open?.openingCorrections ?? []} pending={feed.pendingOpeningReviews ?? 0}
+        canReview={feed.canReviewOpening === true} onReviewed={() => void load()} />
       {feed.canOperate ? <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card" aria-label={feed.open ? "جرد وإقفال الوردية" : "فتح الوردية"}>
         <form className="space-y-4" onSubmit={event => void submit(event, feed.open ? "close" : "open")}>
           <h2 className="font-bold text-navy-900">{feed.open ? "جرد وإقفال الوردية" : "فتح وردية جديدة"}</h2>
@@ -161,7 +173,7 @@ export function CanonicalShifts({ username }: { username: string }) {
             {feed.open ? <>
               <label className="block text-xs font-semibold text-slate-600">ملاحظة الإقفال<input className={inputClass} maxLength={300} value={note} onChange={event => setNote(event.target.value)} /></label>
               {needsReason ? <label className="block text-xs font-semibold text-amber-900">سبب فرق الجرد<input required className={inputClass} maxLength={300} value={reason} onChange={event => setReason(event.target.value)} /></label> : null}
-            </> : null}
+            </> : <p className="text-xs text-slate-500">عُدّ النقد في الدرج وأدخله كما هو؛ يُسجَّل كما أُدخل، وأي فرق عن الإقفال السابق يُحال إلى المراجعة.</p>}
             <ActionButton type="submit" disabled={disabled}>{busy ? "جارٍ تنفيذ العملية…" : feed.open ? "تأكيد الجرد والإقفال" : "تأكيد فتح وردية جديدة"}</ActionButton>
           </fieldset>
         </form>
@@ -195,6 +207,7 @@ export function CanonicalShifts({ username }: { username: string }) {
         <ul className="divide-y divide-slate-100">{feed.recent.map(row => <li key={row.id} className="space-y-1 py-3 text-xs">
           <p className="font-bold text-navy-900">#{row.id} — {row.status === "open" ? "مفتوحة" : "مقفلة"} — {date(row.openedAt)}</p>
           <p>فتحها {row.openedBy}{row.closedBy ? `، أقفلها ${row.closedBy}` : ""}</p>
+          {row.sealed ? <p data-testid="shift-sealed" className="text-slate-500">المعدود مختوم حتى افتتاح الوردية التالية.</p> : null}
           {row.counted ? <div className="grid gap-1 sm:grid-cols-3">{CURRENCIES.map(c => <p key={c}>{c}: المعدود <bdi>{formatMoney(row.counted![c], c)}</bdi> · الفرق <bdi>{formatMoney(row.difference?.[c] ?? 0, c)}</bdi></p>)}</div> : null}
           {row.note ? <p className="break-words">{row.note}</p> : null}{row.differenceReason ? <p className="break-words">سبب الفرق: {row.differenceReason}</p> : null}
         </li>)}</ul>

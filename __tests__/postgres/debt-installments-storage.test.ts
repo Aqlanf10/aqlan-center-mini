@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { GROUPED_LAB_ORDER_SQL } from "../../lib/grouped-lab-order-schema";
 import { Pool } from "pg";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv, createIsolatedDatabase, adminClient } from "./_setup";
 import { loadMigrationFiles, migrate } from "../../lib/migrations";
@@ -34,7 +36,13 @@ describe("0059 existing-debt allocation storage",()=>{
   it("keeps migration/bootstrap byte-identical, applies with gaps and leaves prior invoice facts intact",async()=>{
     expect(readFileSync("migrations/0059_invoice_debt_installments.sql","utf8")).toBe(DEBT_INSTALLMENTS_SQL);
     expect((await q("SELECT to_jsonb(i) AS facts FROM invoices i WHERE id=$1",[invoiceId]))[0].facts).toEqual(oldInvoice);
-    expect((await q("SELECT version FROM schema_migrations ORDER BY version")).map(r=>r.version).at(-1)).toBe("0089");
+    const registry = await q("SELECT version,name,checksum,adopted FROM schema_migrations ORDER BY version");
+    expect(registry.map(r=>r.version)).toContain("0126");
+    // 0079 remains available as a historical source but is not installed on this fresh fixture.
+    expect(registry.map(r=>r.version)).not.toContain("0079");
+    expect((await q("SELECT to_regclass('public.ortho_followup_coverage_revisions') AS name"))).toEqual([{name:null}]);
+    expect(registry.at(-1)).toEqual({version:"0136",name:"grouped_lab_orders",checksum:createHash("sha256").update(GROUPED_LAB_ORDER_SQL).digest("hex"),adopted:false});
+    expect(readFileSync("migrations/0136_grouped_lab_orders.sql","utf8")).toBe(GROUPED_LAB_ORDER_SQL);
   });
   it("creates exact terms without a second invoice or receipt; exact retry returns the same version",async()=>{
     const first=await schedules.saveDebtRepayment(input("debt-create-exact"));

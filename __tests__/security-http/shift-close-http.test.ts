@@ -77,12 +77,22 @@ describe("إقفال الوردية — جردٌ أعمى وفرقٌ لا يُق
   });
 
   it("تقرير الإقفال (Z) يُطبع للاستقبال ولا يُفتح للطبيب", async () => {
-    const ok = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions.reception.cookie } });
+    const print = async (cookie: string) => fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie } });
+    /* العدّ الأعمى (0129 §8.3، قرار المالك 6886911163): آخر إقفال مختومٌ لغير المخوّل حتى يُثبَّت عدّ الافتتاح
+       التالي. أيّ إقفال هو «الأخير» يتوقف على ترتيب ملفات هذه القاعدة المشتركة (بعضها يزرع إقفالًا بتاريخ
+       لاحق)، فيُثبت الختم نفسه في shift-blind-count-legacy-http بإقفالٍ يملكه. هنا: المدير يرى السبب فورًا،
+       وبعد افتتاح الوردية التالية يطبع الاستقبال التقرير كاملًا، والطبيب لا يفتحه. */
+    const admin = await print(h.sessions.admin.cookie);
+    expect(admin.status).toBe(200);
+    expect(await admin.text()).toContain("مبلغ زائد تركه مريض");
+    await db.query(`INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd) VALUES ('p13-http-next', 0, 0, 0)`);
+    const ok = await print(h.sessions.reception.cookie);
     expect(ok.status).toBe(200);
     const html = await ok.text();
     expect(html).toContain("تقرير إقفال الوردية");
+    expect(html).not.toContain("shift-report-sealed");
     expect(html).toContain("مبلغ زائد تركه مريض");
-    const denied = await fetch(`${baseUrl}/print/shift/${shiftId}`, { headers: { cookie: h.sessions.doctorA.cookie } });
+    const denied = await print(h.sessions.doctorA.cookie);
     expect(denied.status).toBe(404);
   });
 });

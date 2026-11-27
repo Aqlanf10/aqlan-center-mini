@@ -23,7 +23,7 @@ beforeAll(async () => {
   // Withhold only the receipt table in this owned fixture to retain the original
   // partial-schema refusal assertion; the real runtime already registered0056–0058.
   const id = await staff('اختبار بوابة الإدماج');
-  expect((await owned.db.query("SELECT version FROM schema_migrations ORDER BY version")).rows.map(row => row.version)).toEqual(['0051','0052','0056','0057','0058','0063','0064','0065','0066','0067','0068','0069','0074','0078', '0080', '0081', '0082', '0087', '0089']);
+  expect((await owned.db.query("SELECT version FROM schema_migrations ORDER BY version")).rows.map(row => row.version)).toEqual(['0051','0052','0056','0057','0058','0063','0064','0065','0066','0067','0068','0069','0074','0078', '0080', '0081', '0082', '0087', '0089', '0126', '0128', '0129', '0133', '0136']);
   // Retired 0079 remains immutable for historical databases, but this fixture is fresh.
   expect(createHash('sha256').update(readFileSync('migrations/0079_ortho_followup_coverage.sql')).digest('hex')).toBe('5603226d149a9be0635d4e99eeaff606d5cc881ce1552b56bf7fbad203044c99');
   expect((await owned.db.query("SELECT version FROM schema_migrations WHERE version='0079'")).rows).toEqual([]);

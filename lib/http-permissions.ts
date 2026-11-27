@@ -126,6 +126,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/expenses": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ["admin", "reception", "cashier"], DELETE: ADMIN },
   "/api/expenses/[id]/attachments": { GET: ["admin", "reception", "cashier", "accountant"], POST: ["admin", "reception", "cashier"] },
   "/api/expenses/quote": { POST: ["admin", "reception", "cashier"] },
+  // (0133) إنهاء طلب صرف مجهول النتيجة نهائيًا — صلاحية إنشاء الصرف نفسها.
+  "/api/expenses/attempts/retire": { POST: ["admin", "reception", "cashier"] },
   "/api/export": { GET: ADMIN },
   "/api/families": { GET: FRONT_DESK, POST: FRONT_DESK },
   "/api/families/[id]": { GET: CLINIC, PATCH: FRONT_DESK },
@@ -133,6 +135,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/families/[id]/members": { POST: FRONT_DESK },
   "/api/families/[id]/members/[patientId]": { DELETE: FRONT_DESK },
   "/api/finance/commission-overrides": { GET: ADMIN, POST: ADMIN },
+  "/api/finance/commission-participations": { GET: ADMIN, POST: ADMIN },
   "/api/finance/commissions": { GET: ["admin", "doctor", "accountant"] },
   "/api/finance/debts": { GET: ["admin", "reception", "cashier", "accountant"] },
   "/api/finance/expense-categories": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ADMIN, PATCH: ADMIN, DELETE: ADMIN },
@@ -304,6 +307,9 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/settings/readiness": { GET: ADMIN },
   "/api/settings/reset": { GET: ADMIN, POST: ADMIN },
   "/api/shifts": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ["admin", "reception", "cashier"], PATCH: ["admin", "reception", "cashier"] },
+  // (0129) مراجعات فرق افتتاح الوردية — المسار للجلسة الموحّدة وحدها؛ الجلسة القديمة تُرفض داخل المعالج (403).
+  "/api/shifts/opening-reviews": { GET: ["admin", "reception", "doctor"], POST: ["admin"] },
+  "/api/shifts/opening-corrections": { POST: ["admin", "reception"] },
   "/api/users": { GET: ADMIN, POST: ADMIN },
   "/api/users/[id]": { PATCH: ADMIN },
   "/api/visits": { GET: ["admin", "reception", "doctor", "assistant"], POST: CLINIC },

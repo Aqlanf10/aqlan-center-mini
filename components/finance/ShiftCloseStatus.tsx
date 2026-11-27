@@ -14,6 +14,8 @@ export interface ShiftCloseInfo {
   difference?: Record<Currency, number> | null;
   differenceReason?: string | null;
   expectedSource?: "stored" | "computed";
+  /** 0129 §8.3: the latest close before the next opening, withheld from this viewer by the server. */
+  sealed?: boolean;
 }
 
 export function ShiftCloseStatus({ shift, compact = false }: { shift: ShiftCloseInfo; compact?: boolean }) {
@@ -21,6 +23,13 @@ export function ShiftCloseStatus({ shift, compact = false }: { shift: ShiftClose
     return (
       <span className="inline-flex rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
         مفتوحة
+      </span>
+    );
+  }
+  if (shift.sealed) {
+    return (
+      <span data-testid="shift-sealed" className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+        مختوم حتى افتتاح الوردية التالية
       </span>
     );
   }

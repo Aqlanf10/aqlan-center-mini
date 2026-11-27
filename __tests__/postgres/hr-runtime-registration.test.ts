@@ -1,8 +1,13 @@
+import { EXPENSE_COMMANDS_SQL } from "../../lib/expense-commands-schema";
+import { SHIFT_OPENING_REVIEWS_SQL } from "../../lib/shift-opening-reviews-schema";
+import { EXPENSE_REQUEST_RETIREMENTS_SQL } from "../../lib/expense-request-retirements-schema";
+import { GROUPED_LAB_ORDER_SQL } from "../../lib/grouped-lab-order-schema";
 import { LAB_WORK_INTENT_SQL } from "../../lib/lab-work-intent-schema";
 import { PATIENT_NUMBERING_SQL } from "../../lib/patient-numbering-schema";
 import { INVOICE_ARCHIVE_SQL } from "../../lib/invoice-archive-schema";
 import { INVOICE_SERVICE_ADDITIONS_SQL } from "../../lib/invoice-service-additions-schema";
 import { LAB_SHADE_SPECIFICATION_SQL } from "../../lib/lab-shade-schema";
+import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "../../lib/commission-participation-schema";
 import { AGREEMENT_REMINDER_GUARD_SQL } from "../../lib/agreement-reminder-guard-schema";
 import { AGREEMENT_RECONCILIATION_SQL } from "../../lib/agreement-reconciliation-schema";
 import { PATIENT_APPOINTMENT_HISTORY_SQL } from "../../lib/patient-appointment-history-schema";
@@ -54,6 +59,11 @@ it('runtime registers exact additive contracts without fabricating facts, receip
     { version: "0082", name: "invoice_service_additions", checksum: createHash("sha256").update(INVOICE_SERVICE_ADDITIONS_SQL).digest("hex") },
     { version: "0087", name: "agreement_reminder_metadata", checksum: createHash("sha256").update(AGREEMENT_REMINDER_GUARD_SQL).digest("hex") },
     { version: "0089", name: "lab_shade_specification", checksum: createHash("sha256").update(LAB_SHADE_SPECIFICATION_SQL).digest("hex") },
+    { version: "0126", name: "commission_case_participations", checksum: createHash("sha256").update(COMMISSION_CASE_PARTICIPATIONS_SQL).digest("hex") },
+    { version: "0128", name: "expense_commands", checksum: createHash("sha256").update(EXPENSE_COMMANDS_SQL).digest("hex") },
+    { version: "0129", name: "shift_opening_reviews", checksum: createHash("sha256").update(SHIFT_OPENING_REVIEWS_SQL).digest("hex") },
+    { version: "0133", name: "expense_request_retirements", checksum: createHash("sha256").update(EXPENSE_REQUEST_RETIREMENTS_SQL).digest("hex") },
+    { version: "0136", name: "grouped_lab_orders", checksum: createHash("sha256").update(GROUPED_LAB_ORDER_SQL).digest("hex") },
   ].map(file => ({ version: file.version, name: file.name, checksum: file.checksum, adopted: false })));
   for (const table of ['hr_effective_streams', 'hr_effective_revisions', 'hr_temporal_write_receipts', 'hr_staff', 'hr_settings', 'inventory_purchase_receipts']) {
     expect((await fixture.source.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n, table).toBe(0);

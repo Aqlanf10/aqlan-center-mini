@@ -1,0 +1,177 @@
+import { describe, expect, it } from "vitest";
+import {
+  EXPENSE_ATTEMPT_STORAGE_KEY, beginExpenseAttempt, classifyExpenseAnswer, dismissExpenseAttempt,
+  pendingExpenseAttempts, resetExpenseAttemptMemoryForTesting, retireExpenseAttempt, sendExpenseAttempt, settleExpenseAttempt,
+} from "../lib/expense-attempt";
+import { IDEMPOTENCY_KEY_PATTERN } from "../lib/idempotency-key";
+
+// docs/finance/EXPENSE_COMMANDS_0128.md §2.1 and the owner's review #483 6882465665: an unsettled expense
+// request is never lost and never silently replaced by a new key. Synthetic values only.
+function storage() {
+  const map = new Map<string, string>();
+  return { getItem: (k: string) => map.get(k) ?? null, setItem: (k: string, v: string) => { map.set(k, v); },
+    removeItem: (k: string) => { map.delete(k); }, map };
+}
+function broken() {
+  return { getItem: () => { throw new Error("SecurityError"); }, setItem: () => { throw new Error("QuotaExceededError"); },
+    removeItem: () => { throw new Error("SecurityError"); } };
+}
+const body = JSON.stringify({ category: "other", amount: "125", currency: "YER", payee: "SYN" });
+const start = (store: Parameters<typeof beginExpenseAttempt>[0], extra: Partial<Parameters<typeof beginExpenseAttempt>[1]> = {}) =>
+  beginExpenseAttempt(store, { actor: "syn-cashier", surface: "petty", match: body, body, label: "SYN 125", ...extra });
+
+describe("one key per intended voucher", () => {
+  it("reuses the pending key for the same user and entry, and mints a new one only after a settled answer", () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const first = start(store).attempt;
+    expect(first.key).toMatch(IDEMPOTENCY_KEY_PATTERN);
+    expect(start(store).attempt.key).toBe(first.key);
+    expect(start(store, { match: "{\"amount\":\"126\"}" }).attempt.key).not.toBe(first.key);
+    settleExpenseAttempt(store, first.key);
+    expect(start(store).attempt.key).not.toBe(first.key);
+  });
+
+  it("survives a reload through storage", () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const key = start(store).attempt.key;
+    resetExpenseAttemptMemoryForTesting();
+    const reloaded = storage(); reloaded.setItem(EXPENSE_ATTEMPT_STORAGE_KEY, store.getItem(EXPENSE_ATTEMPT_STORAGE_KEY)!);
+    expect(start(reloaded).attempt.key).toBe(key);
+    expect(pendingExpenseAttempts(reloaded, "syn-cashier").map((a) => a.key)).toEqual([key]);
+  });
+
+  it("keeps the key stable in the page when storage throws, and says it cannot survive a reload", () => {
+    resetExpenseAttemptMemoryForTesting();
+    const first = start(broken());
+    expect(first.persisted).toBe(false);
+    const again = start(broken());
+    expect(again.attempt.key).toBe(first.attempt.key);
+    expect(pendingExpenseAttempts(broken(), "syn-cashier").map((a) => a.key)).toEqual([first.attempt.key]);
+    expect(start(null).attempt.key).toBe(first.attempt.key);
+  });
+
+  it("never hands another user's pending attempt to this user, and never shows it to them", () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const mine = start(store).attempt;
+    const theirs = start(store, { actor: "syn-reception" }).attempt;
+    expect(theirs.key).not.toBe(mine.key);
+    expect(pendingExpenseAttempts(store, "syn-reception").map((a) => a.key)).toEqual([theirs.key]);
+    expect(pendingExpenseAttempts(store, "syn-cashier").map((a) => a.key)).toEqual([mine.key]);
+  });
+
+  it("ignores tampered rows and keeps the exact body to resend", () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    store.setItem(EXPENSE_ATTEMPT_STORAGE_KEY, JSON.stringify([{ key: "bad key", actor: "syn-cashier", match: body, body }]));
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+    const sent = start(store, { body: JSON.stringify({ ...JSON.parse(body), expected: { paymentExchangeRate: 1 } }) }).attempt;
+    expect(JSON.parse(pendingExpenseAttempts(store, "syn-cashier")[0].body)).toMatchObject({ expected: { paymentExchangeRate: 1 } });
+    dismissExpenseAttempt(store, sent.key);
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+  });
+});
+
+describe("what an answer proves", () => {
+  const receipt = { id: 9, voucherNumber: "SYN-V-9" };
+  it("is saved only with a readable receipt", () => {
+    expect(classifyExpenseAnswer(201, false, receipt)).toBe("saved");
+    expect(classifyExpenseAnswer(200, false, { ...receipt, replayed: true })).toBe("saved");
+    expect(classifyExpenseAnswer(201, false, null)).toBe("unknown");
+    expect(classifyExpenseAnswer(201, false, { id: "9" })).toBe("unknown");
+    expect(classifyExpenseAnswer(200, true, receipt)).toBe("unknown");
+  });
+  it("is a proven refusal only when the server says the key holds nothing", () => {
+    expect(classifyExpenseAnswer(409, false, { code: "exceeds_drawer_cash", requestKeyState: "unused" })).toBe("refused");
+    expect(classifyExpenseAnswer(400, false, { code: "invalid_payment_split", requestKeyState: "unused" })).toBe("refused");
+    for (const [status, payload] of [[401, { message: "SYN" }], [403, { code: "owner_private_requires_owner" }],
+      [409, { code: "expense_request_conflict" }], [400, { message: "SYN" }], [500, null], [502, { requestKeyState: "unused" }]] as const) {
+      expect(classifyExpenseAnswer(status, false, payload), `${status}`).toBe("unknown");
+    }
+  });
+});
+
+// Review #483 6883224187: "the key holds nothing" is true only at the moment the server checked it. If an
+// earlier send of the same key is still in flight, it can create the voucher afterwards. So a refusal
+// settles an attempt only when this answer belongs to the attempt's only send.
+describe("a refusal after an earlier unproven send", () => {
+  const refusal = () => new Response(JSON.stringify({ code: "exceeds_drawer_cash", requestKeyState: "unused", message: "يتجاوز النقد" }), { status: 409 });
+  it("keeps the attempt pending and unresolved when the key was sent before", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    // First send: held before reaching the server (never answers in this page).
+    const held = sendExpenseAttempt(store, attempt, () => new Promise<Response>(() => {}));
+    void held;
+    const retry = await sendExpenseAttempt(store, pendingExpenseAttempts(store, "syn-cashier")[0], async () => refusal());
+    expect(retry.answer).toBe("unknown");
+    expect(retry.payload?.message).toBe("يتجاوز النقد");
+    expect(pendingExpenseAttempts(store, "syn-cashier").map(row => row.key)).toEqual([attempt.key]);
+    // Re-entering the same form still reuses the same key: no second voucher can come from a new key.
+    expect(start(store).attempt.key).toBe(attempt.key);
+  });
+  it("counts sends across a reload", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    await sendExpenseAttempt(store, attempt, async () => { throw new TypeError("network"); });
+    resetExpenseAttemptMemoryForTesting();
+    const after = await sendExpenseAttempt(store, pendingExpenseAttempts(store, "syn-cashier")[0], async () => refusal());
+    expect(after.answer).toBe("unknown");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toHaveLength(1);
+  });
+  it("still settles a refusal of the attempt's only send (a correctable error)", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    expect((await sendExpenseAttempt(store, attempt, async () => refusal())).answer).toBe("refused");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+  });
+  it("treats a stored attempt without a send count as already sent", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    const legacy = { ...attempt } as Record<string, unknown>; delete legacy.sends;
+    store.setItem(EXPENSE_ATTEMPT_STORAGE_KEY, JSON.stringify([legacy]));
+    resetExpenseAttemptMemoryForTesting();
+    const row = pendingExpenseAttempts(store, "syn-cashier")[0];
+    expect((await sendExpenseAttempt(store, row, async () => refusal())).answer).toBe("unknown");
+  });
+});
+
+// 0133: the server's committed retirement is final whatever the send count; the explicit retirement settles
+// only on "retired" or on the saved voucher, and always sends the exact stored body and key.
+describe("retired requests (0133)", () => {
+  it("settles a refusal the server retired even after earlier sends", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    await sendExpenseAttempt(store, attempt, async () => { throw new TypeError("network"); });
+    const retired = new Response(JSON.stringify({ code: "exceeds_drawer_cash", requestKeyState: "retired", message: "يتجاوز" }), { status: 409 });
+    expect((await sendExpenseAttempt(store, pendingExpenseAttempts(store, "syn-cashier")[0], async () => retired)).answer).toBe("refused");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+  });
+  it("retires with the exact body and key and settles only on a proven answer", async () => {
+    resetExpenseAttemptMemoryForTesting();
+    const store = storage();
+    const { attempt } = start(store);
+    const sent: Array<{ url: string; body: unknown }> = [];
+    const answerWith = (status: number, payload: unknown) => async (url: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response(JSON.stringify(payload), { status });
+    };
+    expect((await retireExpenseAttempt(store, attempt, answerWith(409, { code: "expense_retirement_unproven" }))).answer).toBe("unknown");
+    expect((await retireExpenseAttempt(store, attempt, answerWith(500, {}))).answer).toBe("unknown");
+    expect((await retireExpenseAttempt(store, attempt, async () => { throw new TypeError("network"); })).answer).toBe("unknown");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toHaveLength(1);
+    expect(sent.every(s => s.url === "/api/expenses/attempts/retire")).toBe(true);
+    expect(sent[0].body).toEqual({ key: attempt.key, body: attempt.body });
+    expect((await retireExpenseAttempt(store, attempt, answerWith(200, { requestKeyState: "retired" }))).answer).toBe("retired");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+    const again = start(store).attempt;
+    expect((await retireExpenseAttempt(store, again, answerWith(200, { id: 7, voucherNumber: "SYN-7", existing: true }))).answer).toBe("saved");
+    expect(pendingExpenseAttempts(store, "syn-cashier")).toEqual([]);
+  });
+});

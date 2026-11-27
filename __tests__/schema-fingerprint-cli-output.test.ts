@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+import type { FingerprintBucketSelection } from "../lib/schema-fingerprint";
 
 const state = vi.hoisted(() => ({ end: vi.fn(), entries: 1 }));
 vi.mock("pg", async () => {
@@ -11,19 +12,21 @@ vi.mock("pg", async () => {
 });
 vi.mock("../lib/schema-preflight", async (original) => {
   const actual = await original<typeof import("../lib/schema-preflight")>();
-  return { ...actual, inspectSchemaReadOnly: vi.fn(async () => ({
+  const { fingerprintBucketResponse } = await import("../lib/schema-fingerprint");
+  return { ...actual, inspectSchemaReadOnly: vi.fn(async (_client: unknown, _files: unknown, options: { fingerprintBuckets?: FingerprintBucketSelection | null }) => ({
     format: "aqlan-read-only-schema-preflight", formatVersion: 1, postgresMajor: 18,
     catalog: {}, adoptionAssessment: "NOT_PERFORMED", schemaEquivalence: "NOT_ASSESSED",
-    fingerprintDrilldown: {
+    fingerprintBuckets: fingerprintBucketResponse({
       formatVersion: 1, postgresVersionNum: 180004, disclosurePolicySha256: "a".repeat(64),
-      sections: Object.fromEntries(["columns", "constraints", "internalTriggers"].map((section) => [section, {
-        count: section === "columns" ? state.entries : 0, withheldIdentityCount: 0,
-        entries: section !== "columns" ? [] : Array.from({ length: state.entries }, () => ({
+      sections: {
+        columns: { count: state.entries, withheldIdentityCount: 0, entries: Array.from({ length: state.entries }, () => ({
           identitySha256: "0".repeat(64), entrySha256: "1".repeat(64),
           properties: { ordinal: "2".repeat(64) }, withheldPropertyCount: 0,
-        })),
-      }])),
-    },
+        })) },
+        constraints: { count: 0, withheldIdentityCount: 0, entries: [] },
+        internalTriggers: { count: 0, withheldIdentityCount: 0, entries: [] },
+      },
+    }, options.fingerprintBuckets ?? undefined),
   })) };
 });
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); state.entries = 1; });

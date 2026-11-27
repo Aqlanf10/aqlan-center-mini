@@ -1,6 +1,7 @@
 import { MAX_CLINIC_CHAIRS } from "./clinic-chair-range";
 import { CLINIC_ZONE_FALLBACK } from "./clinicZone";
 import { documentPrefixProblem } from "./document-numbers";
+import { ownerFundingAccountProblem } from "./expense-payment-split";
 /**
  * إعدادات المركز — مصدر واحد لكل قيمة قابلة للتغيير.
  *
@@ -30,6 +31,7 @@ export type SettingKey =
   | "finance.rate.USD"
   | "finance.rate_max_age_days"
   | "finance.locked_before"
+  | "finance.owner_private_funding_account"
   | "finance.commission_material_rate"
   | "billing.max_discount_percent"
   | "documents.invoice_prefix"
@@ -121,6 +123,10 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "finance.rate_max_age_days": "7",
   // فارغ = لا قفل. يُملأ بتاريخ فيصير كل ما قبله مقفلًا لا يُعدَّل.
   "finance.locked_before": "",
+  /* 0128 (#483 6831365228): the account credited when the owner pays part of an expense from a private
+     source. Empty = not decided: no private part is accepted until the owner chooses (asked on #483). */
+  // Owner decision #483 6888146935: owed to the owner by the clinic, to be repaid later (liability 2108).
+  "finance.owner_private_funding_account": "2108",
   /* خصم إهلاك المواد المقدَّر (نسب التخصصات) من العمولة — قرار المالك،
      والافتراض مغلق فلا يتغيّر رقمٌ قائم. "on" يفعّله بعد تحديد النسب. */
   "finance.commission_material_rate": "off",
@@ -352,6 +358,10 @@ export function validateSetting(key: SettingKey, value: string): string | null {
     if (!Number.isFinite(rate) || rate <= 0) return "سعر الصرف رقم أكبر من صفر.";
     if (rate > 1_000_000) return "سعر الصرف غير منطقي.";
   }
+  if (key === "finance.owner_private_funding_account" && trimmed) {
+    const problem = ownerFundingAccountProblem(trimmed);
+    if (problem) return problem;
+  }
   if (key === "finance.locked_before") {
     // الفراغ مقبول: هو حالة «لا قفل». وتاريخ بصيغة أخرى يُقفل الدفاتر كلها أو لا
     // يُقفل شيئًا، وكلاهما خطأ صامت.
@@ -494,6 +504,7 @@ export const SETTING_FIELDS: SettingField[] = [
   { key: "finance.rate.SAR", label: "سعر الريال السعودي", hint: "كم ريالًا يمنيًا يساوي ريالًا سعوديًا اليوم", kind: "number", group: "finance" },
   { key: "finance.rate.USD", label: "سعر الدولار", hint: "كم ريالًا يمنيًا يساوي دولارًا اليوم", kind: "number", group: "finance" },
   { key: "finance.locked_before", label: "قفل الدفاتر قبل تاريخ", hint: "لا يُقبل قيد أو تعديل قبل هذا التاريخ. اتركه فارغًا لإلغاء القفل.", kind: "date", group: "finance" },
+  { key: "finance.owner_private_funding_account", label: "حساب ما يدفعه المالك من مصدره الخاص", hint: "الافتراضي 2108: مستحق للمالك على العيادة يُعاد إليه لاحقًا (قرار المالك). يقبل حساب حقوق ملكية أو التزامات من الدليل؛ يغيّره المالك وحده بسبب مكتوب، ولا يغيّر السندات السابقة. فارغ = الافتراضي 2108.", kind: "text", group: "finance" },
   { key: "finance.commission_material_rate", label: "خصم إهلاك المواد من العمولة", hint: "on = خصم نسب التخصصات المحدَّدة في «نسب إهلاك المواد»؛ off = إبقاء الأرقام كما كانت.", kind: "text", group: "finance" },
 
   { key: "clinic.chairs", label: "عدد الكراسي", hint: "يحكم الحجز والانتظار وشاشة الصالة", kind: "number", group: "operations" },

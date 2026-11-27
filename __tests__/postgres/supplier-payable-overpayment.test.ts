@@ -116,7 +116,7 @@ beforeEach(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
   await q("DELETE FROM parties");
-  await q(`INSERT INTO cashier_shifts (opened_by) VALUES ('p02')`);
+  await q(`INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd) VALUES ('p02', 100000000, 100000000, 100000000)`);
 });
 
 afterAll(async () => {

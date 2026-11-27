@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { validatePostgresTestTarget } from "./_safe-target";
-import { stubPostgresEnv } from "./_setup";
+import { dropPublicSchema, stubPostgresEnv } from "./_setup";
 import { sessionCredentialVersion, sessionPermissionVersion, type SessionPayload } from "../../lib/auth";
 validatePostgresTestTarget(process.env); stubPostgresEnv();
 const db = await import("../../lib/db");
@@ -13,7 +13,9 @@ async function actor(role: "admin" | "reception" | "doctor" | "cashier"): Promis
   return { userId: user.id, username, role, expiresAt: Date.now() + 3600000, credentialVersion: sessionCredentialVersion("synthetic-lab-status-hash"),
     ...(role === "cashier" ? { permissionVersion: sessionPermissionVersion(role, undefined) } : {}) };
 }
-beforeAll(async () => { await db.ensureSchema(); admin = await actor("admin"); reception = await actor("reception"); doctor = await actor("doctor"); }, 180000);
+// Start from an empty schema: an earlier file in the same run may leave a partial one behind
+// (seen locally: a stub `users(id)` table made ensureSchema fail here before any test ran).
+beforeAll(async () => { await db.resetPoolForTesting(); await dropPublicSchema(process.env.DATABASE_URL!); await db.ensureSchema(); admin = await actor("admin"); reception = await actor("reception"); doctor = await actor("doctor"); }, 180000);
 afterAll(async () => { await db.resetPoolForTesting(); });
 async function fixture(status = "sent", money = true) {
   const [patient] = await q("INSERT INTO patients(patient_number,full_name) VALUES($1,'Synthetic lab status patient') RETURNING id", [`LST-${randomUUID()}`]);

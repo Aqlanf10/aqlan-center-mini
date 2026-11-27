@@ -111,6 +111,55 @@ describe("plan items", () => {
     expect(await itemsOf(outside)).toEqual([]);
   });
 
+  it("does not reveal an external item's financial lineage by its identifier", async () => {
+    // All patients, accounts, identifiers and invoices in this fixture are synthetic.
+    const minePatient = await patient(fx.parties.doctor!), foreignPatient = await patient();
+    const mine = await plan(minePatient), foreign = await plan(foreignPatient);
+    const owner = await fx.session("owner"), doctor = await fx.session("doctor");
+    await items.commandCanonicalPlanItemAdd(owner, foreign, item());
+    await items.commandCanonicalPlanItemAdd(owner, foreign, item());
+    await items.commandCanonicalPlanItemAdd(doctor, mine, item());
+    await items.commandCanonicalPlanItemAdd(doctor, mine, item());
+    const [foreignBilled, foreignOpen] = await itemsOf(foreign);
+    const [mineBilled, mineOpen] = await itemsOf(mine);
+
+    // Create a saved financial lineage without payments or any external service connection.
+    async function addSyntheticInvoiceLine(patientId: number, itemId: number) {
+      const [invoice] = await q(
+        "INSERT INTO invoices(invoice_number,patient_id,created_by) VALUES ($1,$2,$3) RETURNING id",
+        ["SYN-PI-SCOPE-" + (++serial), patientId, "SYN-PI-OWNER"],
+      );
+      await q(
+        "INSERT INTO invoice_items(invoice_id,service_id,description,quantity,unit_price_minor,total_minor,plan_item_id) " +
+        "SELECT $1,i.service_id,i.service_name,i.quantity,i.unit_price_minor,i.quantity*i.unit_price_minor,i.id FROM plan_items i WHERE i.id=$2",
+        [invoice.id, itemId],
+      );
+    }
+    await addSyntheticInvoiceLine(foreignPatient, foreignBilled.id);
+    await addSyntheticInvoiceLine(minePatient, mineBilled.id);
+
+    const missing = await refusal(items.commandCanonicalPlanItemRemove(doctor, mine, 2_000_000_000));
+    const foreignFinancial = await refusal(items.commandCanonicalPlanItemRemove(doctor, mine, foreignBilled.id));
+    const foreignUnbilled = await refusal(items.commandCanonicalPlanItemRemove(doctor, mine, foreignOpen.id));
+    expect(missing).toMatchObject({ code: "plan_refused", status: 409 });
+    for (const response of [foreignFinancial, foreignUnbilled]) {
+      expect({ code: response?.code, status: response?.status, message: response?.message })
+        .toEqual({ code: missing?.code, status: missing?.status, message: missing?.message });
+    }
+
+    // Preserves the financial guard inside the permitted plan; normal deletion still works.
+    expect(await refusal(items.commandCanonicalPlanItemRemove(doctor, mine, mineBilled.id)))
+      .toMatchObject({ code: "plan_refused", status: 409, message: expect.stringContaining("سجل مالي") });
+    expect(await items.commandCanonicalPlanItemRemove(doctor, mine, mineOpen.id)).toEqual({ ok: true });
+    expect(await refusal(items.commandCanonicalPlanItemRemove(doctor, foreign, foreignOpen.id)))
+      .toMatchObject({ code: "plan_not_found", status: 404 });
+    expect(await refusal(items.commandCanonicalPlanItemRemove(await fx.session("viewer"), mine, mineBilled.id)))
+      .toMatchObject(denied);
+    expect(await itemsOf(foreign)).toEqual([foreignBilled, foreignOpen]);
+    expect(await itemsOf(mine)).toEqual([mineBilled]);
+    expect(await audits("plan.item_remove", foreign)).toEqual([]);
+  });
+
   it("refuses a patient that leaves the clinician's scope while the writer waits for the patient row", async () => {
     const pid = await patient(fx.parties.doctor!), p = await plan(pid), session = await fx.session("doctor");
     const blocker: PoolClient = await blockers.connect();

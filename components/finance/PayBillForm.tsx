@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { CLINIC_BASE_CURRENCY, CURRENCIES, CURRENCY_LABEL, formatMoney, type Currency } from "@/lib/money";
 import type { SettlementQuote } from "@/lib/supplier-payments";
+import { EXPENSE_NOT_PERSISTED, EXPENSE_UNCERTAIN, beginExpenseAttempt, sendExpenseAttempt, sessionStorageOrNull } from "@/lib/expense-attempt";
+import { useSession } from "@/components/SessionProvider";
 
 /**
  * (P0-2) سداد فاتورة مورد/مختبر بعينها — مع معاينةٍ قبل التأكيد.
@@ -28,6 +30,7 @@ export default function PayBillForm({
   partyId: number; payable: PayableRow; isAdmin: boolean;
   onPaid: () => Promise<void> | void; onCancel: () => void;
 }) {
+  const actor = useSession()?.username;
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState<Currency>(payable.currency);
   const [override, setOverride] = useState(false);
@@ -75,22 +78,31 @@ export default function PayBillForm({
       /* التأكيد يحمل ما رآه المستخدم: إن تغيّر السعر أو المتبقي منذ المعاينة يرفض
          الخادم (stale_quote) فتُعاد المعاينة — لا يُحفظ غير ما أُكِّد. */
       const quoted = preview.quote;
-      const response = await fetch("/api/expenses", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...body,
-          expected: {
-            paymentExchangeRate: quoted.paymentExchangeRate,
-            payableExchangeRate: quoted.payable?.exchangeRate ?? null,
-            payableSettledMinor: quoted.payable?.settledMinor ?? null,
-            payableRemainingBeforeMinor: quoted.payable?.remainingBeforeMinor ?? null,
-          },
-        }),
+      // 0128 + review #483 6882465665: the key follows the payment itself (not the preview values), owned by
+      // this user and kept until an answer proves the outcome, so a retry after a lost or unreadable response
+      // replays the first voucher even if the preview was refreshed in between.
+      if (!actor) { setError("انتهت الجلسة. سجّل الدخول من جديد."); return; }
+      const storage = sessionStorageOrNull();
+      const sent = JSON.stringify({
+        ...body,
+        expected: {
+          paymentExchangeRate: quoted.paymentExchangeRate,
+          payableExchangeRate: quoted.payable?.exchangeRate ?? null,
+          payableSettledMinor: quoted.payable?.settledMinor ?? null,
+          payableRemainingBeforeMinor: quoted.payable?.remainingBeforeMinor ?? null,
+        },
       });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) {
-        if (payload?.code === "stale_quote") { setPreview(null); setPreviewKey(null); }
-        setError(payload?.message ?? "تعذّر تسجيل الصرف.");
+      const { attempt, persisted } = beginExpenseAttempt(storage, { actor, surface: "bill", match: key, body: sent,
+        label: `سداد ${amount} ${currency} — ${payable.description || `الالتزام #${payable.id}`}` });
+      const result = await sendExpenseAttempt(storage, attempt);
+      const message = typeof result.payload?.message === "string" ? result.payload.message : null;
+      if (result.answer === "unknown") {
+        setError([message, EXPENSE_UNCERTAIN, persisted ? null : EXPENSE_NOT_PERSISTED].filter(Boolean).join("\n"));
+        return;
+      }
+      if (result.answer === "refused") {
+        if (result.payload?.code === "stale_quote") { setPreview(null); setPreviewKey(null); }
+        setError(message ?? "تعذّر تسجيل الصرف.");
         return;
       }
       await onPaid();

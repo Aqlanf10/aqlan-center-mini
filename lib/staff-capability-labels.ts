@@ -56,6 +56,7 @@ export const STAFF_CAPABILITY_LABELS: Readonly<Record<StaffCapability, string>> 
  "finance.expenses.void": "إبطال مصروف",
  "finance.shifts.view": "عرض ورديات الصندوق",
  "finance.shifts.operate": "فتح وإغلاق وردية الصندوق",
+ "finance.shifts.review-opening": "مراجعة فرق افتتاح الوردية مع الإقفال السابق (سبب وتسوية، بلا حركة نقدية)",
  "finance.patient-ledger.view": "عرض كشف حساب المريض",
  "finance.service-prices.view": "عرض أسعار الخدمات",
  "finance.service-prices.edit": "تعديل أسعار الخدمات",

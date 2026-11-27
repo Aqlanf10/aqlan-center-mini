@@ -75,7 +75,21 @@ export interface LabOrderTrackingEvent {
 /**
  * البيانات السريرية لأمر المختبر (يتاح للأطباء والتمريض وموظفي الاستقبال) — بلا أي ذكر للتكلفة المالية.
  */
+export interface LabOrderMember {
+  memberId: string;
+  toothCode: number;
+  serviceName: string;
+  labServiceName: string | null;
+}
+export interface LabOrderMemberPrice {
+  memberId: string;
+  unitCostMinor: number | null;
+  currency: Currency | null;
+  state: string;
+}
+
 export interface LabOrderClinicalDTO {
+  members?: LabOrderMember[];
   id: number;
   patientId: number;
   patientName: string;
@@ -141,6 +155,7 @@ export interface LabOrderFinancialDTO extends LabOrderClinicalDTO {
 }
 
 export interface LabOrder extends LabOrderClinicalDTO {
+  memberPrices?: LabOrderMemberPrice[];
   costMinor?: number | null;
   costCurrency?: Currency | null;
   baseAmountMinor?: number | null;

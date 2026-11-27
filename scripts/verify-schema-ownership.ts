@@ -95,10 +95,15 @@ export async function withGeneratedDatabasePair<T>(
   names: { migrations: string; runtime: string },
   verifyServer: (client: GeneratedDatabaseLifecycleClient) => Promise<{ major: number; version: string }>,
   operation: (server: { major: number; version: string }) => Promise<T>,
-  options: { template0?: boolean } = {},
+  options: { template0?: boolean; additional?: readonly string[] } = {},
 ): Promise<T> {
   validateGeneratedDatabaseName(names.migrations);
   validateGeneratedDatabaseName(names.runtime);
+  const additional = [...(options.additional ?? [])];
+  if (additional.length > 1) throw new Error("SCHEMA_OWNERSHIP_ADDITIONAL_LIMIT");
+  for (const name of additional) validateGeneratedDatabaseName(name);
+  if (new Set([names.migrations, names.runtime, ...additional]).size !== 2 + additional.length) throw new Error("SCHEMA_OWNERSHIP_DUPLICATE_DATABASE_NAME");
+  const createdAdditional: string[] = [];
   let primaryFailure: unknown;
   let result: T | undefined;
   const cleanupFailures: unknown[] = [];
@@ -110,12 +115,16 @@ export async function withGeneratedDatabasePair<T>(
     const template = options.template0 ? " TEMPLATE template0" : "";
     await maintenance.query(`CREATE DATABASE ${quoteGeneratedDatabase(names.migrations)}${template}`);
     await maintenance.query(`CREATE DATABASE ${quoteGeneratedDatabase(names.runtime)}${template}`);
+    for (const name of additional) {
+      await maintenance.query(`CREATE DATABASE ${quoteGeneratedDatabase(name)}${template}`);
+      createdAdditional.push(name);
+    }
     result = await operation(server);
   } catch (error) {
     primaryFailure = error;
   } finally {
     if (connected) {
-      for (const name of [names.migrations, names.runtime]) {
+      for (const name of [names.migrations, names.runtime, ...createdAdditional]) {
         try {
           await maintenance.query(`DROP DATABASE IF EXISTS ${quoteGeneratedDatabase(name)} WITH (FORCE)`);
         } catch (error) {
@@ -203,14 +212,14 @@ export function migrationProvenance(files: Awaited<ReturnType<typeof loadMigrati
 
 function assertExpectedMigrationChain(files: Awaited<ReturnType<typeof loadMigrationFiles>>): void {
   const expected = [...Array.from({ length: 43 }, (_, index) => String(index + 1).padStart(4, "0")),
-    '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082', '0087', '0089'];
+    '0045', '0046', '0048', '0049', '0050', '0051', '0052', '0056', '0057', '0058', '0059', '0060', '0061', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0079', '0080', '0081', '0082', '0087', '0089', '0126', '0128', '0129', '0133', '0136'];
   const actual = files.map((file) => file.version);
   const reviewedSuffixes = ["0041_invoice_clinical_linkage.sql", "0042_legacy_treatment_agreements.sql", "0043_legacy_treatment_coverage.sql",
     '0045_hr_staff.sql', '0046_hr_tasks.sql', '0048_hr_contracts_attendance_leaves.sql',
     '0049_hr_payroll_disbursements.sql', '0050_hr_payroll_integrity.sql',
     '0051_ortho_treatment_strategy.sql', '0052_ortho_assessment.sql', '0056_hr_employment_history.sql',
     '0057_hr_schedule_policy_versions.sql', '0058_hr_temporal_write_receipts.sql',
-    '0059_invoice_debt_installments.sql', '0060_historical_treatment_documents.sql', '0061_invoice_correction_lineage.sql', '0063_invoice_currency_reclassification.sql', '0064_approved_agreement_principal.sql', '0065_inventory_purchase_receipts.sql', '0066_agreement_delta_amendments.sql', '0067_patient_appointment_history_index.sql', '0068_collection_attempt_retirements.sql', '0069_unpaid_currency_transitions.sql', '0074_lab_work_intents.sql', '0078_agreement_reconciliation.sql', '0079_ortho_followup_coverage.sql', '0080_patient_numbering.sql', '0081_invoice_archive.sql', '0082_invoice_service_additions.sql', '0087_agreement_reminder_metadata.sql', '0089_lab_shade_specification.sql'];
+    '0059_invoice_debt_installments.sql', '0060_historical_treatment_documents.sql', '0061_invoice_correction_lineage.sql', '0063_invoice_currency_reclassification.sql', '0064_approved_agreement_principal.sql', '0065_inventory_purchase_receipts.sql', '0066_agreement_delta_amendments.sql', '0067_patient_appointment_history_index.sql', '0068_collection_attempt_retirements.sql', '0069_unpaid_currency_transitions.sql', '0074_lab_work_intents.sql', '0078_agreement_reconciliation.sql', '0079_ortho_followup_coverage.sql', '0080_patient_numbering.sql', '0081_invoice_archive.sql', '0082_invoice_service_additions.sql', '0087_agreement_reminder_metadata.sql', '0089_lab_shade_specification.sql', '0126_commission_case_participations.sql', '0128_expense_commands.sql', '0129_shift_opening_reviews.sql', '0133_expense_request_retirements.sql', '0136_grouped_lab_orders.sql'];
   if (actual.join(",") !== expected.join(",") || files.slice(40).some((file, index) => file.filename !== reviewedSuffixes[index])) {
     throw new Error(`SCHEMA_OWNERSHIP_MIGRATION_CHAIN: expected ${expected.join(",")}; got ${actual.join(",")}.`);
   }
@@ -438,7 +447,7 @@ export async function runSchemaOwnershipCharacterization(
     if (migrationCatalog.registry.rows.length !== activeProvenance.length) {
       throw new Error("SCHEMA_OWNERSHIP_REGISTRY_MISMATCH: unexpected registry row count.");
     }
-    const runtimeExtensions = provenance.filter(item => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0080', '0081', '0082', '0087', '0089'].includes(item.version));
+    const runtimeExtensions = provenance.filter(item => ['0051', '0052', '0056', '0057', '0058', '0063', '0064', '0065', '0066', '0067', '0068', '0069', '0074', '0078', '0080', '0081', '0082', '0087', '0089', '0126', '0128', '0129', '0133', '0136'].includes(item.version));
     if (runtimeCatalog.registry.rows.length !== runtimeExtensions.length || runtimeExtensions.some(item =>
       !runtimeCatalog.registry.rows.some(row => row.version === item.version && row.name === item.name
         && row.checksum === item.checksum && row.adopted === false))) {

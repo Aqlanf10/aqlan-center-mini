@@ -71,7 +71,7 @@ export async function GET(request: Request) {
       withServices ? listLabServices() : Promise.resolve([]),
     ]);
     const orders = hideCosts
-      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null }))
+      ? rawOrders.map((o) => ({ ...o, costMinor: null, costCurrency: null, memberPrices: undefined }))
       : rawOrders;
     return NextResponse.json({ orders, labs, ...(withServices ? { labServices } : {}) });
   } catch {

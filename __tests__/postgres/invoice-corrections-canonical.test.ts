@@ -43,11 +43,11 @@ async function invoice(paid = 10000, primaryDoctor: number | null = null) {
 }
 const archiveCommand = (action: "archive" | "restore" = "archive", expectedVersion = 0) =>
   ({ action, expectedVersion, reason: "SYN documentary organization", idempotencyKey: `syn-ix-arch-${++serial}` });
-async function correction(key: Key, invoiceId: number, after: number) {
+async function correction(key: Key, invoiceId: number, after: number, quantity = 1) {
   const view = await fixes.readCanonicalInvoiceRevision(await fx.session(key), String(invoiceId)) as { sourceHash: string; settledMinor: number; invoice: { items: { id: number }[] } };
-  const remaining = Math.max(0, after - view.settledMinor);
+  const remaining = Math.max(0, after * quantity - view.settledMinor);
   return { idempotencyKey: `syn-ix-corr-${++serial}`, expectedSourceHash: view.sourceHash, reason: "SYN correct the agreed amount",
-    lines: view.invoice.items.map(item => ({ itemId: item.id, quantity: 1, unitPrice: String(after) })), discount: "0", discountReason: null,
+    lines: view.invoice.items.map(item => ({ itemId: item.id, quantity, unitPrice: String(after) })), discount: "0", discountReason: null,
     repaymentTerms: remaining > 0 ? { mode: "installments", installments: [{ dueDate: "2026-12-14", kind: "installment", amountMinor: remaining }] } : { mode: "full", installments: [] },
     expectedRemainingMinor: remaining };
 }
@@ -83,10 +83,13 @@ describe("archive and restore", () => {
 
 describe("correction", () => {
   it("finance.invoices.correct reads and corrects with its audit, receipts untouched; the key replays", async () => {
-    const o = await invoice(4000), session = await fx.session("corrector"), request = await correction("corrector", o.invoiceId, 14000);
+    // Owner decision 2026-11-11: raising a manual line (no catalogue price) is a price increase and needs
+    // finance.price-increases.apply; this test's correction therefore changes the quantity, which the correction grant owns.
+    const o = await invoice(4000), session = await fx.session("corrector"), request = await correction("corrector", o.invoiceId, 10000, 2);
+    expect(await refusal(fixes.commandCanonicalInvoiceRevision(session, String(o.invoiceId), await correction("corrector", o.invoiceId, 14000)))).toMatchObject({ code: "unauthorized" });
     const receipts = await q("SELECT to_jsonb(p) AS r FROM payments p WHERE patient_id=$1 ORDER BY id", [o.patientId]);
     const result = await fixes.commandCanonicalInvoiceRevision(session, String(o.invoiceId), request);
-    expect(result).toMatchObject({ replayed: false, beforeMinor: 10000, afterMinor: 14000, settledMinor: 4000, remainingMinor: 10000, createdBy: "SYN-IX-CORR" });
+    expect(result).toMatchObject({ replayed: false, beforeMinor: 10000, afterMinor: 20000, settledMinor: 4000, remainingMinor: 16000, createdBy: "SYN-IX-CORR" });
     expect(await q("SELECT actor FROM audit_log WHERE action='invoice.correct' AND entity_id=$1::text", [o.invoiceId])).toEqual([{ actor: "SYN-IX-CORR" }]);
     expect(await q("SELECT to_jsonb(p) AS r FROM payments p WHERE patient_id=$1 ORDER BY id", [o.patientId])).toEqual(receipts);
     expect(await fixes.commandCanonicalInvoiceRevision(session, String(o.invoiceId), request)).toEqual({ ...result, replayed: true });

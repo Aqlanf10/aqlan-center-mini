@@ -665,3 +665,76 @@ Application shade edits commit their audit record in the same transaction and
 use the previously observed specification to reject stale writes. Rollback of
 application code must not delete the new column or migration registry history.
 Exact-head CI and Staging verification remain required before Production rollout.
+
+### 0126_commission_case_participations.sql
+
+Adds one additive, append-only table, `commission_case_participations`, for the
+centre's decision on how doctors share a clinical case (owner decision
+2026-11-11): the participants and their shares in basis points, the status
+(`approved`, `pending`, `void`), the source, the written reason, who decided and
+when. An immutable validation function and a CHECK constraint require an approved
+split to add up to exactly 10,000 with distinct doctors; a pending or void row
+carries no participants. One head per case is enforced by two partial unique
+indexes, and a trigger refuses every UPDATE and DELETE.
+
+No existing table, column or published migration is changed, and nothing is
+backfilled: a case without a decision is paid as before. Numbered and
+checksum-checked runtime SQL use identical bytes. The number was verified free on
+every active branch; numbers 0090–0125 belong to other lines and are not filled
+here. Decisions commit with their audit row in one transaction under the case row
+lock. Rollback of application code must not delete the table or migration
+registry history. Exact-head CI and Staging verification remain required before
+Production rollout.
+
+### 0128_expense_commands.sql
+
+Adds a unique optional request key and its fingerprint to expense vouchers, plus
+an explicit split between drawer cash and an owner-private source. The owner's
+funding account is captured on the voucher so later setting changes do not rewrite
+its accounting history. Existing vouchers retain NULL in the added columns; their
+whole amount remains attributable to the drawer. No historical vouchers are
+backfilled. SQL checks and an append-only guard protect the recorded source and
+request identity. The application serializes drawer outflows and refuses an amount
+exceeding available cash. See `docs/finance/EXPENSE_COMMANDS_0128.md`.
+
+### 0129_shift_opening_reviews.sql
+
+Adds `shift_opening_reviews` and `shift_opening_corrections` to retain and review
+opening-count differences, with constrained and audited correction history. The
+blind opening records the new count before an unauthorized opener can see the
+previous close or difference. The review and correction do not themselves post a
+cash movement or rewrite the prior close. Existing shifts are not backfilled.
+See `docs/finance/SHIFT_OPENING_REVIEWS_0129.md`.
+
+### 0133_expense_request_retirements.sql
+
+Adds the append-only `expense_request_retirements` ledger and a transaction-locked
+request-key fence shared with expense creation. A saved voucher prevents retirement;
+a committed retirement prevents a late send of the same actor and fingerprint
+from creating a voucher. No old expense or request is rewritten, and the ledger is
+preserved through clinic reset. See `docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md`.
+
+The numbered files and their runtime SQL remain checksum-checked; their history and
+existing records must be retained when application code is changed or restored.
+
+### 0136_grouped_lab_orders.sql
+
+Additive support for one lab order covering any number of selected crown or veneer
+teeth, from either jaw, entered once on an invoice (owner #483 6930647956,
+6931868779, 6932010630; contract `docs/review/grouped-lab-order-0136-contract-20261117.md`).
+It widens `lab_work_intents.group_kind` to admit `grouped`, adds optional
+`lab_work_intents.instructions` (grouped only, frozen once the order exists),
+`services.lab_service_id` (the settings mapping from a clinic service to a lab
+service), `lab_orders.pricing_state`, and the append-only table
+`lab_order_member_prices` holding each tooth's lab service, rule, unit price and
+currency. A missing mapping or price, or a foreign or mixed currency, leaves the cost
+pending; nothing is converted or computed as zero.
+
+No row is rewritten and no data is removed. The published 0074 trigger functions are
+not redefined; the price snapshots reuse its append-only guard and are protected by
+the clinic reset like the rest of lab history. Numbered and checksum-checked runtime
+SQL use identical bytes. The number was reserved for this work (6907274207) and
+verified free; the separately allocated financial migrations 0128, 0129 and 0133
+are documented above. Rollback of application code must not delete the columns, the table or migration
+registry history. Exact-head CI and Staging verification remain required before
+Production rollout.

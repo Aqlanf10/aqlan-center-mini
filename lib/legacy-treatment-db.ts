@@ -12,7 +12,7 @@
  */
 import { createHash } from "node:crypto";
 import type { SessionPayload } from "./auth";
-import { assertDebtSession, DebtRepaymentError, debtRequestHash, writeDebtRepaymentInTransaction } from "./debt-installments-db";
+import { assertDebtSession, DebtRepaymentError, debtRequestHash, isCanonicalDebtActor, writeDebtRepaymentInTransaction, type DebtActorSource } from "./debt-installments-db";
 import { lockDebtAccountForSchedule } from "./debt-account-position";
 import { openingBalanceAccess } from "./opening-access";
 import {
@@ -109,13 +109,17 @@ function toView(row: AgreementRow): LegacyAgreementView {
 
 export async function listLegacyTreatments(patientId: number): Promise<LegacyAgreementView[]> {
   await ensureSchema();
-  const { rows } = await getPool().query<AgreementRow>(
+  return listLegacyTreatmentsWith(getPool(), patientId);
+}
+/** The same list on a caller's reader (M2 slice 95a: the canonical read snapshot). */
+export async function listLegacyTreatmentsWith(reader: Pick<DbClient, "query">, patientId: number): Promise<LegacyAgreementView[]> {
+  const { rows } = await reader.query<AgreementRow>(
     `${AGREEMENT_SELECT} WHERE a.patient_id = $1 ORDER BY (a.status = 'live') DESC, a.id DESC`, [patientId]);
   return rows.map(toView);
 }
 
-async function readAgreement(id: number): Promise<LegacyAgreementView> {
-  const { rows: [row] } = await getPool().query<AgreementRow>(`${AGREEMENT_SELECT} WHERE a.id = $1`, [id]);
+async function readAgreement(id: number, reader: Pick<DbClient, "query"> = getPool()): Promise<LegacyAgreementView> {
+  const { rows: [row] } = await reader.query<AgreementRow>(`${AGREEMENT_SELECT} WHERE a.id = $1`, [id]);
   return toView(row);
 }
 
@@ -156,12 +160,23 @@ export async function createLegacyTreatment(input: {
   /** من يملك تعديل الرصيد السابق (المدير): يضيف المتبقي إلى رصيدٍ أنشأته اتفاقاتٌ سابقة. وغيره يُنشئ فقط. */
   canEditOpening: boolean;
   templates: readonly SpecialtyTemplate[];
-  session?: SessionPayload;
+  /** The legacy session, or the slice 91 branded canonical actor (M2 slice 95b). */
+  session?: SessionPayload | DebtActorSource;
 }): Promise<CreateLegacyTreatmentResult> {
   await ensureSchema();
   const written = await writeLegacyTreatment(input);
   if (!written.ok) return written;
   return { ok: true, replayed: written.replayed, caseCreated: written.caseCreated, agreement: await readAgreement(written.id) };
+}
+
+/** The same write on a caller's transaction (M2 slice 95b). `afterLocks` decides the canonical scope
+ * right after the patient row lock, before the replay and every decision. A refusal is returned,
+ * and the caller rolls the whole operation back. */
+export async function createLegacyTreatmentOn(client: DbClient, input: Parameters<typeof createLegacyTreatment>[0],
+  afterLocks: (patientId: number) => Promise<void>): Promise<CreateLegacyTreatmentResult> {
+  const written = await writeLegacyTreatment(input, { client, afterLocks, mapRefusals: true });
+  if (!written.ok) return written;
+  return { ok: true, replayed: written.replayed, caseCreated: written.caseCreated, agreement: await readAgreement(written.id, client) };
 }
 
 /** ما سيفعله الحفظ بالاتفاق — يقرّره الكاتب تحت الأقفال، وتقرأه المعاينة بلا أقفال ولا كتابة، بالقواعد نفسها. */
@@ -347,6 +362,18 @@ export async function previewLegacyTreatment(input: {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    return await previewLegacyTreatmentWith(client, input);
+  } finally {
+    await client.query("ROLLBACK").catch(() => undefined);
+    client.release();
+  }
+}
+
+/** The preview on a caller's read-only snapshot (M2 slice 95b: the canonical read snapshot). */
+export async function previewLegacyTreatmentWith(client: DbClient, input: {
+  patientId: number; request: LegacyTreatmentRequest; canEditOpening: boolean;
+}): Promise<LegacyTreatmentPreviewResult> {
+  try {
     const { rows: [patient] } = await client.query(`SELECT id FROM patients WHERE id = $1`, [input.patientId]);
     if (!patient) throw new Refusal("no_patient");
     let replayed = false;
@@ -375,9 +402,6 @@ export async function previewLegacyTreatment(input: {
   } catch (error) {
     if (error instanceof Refusal) return { ok: false, reason: error.reason as LegacyTreatmentRefusal };
     throw error;
-  } finally {
-    await client.query("ROLLBACK").catch(() => undefined);
-    client.release();
   }
 }
 
@@ -387,7 +411,8 @@ export async function writeLegacyDocumentLine(client: DbClient, input: Parameter
   return writeLegacyTreatment(input, { client, document });
 }
 
-async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatment>[0], composition?: { client: DbClient; document: LegacyDocumentLineContext }):
+type LegacyComposition = { client: DbClient; document?: LegacyDocumentLineContext; afterLocks?: (patientId: number) => Promise<void>; mapRefusals?: boolean };
+async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatment>[0], composition?: LegacyComposition):
   Promise<{ ok: true; id: number; replayed: boolean; caseCreated: boolean } | { ok: false; reason: LegacyTreatmentRefusal }> {
   const { patientId, request } = input;
   const requestHash = request.idempotencyKey ? request.repaymentTerms
@@ -401,12 +426,16 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
     // The opening engine retains its own add-only fence when a new opening is actually inserted.
     const { rows: [patient] } = await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [patientId]);
     if (!patient) throw new Refusal("no_patient");
+    if (composition?.afterLocks) await composition.afterLocks(patientId);
     if(request.repaymentTerms){
       if(!input.session||input.actor!==input.session.username||input.actorRole!==input.session.role)throw new DebtRepaymentError("unauthorized","جلسة الاتفاق غير صالحة.");
       await assertDebtSession(client,input.session);
       await lockDebtAccountForSchedule(client,patientId);
-      const access=openingBalanceAccess(input.session.role,(await getSettingsInTransaction(client))["finance.reception_adds_opening_balance"]==="true");
-      if(!access.add||input.canEditOpening&&!access.edit)throw new DebtRepaymentError("unauthorized","تغيّرت صلاحية تسجيل الرصيد السابق.");
+      // The canonical actor's grants were re-proved by assertDebtSession; labels and the setting count only on legacy.
+      if(!isCanonicalDebtActor(input.session)){
+        const access=openingBalanceAccess(input.session.role,(await getSettingsInTransaction(client))["finance.reception_adds_opening_balance"]==="true");
+        if(!access.add||input.canEditOpening&&!access.edit)throw new DebtRepaymentError("unauthorized","تغيّرت صلاحية تسجيل الرصيد السابق.");
+      }
     }
 
     if (request.idempotencyKey) {
@@ -563,8 +592,8 @@ async function writeLegacyTreatment(input: Parameters<typeof createLegacyTreatme
     if (!composition) await client.query("COMMIT");
     return { ok: true, id: agreement.id, replayed: false, caseCreated };
   } catch (error) {
-    if (composition) throw error;
-    await client.query("ROLLBACK").catch(() => undefined);
+    if (composition && !composition.mapRefusals) throw error;
+    if (!composition) await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof Refusal) return { ok: false, reason: error.reason as LegacyTreatmentRefusal };
     if (error instanceof OpeningBalanceExists) return { ok: false, reason: "opening_edit_forbidden" };
     if (error instanceof OpeningBalanceChanged) return { ok: false, reason: "opening_changed" };
@@ -670,24 +699,37 @@ export async function getLegacyVoidPreview(input: {
   patientId: number; agreementId: number; actor: string; actorRole: string | null; mode?: LegacyVoidMode;
 }): Promise<{ ok: true; preview: LegacyVoidPreview } | { ok: false; reason: LegacyVoidRefusal }> {
   if (!isAdmin(input.actorRole)) return { ok: false, reason: "void_forbidden" };
-  const mode = input.mode ?? "ordinary";
-  if (!isLegacyVoidMode(mode)) return { ok: false, reason: "bad_void_request" };
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+    const result = await getLegacyVoidPreviewWith(client, input);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally { client.release(); }
+}
+
+/** The void preview on a caller's read-only snapshot (M2 slice 95b). Authority is the caller's:
+ * the legacy function checks the label, the canonical read its grant. */
+export async function getLegacyVoidPreviewWith(client: DbClient, input: {
+  patientId: number; agreementId: number; actor: string; actorRole: string | null; mode?: LegacyVoidMode;
+}): Promise<{ ok: true; preview: LegacyVoidPreview } | { ok: false; reason: LegacyVoidRefusal }> {
+  const mode = input.mode ?? "ordinary";
+  if (!isLegacyVoidMode(mode)) return { ok: false, reason: "bad_void_request" };
+  try {
     const { rows: [agreement] } = await client.query<VoidAgreementRow>(
       `SELECT document_id, status, currency, remaining_minor::text, opening_effect, service_name, plan_item_id
          FROM legacy_treatment_agreements WHERE id = $1 AND patient_id = $2`, [input.agreementId, input.patientId]);
     if (!agreement) throw new Refusal("not_found");
     const { preview } = await readLegacyVoidPreviewInTx(client, { ...input, mode }, agreement, false);
-    await client.query("COMMIT");
     return { ok: true, preview };
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof Refusal) return { ok: false, reason: error.reason as LegacyVoidRefusal };
     throw error;
-  } finally { client.release(); }
+  }
 }
 
 export type VoidLegacyTreatmentResult =
@@ -707,13 +749,33 @@ export async function voidLegacyTreatment(input: {
 }): Promise<VoidLegacyTreatmentResult> {
   // Enforce authority in the writer as well as HTTP. No caller-provided boolean can elevate a role.
   if (!isAdmin(input.actorRole)) return { ok: false, reason: "void_forbidden" };
-  const parsed = parseLegacyVoidRequest({ reason: input.reason, mode: input.mode, previewToken: input.previewToken });
-  if (!parsed.ok) return parsed;
-  const { reason, mode, previewToken } = parsed.value;
+  const checked = parseLegacyVoidRequest({ reason: input.reason, mode: input.mode, previewToken: input.previewToken });
+  if (!checked.ok) return checked;
   await ensureSchema();
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
+    const result = await voidLegacyTreatmentOn(client, input);
+    await client.query(result.ok ? "COMMIT" : "ROLLBACK");
+    if (!result.ok) return result;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally { client.release(); }
+  return { ok: true, agreement: await readAgreement(input.agreementId) };
+}
+
+/** The void on a caller's transaction (M2 slice 95b). Authority is the caller's (the legacy
+ * function checks the label; the canonical command its grants). `afterLocks` decides the canonical
+ * scope right after the patient row lock. A refusal is returned and the caller rolls back. */
+export async function voidLegacyTreatmentOn(client: DbClient, input: {
+  patientId: number; agreementId: number; reason: string; actor: string; actorRole: string | null;
+  mode?: LegacyVoidMode; previewToken?: string;
+}, afterLocks?: (patientId: number) => Promise<void>): Promise<VoidLegacyTreatmentResult> {
+  const parsed = parseLegacyVoidRequest({ reason: input.reason, mode: input.mode, previewToken: input.previewToken });
+  if (!parsed.ok) return parsed;
+  const { reason, mode, previewToken } = parsed.value;
+  try {
     const { rows: [found] } = await client.query<{ plan_item_id: number }>(
       `SELECT plan_item_id FROM legacy_treatment_agreements WHERE id = $1 AND patient_id = $2`,
       [input.agreementId, input.patientId]);
@@ -721,6 +783,7 @@ export async function voidLegacyTreatment(input: {
     // Match signatures, invoice creation and plan edits: patient -> plans -> item -> agreement.
     // The completed-session snapshot below is taken only after the patient lock wait has finished.
     await client.query(`SELECT id FROM patients WHERE id = $1 FOR NO KEY UPDATE`, [input.patientId]);
+    if (afterLocks) await afterLocks(input.patientId);
     await client.query(`SELECT id FROM treatment_plans WHERE patient_id = $1 ORDER BY id FOR UPDATE`, [input.patientId]);
     const { rows: [item] } = await client.query<{ id: number; plan_id: number; status: string; service_name: string; done: string }>(
       `SELECT i.id, i.plan_id, i.status, i.service_name,
@@ -800,16 +863,12 @@ export async function voidLegacyTreatment(input: {
       },
       actor: input.actor, actorRole: input.actorRole,
     });
-    await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK").catch(() => undefined);
     if (error instanceof Refusal) return { ok: false, reason: error.reason as LegacyVoidRefusal };
     if (error instanceof OpeningBalanceChanged) return { ok: false, reason: "opening_changed" };
     throw error;
-  } finally {
-    client.release();
   }
-  return { ok: true, agreement: await readAgreement(input.agreementId) };
+  return { ok: true, agreement: await readAgreement(input.agreementId, client) };
 }
 
 export { Refusal as LegacyTreatmentWriteError };

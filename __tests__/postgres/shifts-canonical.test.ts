@@ -34,7 +34,7 @@ const moneySnapshot = async () => (await q(`SELECT
 const counted = (a: CashierShift["expected"]) => ({ YER: toInputAmount(a.YER, "YER"), SAR: toInputAmount(a.SAR, "SAR"), USD: toInputAmount(a.USD, "USD") });
 const open = async (key: Key = "operator", opening = { YER: "1000", SAR: "0", USD: "0" }) =>
   shifts.commandCanonicalShiftOpen(await fx.session(key), { opening, openedBy: "forged-actor" });
-const close = async (shift: CashierShift, key: Key = "operator") =>
+const close = async (shift: Pick<CashierShift, "id" | "expected">, key: Key = "operator") =>
   shifts.commandCanonicalShiftClose(await fx.session(key), { id: shift.id, counted: counted(shift.expected), closedBy: "forged-actor" });
 async function provenanceFixture(number: string) {
   await open();

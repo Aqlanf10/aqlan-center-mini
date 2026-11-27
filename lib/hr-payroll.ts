@@ -247,6 +247,76 @@ async function staffResolution(client: DbClient, row: Row, period: Row, currency
   }
   return resolved;
 }
+/** The start of the commission balance: the same epoch the doctor statement uses. */
+const COMMISSION_BALANCE_EPOCH = "1970-01-01";
+
+/**
+ * Owner decision 2026-11-11 (finance point 2): commission on money collected later belongs to the
+ * payroll month in which it was collected, whatever the invoice's month.
+ *
+ * The run therefore pays the doctor's cumulative commission due at the period end, in the run's
+ * currency: everything earned on collections up to that day, on any invoice, minus every
+ * commission voucher already paid, minus what other payroll runs have already committed and not
+ * paid. A collection that lands after its invoice's month is not due before it is collected, so it
+ * enters the run of the month of collection. Nothing is paid twice: an amount that was paid or
+ * committed elsewhere is subtracted here. A closed or approved run is never rewritten: a refund or
+ * a correction after it lowers the cumulative due and is absorbed by the next run. Recalculating a
+ * draft run, or retrying, derives the same figure from the ledger again.
+ */
+async function commissionDueForPayroll(client: DbClient, period: { start_date: string; end_date: string }, currency: Currency) {
+  const dayOf = (value: unknown) => (value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10));
+  const periodEnd = dayOf((await client.query<{ day: string }>("SELECT $1::date::text AS day", [period.end_date])).rows[0].day);
+  const cumulativeAt = new Map<string, Awaited<ReturnType<typeof commissionReport>>>();
+  const cumulative = async (end: string) => {
+    const cached = cumulativeAt.get(end);
+    if (cached) return cached;
+    const rows = await commissionReport(COMMISSION_BALANCE_EPOCH, end, undefined, client);
+    cumulativeAt.set(end, rows);
+    return rows;
+  };
+  const ofPeriodInvoices = await commissionReport(period.start_date, period.end_date, undefined, client);
+  const pick = (rows: Awaited<ReturnType<typeof commissionReport>>, doctorId: number) => rows.find((c) => c.doctorId === doctorId && c.currency === currency);
+  return {
+    /** Due for one doctor in this run; `exceptItemId` is the run's own item (its commitment is this figure). */
+    async forDoctor(doctorId: number, exceptItemId: number | null, standing: "draft" | "committed" = "draft") {
+      /* Other runs' commission payables for this doctor and currency: only their UNPAID remainder
+         is committed (what they paid is already inside the cumulative paid). The balance is taken
+         at one horizon for all of them: the latest period end among this run and those runs. A
+         later run's commitment rests on earnings up to its own end, so the earnings must be read
+         up to that day too; otherwise paying an earlier month after a later one was approved
+         would be refused, or the later commitment would be subtracted from earnings it never
+         covered. With no later commitment the horizon is this period's end. */
+      const { rows: [other] } = await client.query<{ committed: string; horizon: string | null }>(`SELECT
+          COALESCE(SUM(GREATEST(0, ${payableAmountSql("c")} - ${payableSettledTotalSql("c")})),0)::text AS committed,
+          MAX(p.end_date)::text AS horizon
+        FROM hr_payroll_items i JOIN hr_payroll_runs r ON r.id=i.run_id JOIN hr_payroll_periods p ON p.id=r.period_id
+        JOIN payables c ON c.id=i.commission_payable_id
+        WHERE i.currency=$2 AND (i.pay_terms_snapshot->>'doctorPartyId')::bigint=$1 AND ($3::bigint IS NULL OR i.id<>$3)`,
+        [doctorId, currency, exceptItemId]);
+      const horizon = other.horizon && other.horizon > periodEnd ? other.horizon : periodEnd;
+      const row = pick(await cumulative(horizon), doctorId);
+      const committedElsewhereMinor = Number(other.committed);
+      /* A run that is still a draft comes after every committed run: it may only take what was
+         earned on collections up to ITS OWN period end and is not already paid or committed. A
+         collection of a later month is never pulled back into an earlier draft; when that later
+         month's run is already approved, the collection waits for the next run. A run that is
+         already approved keeps its place: its check is only that the whole ledger still covers it
+         (the single horizon above), so paying an earlier month after a later one stays possible. */
+      const earnedAtHorizon = row?.earnedMinor ?? 0;
+      const earnedAtOwnEnd = horizon === periodEnd ? earnedAtHorizon : pick(await cumulative(periodEnd), doctorId)?.earnedMinor ?? 0;
+      const earnedCapMinor = standing === "draft" ? Math.min(earnedAtOwnEnd, earnedAtHorizon) : earnedAtHorizon;
+      const cumulativeDueMinor = earnedCapMinor - (row?.paidMinor ?? 0);
+      const dueMinor = Math.max(0, cumulativeDueMinor - committedElsewhereMinor);
+      return {
+        dueMinor, committedElsewhereMinor, asOf: horizon, earnedAtOwnEndMinor: earnedAtOwnEnd,
+        cumulativeEarnedMinor: row?.earnedMinor ?? 0, cumulativePaidMinor: row?.paidMinor ?? 0,
+        /** What the period's own invoices contribute; the rest is later collections and adjustments of earlier months. */
+        periodInvoicesDueMinor: Math.max(0, pick(ofPeriodInvoices, doctorId)?.dueMinor ?? 0),
+      };
+    },
+  };
+}
+
 export async function calculatePayrollRun(periodId: number | string, currency: Currency, session: SessionPayload, authorize?: HrPayrollWriteAuthorizer): Promise<HrPayrollRunView> {
   manager(session);
   if (!isAllowedHrCurrency(currency)) fail("invalid_currency", "العملة غير معتمدة.", 400);
@@ -263,7 +333,7 @@ export async function calculatePayrollRun(periodId: number | string, currency: C
     const staff = await client.query(`SELECT s.*, s.hire_date::text, s.end_date::text, s.salary_effective_on::text,
       u.party_id AS user_party_id FROM hr_staff s LEFT JOIN users u ON u.id = s.user_id
       ORDER BY s.id FOR SHARE OF s`);
-    const commissions = await commissionReport(period.start_date, period.end_date, undefined, client);
+    const commissions = await commissionDueForPayroll(client, period, currency);
     let baseTotal = 0, commissionTotal = 0;
     const included: number[] = [], doctors = new Set<number>();
     for (const st of staff.rows) {
@@ -274,10 +344,13 @@ export async function calculatePayrollRun(periodId: number | string, currency: C
       const blockers = [...resolved.blockers];
       const doctorId = resolved.contract?.doctorPartyId ?? st.user_party_id ?? null;
       let commissionMinor = 0;
+      let commissionBasis: Awaited<ReturnType<Awaited<ReturnType<typeof commissionDueForPayroll>>["forDoctor"]>> | null = null;
       if (hasCommission(terms.kind) && doctorId) {
         if (doctors.has(Number(doctorId))) fail("duplicate_doctor", "الطبيب مرتبط بأكثر من ملف موظف في المسير نفسه؛ صحّح الربط أولًا.");
         doctors.add(Number(doctorId));
-        commissionMinor = Math.max(0, commissions.find((c) => c.doctorId === Number(doctorId) && c.currency === currency)?.dueMinor ?? 0);
+        const own = await client.query<{ id: number }>("SELECT id FROM hr_payroll_items WHERE run_id=$1 AND staff_id=$2", [run.id, st.id]);
+        commissionBasis = await commissions.forDoctor(Number(doctorId), own.rows[0]?.id ?? null);
+        commissionMinor = commissionBasis.dueMinor;
       } else if (hasCommission(terms.kind)) blockers.push("no_pay_terms");
       const baseMinor = blockers.length === 0 && hasSalary(terms.kind) && terms.currency === currency ? terms.salaryMinor ?? 0 : 0;
       if (blockers.length) commissionMinor = 0;
@@ -288,7 +361,13 @@ export async function calculatePayrollRun(periodId: number | string, currency: C
         base_salary_minor=$4,commissions_minor=$5,commission_details=$6,net_due_minor=$7,remaining_minor=$7,
         pay_terms_snapshot=$8,blocker_codes=$9,commission_basis_at=NOW(),updated_at=NOW()`,
         [run.id, st.id, currency, baseMinor, commissionMinor,
-          JSON.stringify(commissionMinor ? [{ source: "commissionReport", periodKey: period.period_key, amountMinor: commissionMinor }] : []),
+          JSON.stringify(commissionMinor && commissionBasis ? [{
+            source: "commissionCumulativeDue", periodKey: period.period_key, asOf: commissionBasis.asOf, amountMinor: commissionMinor,
+            cumulativeEarnedMinor: commissionBasis.cumulativeEarnedMinor, cumulativePaidMinor: commissionBasis.cumulativePaidMinor,
+            committedElsewhereMinor: commissionBasis.committedElsewhereMinor,
+            periodInvoicesMinor: Math.min(commissionMinor, commissionBasis.periodInvoicesDueMinor),
+            laterCollectionsAndAdjustmentsMinor: commissionMinor - Math.min(commissionMinor, commissionBasis.periodInvoicesDueMinor),
+          }] : []),
           baseMinor + commissionMinor, JSON.stringify(snapshot), [...new Set(blockers)]]);
       included.push(Number(st.id)); baseTotal += baseMinor; commissionTotal += commissionMinor;
     }
@@ -332,9 +411,8 @@ export async function approvePayrollRun(runId: number | string, session: Session
       // protected by the staff lock held above throughout both reads.
       if (doctorId) assertPayTermsUnblocked((await staffResolution(client, staff, run, item.currency)).blockers);
       if (Number(item.commissions_minor) > 0) {
-        const current = (await commissionReport(run.start_date, run.end_date, undefined, client))
-          .find((c) => c.doctorId === partyId && c.currency === item.currency);
-        if ((current?.dueMinor ?? 0) < Number(item.commissions_minor)) fail("stale_commission", "تغيّر مستحق كشف الطبيب بعد الاحتساب؛ أعد الاحتساب قبل الاعتماد.");
+        const current = await (await commissionDueForPayroll(client, run as { start_date: string; end_date: string }, item.currency as Currency)).forDoctor(partyId, Number(item.id));
+        if (current.dueMinor < Number(item.commissions_minor)) fail("stale_commission", "تغيّر مستحق كشف الطبيب بعد الاحتساب؛ أعد الاحتساب قبل الاعتماد.");
       }
       for (const [category, amount, column] of [["salary", Number(item.base_salary_minor), "payable_id"], ["commission", Number(item.commissions_minor), "commission_payable_id"]] as const) {
         if (amount <= 0) continue;
@@ -431,8 +509,8 @@ async function disburseInTx(client: DbClient, input: ReturnType<typeof normalize
   if (components.commissionMinor > 0) {
     const snapshot = jsonObject(item.pay_terms_snapshot), doctorId = Number(snapshot.doctorPartyId);
     if (!doctorId || !item.commission_payable_id) fail("commission_missing", "التزام العمولة غير مرتبط بمصدره؛ يلزم مراجعة المسير.");
-    const earned = (await commissionReport(run.start_date,run.end_date,undefined,client)).find((c) => c.doctorId===doctorId && c.currency===item.currency);
-    if (components.commissionMinor > Math.max(0,earned?.dueMinor ?? 0)) fail("doctor_already_paid", "صُرفت العمولة من كشف الطبيب أو تغيّر استحقاقها؛ لا تُصرف ثانيةً من المسير.");
+    const earned = await (await commissionDueForPayroll(client, run as { start_date: string; end_date: string }, item.currency as Currency)).forDoctor(doctorId, Number(item.id), "committed");
+    if (components.commissionMinor > earned.dueMinor) fail("doctor_already_paid", "صُرفت العمولة من كشف الطبيب أو تغيّر استحقاقها؛ لا تُصرف ثانيةً من المسير.");
   }
   const rates = ratesFromSettings(await getSettings()), rate = rates[item.currency as Currency] ?? 1;
   const parts: HrPayrollDisbursementView["parts"] = [];

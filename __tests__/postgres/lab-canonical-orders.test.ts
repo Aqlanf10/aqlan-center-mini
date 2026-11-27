@@ -117,14 +117,18 @@ describe("cancel", () => {
     expect([await statusOf(sent), await audits("lab_order.cancel", sent)]).toEqual(["sent", []]);
   });
 
-  it("cancelling received work removes the unpaid payable (exempt) — never a paid one's trace", async () => {
+  it("cancelling received work keeps the laboratory's payable: a debt is not dropped merely because nothing was paid (owner decision 2026-11-11)", async () => {
     const id = await order();
     const manager = await fx.session("manager");
     await lab.commandCanonicalLabStatus(manager, String(id), { status: "received" });
     expect(await payables(id)).toHaveLength(1);
     await lab.commandCanonicalLabStatus(manager, String(id), { status: "cancelled", expectedStatus: "received" });
-    expect(await payables(id)).toEqual([]);
-    expect((await q("SELECT status, payable_id, financial_status FROM lab_orders WHERE id=$1", [id]))[0]).toEqual({ status: "cancelled", payable_id: null, financial_status: "exempt" });
+    // The previous rule deleted the unpaid payable here (exempt). The work was received: the debt stays
+    // until it is settled or waived by a documented financial act.
+    expect(await payables(id)).toHaveLength(1);
+    const [row] = await q("SELECT status, payable_id, financial_status FROM lab_orders WHERE id=$1", [id]);
+    expect(row).toMatchObject({ status: "cancelled", financial_status: "payable_created" });
+    expect(row.payable_id).not.toBeNull();
     expect(await audits("lab_order.cancel", id)).toEqual([{ actor: "SYN-LO-MGR", details: expect.objectContaining({ from: "received", costMinor: 40000 }) }]);
   });
 });

@@ -108,12 +108,17 @@ export const RESET_WIPE_TABLES = [
   "plan_installments",
   // (COMM-DETAIL-1) النسبة الخاصة بالحالة — تُمسح مع حالاتها وخططها (TRUNCATE لا يطلق حارس الصفوف)
   "commission_case_overrides",
+  // (COMM-SHARE) قرارات مشاركة الأطباء في الحالة — تُمسح مع حالاتها (TRUNCATE لا يطلق حارس الإلحاق فقط)
+  "commission_case_participations",
   // (INV-LEGACY) الاتفاقات التاريخية لعلاجٍ بدأ قبل النظام — تُمسح مع بنودها وحالاتها ومرضاها (TRUNCATE لا يطلق حارسها)
   "legacy_treatment_coverage_snapshots",
   "legacy_treatment_agreements",
   "plan_items",
   "clinical_cases",
   "treatment_plans",
+  // (0129) مراجعات فرق افتتاح الوردية — تُمسح مع وردياتها (TRUNCATE لا يطلق حارس الإلحاق فقط)
+  "shift_opening_corrections",
+  "shift_opening_reviews",
   "cashier_shifts",
   "legacy_balance_arrangements",
   "patient_opening_balance_history",
@@ -164,7 +169,7 @@ export class ProtectedOrthoFollowupHistoryError extends Error {
 }
 
 /** Durable lab source identity and terminal outcomes are never erased. */
-export const LAB_HISTORY_TABLES = ["lab_prescription_source_memberships", "lab_work_commands", "lab_work_members", "lab_work_intents"] as const;
+export const LAB_HISTORY_TABLES = ["lab_order_member_prices", "lab_prescription_source_memberships", "lab_work_commands", "lab_work_members", "lab_work_intents"] as const;
 export class ProtectedLabHistoryError extends Error {
   constructor() { super("لا يمكن إعادة الضبط بعد حفظ هويات أعمال المختبر أو نتائج طلباتها. لم يُمسح شيء؛ يجب الاحتفاظ بالمصادر ومفاتيح إعادة المحاولة."); this.name = "ProtectedLabHistoryError"; }
 }
@@ -214,6 +219,9 @@ export const RESET_KEEP_TABLES = [
   "login_limits",
   "staff_login_limits",
   "audit_log",
+  // (0133) Expense request retirements are kept through a reset and never block it: they hold no money and
+  // no patient data, and a kept retirement keeps a delayed send of its exact request from writing afterwards.
+  "expense_request_retirements",
   "schema_migrations",
 ] as const;
 

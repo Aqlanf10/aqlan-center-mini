@@ -57,6 +57,36 @@ export interface SchemaFingerprintDrilldown {
   }>;
 }
 
+type ProjectedEntry = SchemaFingerprintDrilldown["sections"][FingerprintSection]["entries"][number];
+
+function projectFingerprintEntry(section: FingerprintSection, entry: DetailedCatalogEntry,
+  known: Set<string>, allowedText: Map<string, Set<string>>): ProjectedEntry | null {
+  const identitySha256 = fingerprintIdentity(section, entry);
+  if (!known.has(identitySha256)) return null;
+  let values: unknown;
+  try { values = JSON.parse(entry.value); }
+  catch { throw Object.assign(new Error("Invalid fingerprint projection."), { code: "FINGERPRINT_PROJECTION_INVALID" }); }
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
+    throw Object.assign(new Error("Invalid fingerprint projection."), { code: "FINGERPRINT_PROJECTION_INVALID" });
+  }
+  const fields: Record<string, string> = FINGERPRINT_FIELDS[section];
+  const object = values as Record<string, unknown>;
+  let withheldPropertyCount = Object.keys(object).filter(field => !Object.hasOwn(fields, field)).length
+    + Object.keys(entry).filter(field => !["key", "table", "name", "value"].includes(field)).length;
+  const properties: Record<string, string> = {};
+  for (const field of Object.keys(fields).sort()) {
+    if (!Object.hasOwn(object, field)) { properties[field] = "MISSING"; continue; }
+    const value = object[field];
+    const hash = fingerprint("property", section, field, value);
+    const safe = fields[field] === "text" ? allowedText.get(field)?.has(hash)
+      : value === null || (typeof value === fields[field] && (typeof value !== "number" || Number.isFinite(value)));
+    if (safe) properties[field] = hash;
+    else { properties[field] = "WITHHELD"; withheldPropertyCount++; }
+  }
+  return { identitySha256, entrySha256: withheldPropertyCount ? null : fingerprint("entry", section, entry),
+    properties, withheldPropertyCount };
+}
+
 /** Pure projection of the existing snapshot; no SQL or schema normalization. */
 export function fingerprintCatalog(catalog: DetailedSchemaCatalog, postgresVersionNum: number): SchemaFingerprintDrilldown {
   const policy: FingerprintDisclosurePolicy = disclosure as FingerprintDisclosurePolicy;
@@ -68,36 +98,13 @@ export function fingerprintCatalog(catalog: DetailedSchemaCatalog, postgresVersi
   for (const section of FINGERPRINT_SECTIONS) {
     const known = new Set(policy.sections[section].identities);
     const allowedText = new Map(Object.entries(policy.sections[section].textValues).map(([field, values]) => [field, new Set(values)]));
-    const fields: Record<string, string> = FINGERPRINT_FIELDS[section];
     const output: SchemaFingerprintDrilldown["sections"][FingerprintSection] = {
       count: catalog[section].length, withheldIdentityCount: 0, entries: [],
     };
     for (const entry of catalog[section]) {
-      const identitySha256 = fingerprintIdentity(section, entry);
-      if (!known.has(identitySha256)) { output.withheldIdentityCount++; continue; }
-      let values: unknown;
-      try { values = JSON.parse(entry.value); }
-      catch { throw Object.assign(new Error("Invalid fingerprint projection."), { code: "FINGERPRINT_PROJECTION_INVALID" }); }
-      if (!values || typeof values !== "object" || Array.isArray(values)) {
-        throw Object.assign(new Error("Invalid fingerprint projection."), { code: "FINGERPRINT_PROJECTION_INVALID" });
-      }
-      const object = values as Record<string, unknown>;
-      let withheldPropertyCount = Object.keys(object).filter((field) => !Object.hasOwn(fields, field)).length
-        + Object.keys(entry).filter((field) => !["key", "table", "name", "value"].includes(field)).length;
-      const properties: Record<string, string> = {};
-      for (const field of Object.keys(fields).sort()) {
-        if (!Object.hasOwn(object, field)) { properties[field] = "MISSING"; continue; }
-        const value = object[field];
-        const hash = fingerprint("property", section, field, value);
-        const safe = fields[field] === "text"
-          ? allowedText.get(field)?.has(hash)
-          : value === null || (typeof value === fields[field] && (typeof value !== "number" || Number.isFinite(value)));
-        if (safe) properties[field] = hash;
-        else { properties[field] = "WITHHELD"; withheldPropertyCount++; }
-      }
-      output.entries.push({ identitySha256,
-        entrySha256: withheldPropertyCount ? null : fingerprint("entry", section, entry),
-        properties, withheldPropertyCount });
+      const projected = projectFingerprintEntry(section, entry, known, allowedText);
+      if (projected === null) output.withheldIdentityCount++;
+      else output.entries.push(projected);
     }
     // Arrays, never maps: duplicate identities and values keep multiplicity.
     output.entries.sort((a, b) => { const left = JSON.stringify(a); const right = JSON.stringify(b); return left < right ? -1 : left > right ? 1 : 0; });
@@ -145,6 +152,55 @@ export function fingerprintBucketResponse(drilldown: SchemaFingerprintDrilldown,
     disclosurePolicySha256: drilldown.disclosurePolicySha256, bucketCount: FINGERPRINT_BUCKET_COUNT };
   // Details retain global count-only disclosure evidence without repeating the
   // complete bucket inventory. Original catalog/provenance accompanies either.
+  return detail
+    ? { ...metadata, mode: "bucket" as const, sections: Object.fromEntries(Object.entries(sections).map(([name, { buckets: _buckets, ...counts }]) => [name, counts])), detail }
+    : { ...metadata, mode: "buckets" as const, sections };
+}
+
+/** Equivalent bounded bucket projection for the CLI: retain at most one projected
+ * bucket at a time. The input section count limit and per-bucket 4 MiB limit are
+ * independent of the existing 4 MiB whole-drilldown guard, which remains intact. */
+export function fingerprintBucketCatalog(catalog: DetailedSchemaCatalog, postgresVersionNum: number,
+  selection?: FingerprintBucketSelection) {
+  if (selection && (!FINGERPRINT_SECTIONS.includes(selection.section) || !/^[0-3][0-9a-f]$/.test(selection.bucket))) {
+    throw Object.assign(new Error("Invalid fingerprint selection."), { code: "CLI_ARGUMENTS_INVALID" });
+  }
+  if (FINGERPRINT_SECTIONS.some(section => catalog[section].length > 5_000)) {
+    throw Object.assign(new Error("Fingerprint evidence exceeds its bound."), { code: "FINGERPRINT_LIMIT_EXCEEDED" });
+  }
+  const policy = disclosure as FingerprintDisclosurePolicy;
+  const sections = {} as Record<FingerprintSection, { count: number; knownEntryCount: number; withheldIdentityCount: number;
+    withheldPropertyCount: number; buckets: { bucket: string; count: number; sha256: string }[] }>;
+  let detail: { section: FingerprintSection; bucket: string; count: number; sha256: string; entries: ProjectedEntry[] } | undefined;
+  for (const section of FINGERPRINT_SECTIONS) {
+    const known = new Set(policy.sections[section].identities);
+    const allowed = new Map(Object.entries(policy.sections[section].textValues).map(([field, values]) => [field, new Set(values)]));
+    const sourceBuckets = Array.from({ length: FINGERPRINT_BUCKET_COUNT }, () => [] as DetailedCatalogEntry[]);
+    let withheldIdentityCount = 0;
+    for (const entry of catalog[section]) {
+      const id = fingerprintIdentity(section, entry);
+      if (!known.has(id)) { withheldIdentityCount++; continue; }
+      sourceBuckets[Number.parseInt(id.slice(0, 2), 16) % FINGERPRINT_BUCKET_COUNT].push(entry);
+    }
+    let knownEntryCount = 0, withheldPropertyCount = 0;
+    const buckets: { bucket: string; count: number; sha256: string }[] = [];
+    for (let index = 0; index < sourceBuckets.length; index++) {
+      const source = sourceBuckets[index];
+      const values = source.map(entry => projectFingerprintEntry(section, entry, known, allowed)!);
+      values.sort((a, b) => { const left = JSON.stringify(a); const right = JSON.stringify(b); return left < right ? -1 : left > right ? 1 : 0; });
+      if (Buffer.byteLength(JSON.stringify(values), "utf8") > 4 * 1024 * 1024) {
+        throw Object.assign(new Error("Fingerprint evidence exceeds its bound."), { code: "FINGERPRINT_LIMIT_EXCEEDED" });
+      }
+      knownEntryCount += values.length;
+      withheldPropertyCount += values.reduce((sum, entry) => sum + entry.withheldPropertyCount, 0);
+      const bucket = index.toString(16).padStart(2, "0");
+      const metadata = { bucket, count: values.length, sha256: fingerprint("bucket", section, bucket, values) };
+      if (selection?.section === section && selection.bucket === bucket) detail = { section, ...metadata, entries: values };
+      buckets.push(metadata);
+    }
+    sections[section] = { count: catalog[section].length, knownEntryCount, withheldIdentityCount, withheldPropertyCount, buckets };
+  }
+  const metadata = { formatVersion: 1 as const, postgresVersionNum, disclosurePolicySha256: fingerprint("disclosure-policy", policy), bucketCount: FINGERPRINT_BUCKET_COUNT };
   return detail
     ? { ...metadata, mode: "bucket" as const, sections: Object.fromEntries(Object.entries(sections).map(([name, { buckets: _buckets, ...counts }]) => [name, counts])), detail }
     : { ...metadata, mode: "buckets" as const, sections };

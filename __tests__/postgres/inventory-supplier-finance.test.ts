@@ -96,10 +96,18 @@ beforeAll(async () => {
       "INSERT INTO inventory_approval_policies(id,branch_key,version,currency,limit_minor,allow_self_approval,created_by) SELECT $1,'clinic',COALESCE(MAX(version),0)+1,'YER',1000000000,FALSE,$2 FROM inventory_approval_policies WHERE branch_key='clinic'",
       [key(), admin.userId],
     );
-  await db.openShift({
+  // 0128: supplier payments need drawer cash. Files share this database and run one after another; a
+  // shift left open by an earlier file would be reused with whatever cash it holds, so close it at its
+  // expected cash first and open this suite's funded drawer.
+  const leftover = await db.getOpenShift();
+  if (leftover) {
+    expect((await db.closeShift({ id: leftover.id, closedBy: admin.username, counted: leftover.expected,
+      note: "synthetic fixture cleanup", differenceReason: null })).reason).toBeNull();
+  }
+  expect(await db.openShift({
     openedBy: admin.username,
-    opening: { YER: 0, SAR: 0, USD: 0 },
-  });
+    opening: { YER: 100_000_000, SAR: 100_000_000, USD: 100_000_000 },
+  })).not.toBeNull();
 });
 afterAll(async () => {
   vi.unstubAllEnvs();

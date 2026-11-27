@@ -7,6 +7,28 @@ import { validatePostgresTestTarget } from "./_safe-target";
 
 /** Reviewed test-only chain variants. Unknown counts, gaps or production suffixes fail closed. */
 export function periodontalCandidateMigrationVersion(files: readonly { version: string; filename: string }[]): string {
+  // Exact grouped lab order suffix (0136, owner #483 6932010630) directly after case participation.
+  if (files.at(-1)?.version === "0136") {
+    if (!["0126", "0128", "0129", "0133"].includes(files.at(-2)?.version ?? "") || files.at(-1)?.filename !== "0136_grouped_lab_orders.sql") throw new Error("Unreviewed grouped lab order migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  // Exact independently reviewed finance additions; predecessors allow omitted upgrade targets only.
+  const financeSuffixes: Record<string, { filename: string; predecessors: string[] }> = {
+    "0128": { filename: "0128_expense_commands.sql", predecessors: ["0126"] },
+    "0129": { filename: "0129_shift_opening_reviews.sql", predecessors: ["0126", "0128"] },
+    "0133": { filename: "0133_expense_request_retirements.sql", predecessors: ["0128", "0129"] },
+  };
+  const finance = financeSuffixes[files.at(-1)?.version ?? ""];
+  if (finance) {
+    if (files.at(-1)?.version === "0133" && !files.some(file => file.version === "0128" && file.filename === "0128_expense_commands.sql")) throw new Error("0133 requires reviewed 0128.");
+    if (files.at(-1)?.filename !== finance.filename || !finance.predecessors.includes(files.at(-2)?.version ?? "")) throw new Error("Unreviewed finance migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
+  // Exact case-participation suffix (finance, owner decision 2026-11-11) directly after the shade migration.
+  if (files.at(-1)?.version === "0126") {
+    if (files.at(-2)?.version !== "0089" || files.at(-1)?.filename !== "0126_commission_case_participations.sql") throw new Error("Unreviewed case participation migration suffix.");
+    return periodontalCandidateMigrationVersion(files.slice(0, -1));
+  }
   // Exact main reminder/shade suffix, followed by the existing strict WORK chain.
   if (files.at(-1)?.version === "0089") {
     if (files.at(-2)?.version !== "0087" || files.at(-1)?.filename !== "0089_lab_shade_specification.sql") throw new Error("Unreviewed lab shade migration suffix.");

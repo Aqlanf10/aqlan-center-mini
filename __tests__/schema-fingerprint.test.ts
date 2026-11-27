@@ -6,6 +6,7 @@ import {
   FINGERPRINT_BUCKET_COUNT,
   fingerprint,
   fingerprintBucketResponse,
+  fingerprintBucketCatalog,
   fingerprintCatalog,
   fingerprintIdentity,
   type FingerprintSection,
@@ -312,6 +313,32 @@ describe("privacy-preserving schema fingerprint drilldown", () => {
     expect(Buffer.byteLength(JSON.stringify(belowBound), "utf8")).toBeLessThan(4 * 1024 * 1024);
     expect(() => fingerprintCatalog(catalog({ columns: Array(4_000).fill(column) }), 180003))
       .toThrow(expect.objectContaining({ code: "FINGERPRINT_LIMIT_EXCEEDED" }));
+  });
+});
+
+describe("bounded direct bucket projection", () => {
+  it("matches the original summary and every selected bucket, preserving duplicate and withheld evidence", () => {
+    const unknown = { ...column, key: "PRIVATE_BOUND_UNKNOWN", name: "PRIVATE_BOUND_UNKNOWN" };
+    const drift = withProperties(column, { default: "PRIVATE_BOUND_DRIFT" });
+    const input = catalog({ columns: [column, drift, column, unknown], constraints: [constraint, constraint], internalTriggers: [internalTrigger] });
+    const original = fingerprintCatalog(input, 180003);
+    const actual = fingerprintBucketCatalog(input, 180003);
+    expect(actual).toEqual(fingerprintBucketResponse(original));
+    expect(JSON.stringify(actual)).not.toMatch(/PRIVATE_BOUND_/);
+    for (const section of FINGERPRINT_SECTIONS) for (let index = 0; index < 64; index++) {
+      const selection = { section, bucket: index.toString(16).padStart(2, "0") };
+      expect(fingerprintBucketCatalog(input, 180003, selection)).toEqual(fingerprintBucketResponse(original, selection));
+    }
+  });
+  it("keeps both entry and per-bucket serialized size guards without exposing opaque identities", () => {
+    expect(() => fingerprintBucketCatalog(catalog({ columns: Array(5_001).fill(column) }), 180003))
+      .toThrow(expect.objectContaining({ code: "FINGERPRINT_LIMIT_EXCEEDED" }));
+    expect(() => fingerprintBucketCatalog(catalog({ columns: Array(4_000).fill(column) }), 180003))
+      .toThrow(expect.objectContaining({ code: "FINGERPRINT_LIMIT_EXCEEDED" }));
+    const hidden = { ...column, key: "PRIVATE_UNKNOWN_BUCKET" };
+    const result = fingerprintBucketCatalog(catalog({ columns: Array(5_000).fill(hidden) }), 180003);
+    expect(result.sections.columns.withheldIdentityCount).toBe(5_000);
+    expect(JSON.stringify(result)).not.toContain("PRIVATE_UNKNOWN_BUCKET");
   });
 });
 

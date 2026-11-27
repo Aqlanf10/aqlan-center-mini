@@ -15,7 +15,9 @@ beforeAll(async () => {
 afterAll(async () => { await db.resetPoolForTesting(); });
 afterEach(() => vi.restoreAllMocks());
 function request(note: string) {
-  return new Request("http://localhost/api/expenses", { method: "POST", headers: { "content-type": "application/json" },
+  // 0128: every HTTP create carries a request key. The same key is reused after the forced failure:
+  // a rolled-back attempt leaves its key unused, so the retry records the voucher once.
+  return new Request("http://localhost/api/expenses", { method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": `syn-audit-key-${note}` },
     body: JSON.stringify({ category: "other", amount: "100", currency: "YER", payee: "Synthetic recipient", note }) });
 }
 async function failAudit(action: string) {

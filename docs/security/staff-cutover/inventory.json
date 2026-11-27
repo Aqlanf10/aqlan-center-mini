@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "630fb89116b26302a0cb35149145ff86f4d7e28c73f26467cf3338f15b411de9",
+  "sourceDigest": "e17c0a24dab2e06d81d9fa8eb7bdaf5442dd81395a152e8e7dacbf1b96ed099b",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -69,13 +69,19 @@
     "finance.invoices.cancel",
     "finance.invoices.mark-paid",
     "finance.payments.refund",
-    "finance.invoices.correct"
+    "finance.invoices.correct",
+    "finance.legacy.record",
+    "finance.legacy.void",
+    "patients.history.record",
+    "patients.history.correct",
+    "finance.expenses.create",
+    "finance.shifts.review-opening"
   ],
   "summary": {
-    "routeMethods": 418,
+    "routeMethods": 424,
     "routeClassifications": {
       "public-separate-portal": 25,
-      "staff-legacy-held": 384,
+      "staff-legacy-held": 390,
       "canonical-ready": 0,
       "unknown": 9
     },
@@ -86,7 +92,7 @@
       "canonical-ready": 0,
       "unknown": 25
     },
-    "legacyReferenceFiles": 249,
+    "legacyReferenceFiles": 253,
     "canonicalDirectReferences": 0
   },
   "sourceEntries": [
@@ -128,6 +134,7 @@
     "app/api/executive/route.ts",
     "app/api/expense-attachments/[id]/route.ts",
     "app/api/expenses/[id]/attachments/route.ts",
+    "app/api/expenses/attempts/retire/route.ts",
     "app/api/expenses/quote/route.ts",
     "app/api/expenses/route.ts",
     "app/api/export/route.ts",
@@ -137,6 +144,7 @@
     "app/api/families/[id]/route.ts",
     "app/api/families/route.ts",
     "app/api/finance/commission-overrides/route.ts",
+    "app/api/finance/commission-participations/route.ts",
     "app/api/finance/commissions/route.ts",
     "app/api/finance/debts/route.ts",
     "app/api/finance/expense-categories/route.ts",
@@ -330,6 +338,8 @@
     "app/api/settings/readiness/route.ts",
     "app/api/settings/reset/route.ts",
     "app/api/settings/route.ts",
+    "app/api/shifts/opening-corrections/route.ts",
+    "app/api/shifts/opening-reviews/route.ts",
     "app/api/shifts/route.ts",
     "app/api/staff-access/[id]/account/route.ts",
     "app/api/staff-access/[id]/route.ts",
@@ -985,6 +995,19 @@
       ]
     },
     {
+      "file": "app/api/expenses/attempts/retire/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 9
+        },
+        {
+          "symbol": "requireSession",
+          "line": 62
+        }
+      ]
+    },
+    {
       "file": "app/api/expenses/quote/route.ts",
       "evidence": [
         {
@@ -1002,19 +1025,19 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 13
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 27
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 97
         },
         {
           "symbol": "requireSession",
-          "line": 92
+          "line": 156
         },
         {
           "symbol": "findUserByUsername",
@@ -1022,7 +1045,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 26
+          "line": 32
         }
       ]
     },
@@ -1066,6 +1089,23 @@
         {
           "symbol": "requireSession",
           "line": 36
+        }
+      ]
+    },
+    {
+      "file": "app/api/finance/commission-participations/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 20
+        },
+        {
+          "symbol": "requireSession",
+          "line": 34
         }
       ]
     },
@@ -2406,7 +2446,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 24
         }
       ]
     },
@@ -2419,7 +2459,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 24
         }
       ]
     },
@@ -2432,11 +2472,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 24
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 43
         }
       ]
     },
@@ -2475,19 +2515,19 @@
         },
         {
           "symbol": "requireSession",
-          "line": 33
+          "line": 35
         },
         {
           "symbol": "requireSession",
-          "line": 49
+          "line": 134
         },
         {
           "symbol": "requireSession",
-          "line": 68
+          "line": 164
         },
         {
           "symbol": "requireSession",
-          "line": 153
+          "line": 225
         }
       ]
     },
@@ -2500,15 +2540,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 26
         },
         {
           "symbol": "findUserByUsername",
-          "line": 5
+          "line": 8
         },
         {
           "symbol": "findUserByUsername",
-          "line": 31
+          "line": 46
         }
       ]
     },
@@ -2521,11 +2561,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 24
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 70
         }
       ]
     },
@@ -2538,7 +2578,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 43
         }
       ]
     },
@@ -2551,11 +2591,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 28
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 56
+          "line": 83
         }
       ]
     },
@@ -2568,7 +2608,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 13
+          "line": 26
         }
       ]
     },
@@ -3453,7 +3493,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 51
+          "line": 55
         },
         {
           "symbol": "findUserByUsername",
@@ -3757,15 +3797,41 @@
         },
         {
           "symbol": "requireSession",
-          "line": 93
+          "line": 98
         },
         {
           "symbol": "requireSession",
-          "line": 115
+          "line": 120
         },
         {
           "symbol": "requireSession",
-          "line": 202
+          "line": 208
+        }
+      ]
+    },
+    {
+      "file": "app/api/shifts/opening-corrections/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 27
+        }
+      ]
+    },
+    {
+      "file": "app/api/shifts/opening-reviews/route.ts",
+      "evidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 30
         }
       ]
     },
@@ -3774,19 +3840,19 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 9
         },
         {
           "symbol": "requireSession",
-          "line": 65
+          "line": 66
         },
         {
           "symbol": "requireSession",
-          "line": 109
+          "line": 119
         },
         {
           "symbol": "requireSession",
-          "line": 145
+          "line": 157
         },
         {
           "symbol": "findUserByUsername",
@@ -3794,7 +3860,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 70
+          "line": 71
         }
       ]
     },
@@ -4025,15 +4091,15 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 4
+          "line": 5
         },
         {
           "symbol": "requireSession",
-          "line": 67
+          "line": 71
         },
         {
           "symbol": "requireSession",
-          "line": 251
+          "line": 255
         }
       ]
     },
@@ -5713,19 +5779,19 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 13
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 27
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 97
         },
         {
           "symbol": "requireSession",
-          "line": 92
+          "line": 156
         },
         {
           "symbol": "findUserByUsername",
@@ -5733,7 +5799,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 26
+          "line": 32
         }
       ]
     },
@@ -5755,19 +5821,19 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 13
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 27
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 97
         },
         {
           "symbol": "requireSession",
-          "line": 92
+          "line": 156
         },
         {
           "symbol": "findUserByUsername",
@@ -5775,7 +5841,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 26
+          "line": 32
         }
       ]
     },
@@ -5795,19 +5861,19 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 13
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 27
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 97
         },
         {
           "symbol": "requireSession",
-          "line": 92
+          "line": 156
         },
         {
           "symbol": "findUserByUsername",
@@ -5815,7 +5881,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 26
+          "line": 32
         }
       ]
     },
@@ -5873,6 +5939,30 @@
         {
           "symbol": "requireSession",
           "line": 46
+        }
+      ]
+    },
+    {
+      "route": "/api/expenses/attempts/retire",
+      "method": "POST",
+      "file": "app/api/expenses/attempts/retire/route.ts",
+      "httpAccess": [
+        "admin",
+        "reception",
+        "cashier"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "finance-reports",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 9
+        },
+        {
+          "symbol": "requireSession",
+          "line": 62
         }
       ]
     },
@@ -6088,6 +6178,58 @@
         {
           "symbol": "requireSession",
           "line": 36
+        }
+      ]
+    },
+    {
+      "route": "/api/finance/commission-participations",
+      "method": "GET",
+      "file": "app/api/finance/commission-participations/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "finance-reports",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 20
+        },
+        {
+          "symbol": "requireSession",
+          "line": 34
+        }
+      ]
+    },
+    {
+      "route": "/api/finance/commission-participations",
+      "method": "POST",
+      "file": "app/api/finance/commission-participations/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "finance-reports",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 20
+        },
+        {
+          "symbol": "requireSession",
+          "line": 34
         }
       ]
     },
@@ -10511,11 +10653,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 24
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 43
         }
       ]
     },
@@ -10538,11 +10680,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 24
         },
         {
           "symbol": "requireSession",
-          "line": 20
+          "line": 43
         }
       ]
     },
@@ -10564,7 +10706,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 24
         }
       ]
     },
@@ -10587,7 +10729,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 10
+          "line": 24
         }
       ]
     },
@@ -10685,7 +10827,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 13
+          "line": 26
         }
       ]
     },
@@ -10711,19 +10853,19 @@
         },
         {
           "symbol": "requireSession",
-          "line": 33
+          "line": 35
         },
         {
           "symbol": "requireSession",
-          "line": 49
+          "line": 134
         },
         {
           "symbol": "requireSession",
-          "line": 68
+          "line": 164
         },
         {
           "symbol": "requireSession",
-          "line": 153
+          "line": 225
         }
       ]
     },
@@ -10746,19 +10888,19 @@
         },
         {
           "symbol": "requireSession",
-          "line": 33
+          "line": 35
         },
         {
           "symbol": "requireSession",
-          "line": 49
+          "line": 134
         },
         {
           "symbol": "requireSession",
-          "line": 68
+          "line": 164
         },
         {
           "symbol": "requireSession",
-          "line": 153
+          "line": 225
         }
       ]
     },
@@ -10781,19 +10923,19 @@
         },
         {
           "symbol": "requireSession",
-          "line": 33
+          "line": 35
         },
         {
           "symbol": "requireSession",
-          "line": 49
+          "line": 134
         },
         {
           "symbol": "requireSession",
-          "line": 68
+          "line": 164
         },
         {
           "symbol": "requireSession",
-          "line": 153
+          "line": 225
         }
       ]
     },
@@ -10817,15 +10959,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 26
         },
         {
           "symbol": "findUserByUsername",
-          "line": 5
+          "line": 8
         },
         {
           "symbol": "findUserByUsername",
-          "line": 31
+          "line": 46
         }
       ]
     },
@@ -10849,11 +10991,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 28
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 56
+          "line": 83
         }
       ]
     },
@@ -10876,11 +11018,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 28
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 56
+          "line": 83
         }
       ]
     },
@@ -10902,11 +11044,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 24
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 70
         }
       ]
     },
@@ -10928,11 +11070,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 24
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 43
+          "line": 70
         }
       ]
     },
@@ -10955,7 +11097,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 21
+          "line": 43
         }
       ]
     },
@@ -13144,7 +13286,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 51
+          "line": 55
         },
         {
           "symbol": "findUserByUsername",
@@ -13178,7 +13320,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 51
+          "line": 55
         },
         {
           "symbol": "findUserByUsername",
@@ -13276,15 +13418,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 93
+          "line": 98
         },
         {
           "symbol": "requireSession",
-          "line": 115
+          "line": 120
         },
         {
           "symbol": "requireSession",
-          "line": 202
+          "line": 208
         }
       ]
     },
@@ -13308,15 +13450,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 93
+          "line": 98
         },
         {
           "symbol": "requireSession",
-          "line": 115
+          "line": 120
         },
         {
           "symbol": "requireSession",
-          "line": 202
+          "line": 208
         }
       ]
     },
@@ -13340,15 +13482,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 93
+          "line": 98
         },
         {
           "symbol": "requireSession",
-          "line": 115
+          "line": 120
         },
         {
           "symbol": "requireSession",
-          "line": 202
+          "line": 208
         }
       ]
     },
@@ -14231,19 +14373,19 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 9
         },
         {
           "symbol": "requireSession",
-          "line": 65
+          "line": 66
         },
         {
           "symbol": "requireSession",
-          "line": 109
+          "line": 119
         },
         {
           "symbol": "requireSession",
-          "line": 145
+          "line": 157
         },
         {
           "symbol": "findUserByUsername",
@@ -14251,7 +14393,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 70
+          "line": 71
         }
       ]
     },
@@ -14271,19 +14413,19 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 9
         },
         {
           "symbol": "requireSession",
-          "line": 65
+          "line": 66
         },
         {
           "symbol": "requireSession",
-          "line": 109
+          "line": 119
         },
         {
           "symbol": "requireSession",
-          "line": 145
+          "line": 157
         },
         {
           "symbol": "findUserByUsername",
@@ -14291,7 +14433,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 70
+          "line": 71
         }
       ]
     },
@@ -14311,19 +14453,19 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 8
+          "line": 9
         },
         {
           "symbol": "requireSession",
-          "line": 65
+          "line": 66
         },
         {
           "symbol": "requireSession",
-          "line": 109
+          "line": 119
         },
         {
           "symbol": "requireSession",
-          "line": 145
+          "line": 157
         },
         {
           "symbol": "findUserByUsername",
@@ -14331,7 +14473,76 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 70
+          "line": 71
+        }
+      ]
+    },
+    {
+      "route": "/api/shifts/opening-corrections",
+      "method": "POST",
+      "file": "app/api/shifts/opening-corrections/route.ts",
+      "httpAccess": [
+        "admin",
+        "reception"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "finance-reports",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 27
+        }
+      ]
+    },
+    {
+      "route": "/api/shifts/opening-reviews",
+      "method": "GET",
+      "file": "app/api/shifts/opening-reviews/route.ts",
+      "httpAccess": [
+        "admin",
+        "reception",
+        "doctor"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "finance-reports",
+      "boundary": "read-snapshot-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 30
+        }
+      ]
+    },
+    {
+      "route": "/api/shifts/opening-reviews",
+      "method": "POST",
+      "file": "app/api/shifts/opening-reviews/route.ts",
+      "httpAccess": [
+        "admin"
+      ],
+      "classification": "staff-legacy-held",
+      "workflow": "finance-reports",
+      "boundary": "transaction-or-external-effect-boundary-required-if-staff",
+      "reason": "Legacy staff proxy/session; no reviewed canonical route acceptance",
+      "directHelperEvidence": [
+        {
+          "symbol": "requireSession",
+          "line": 5
+        },
+        {
+          "symbol": "requireSession",
+          "line": 30
         }
       ]
     },
@@ -14775,15 +14986,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 4
+          "line": 5
         },
         {
           "symbol": "requireSession",
-          "line": 67
+          "line": 71
         },
         {
           "symbol": "requireSession",
-          "line": 251
+          "line": 255
         }
       ]
     },
@@ -14803,15 +15014,15 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 4
+          "line": 5
         },
         {
           "symbol": "requireSession",
-          "line": 67
+          "line": 71
         },
         {
           "symbol": "requireSession",
-          "line": 251
+          "line": 255
         }
       ]
     },

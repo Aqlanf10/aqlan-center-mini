@@ -484,3 +484,98 @@ A plan outside the scope is treated exactly like a missing one:
 - `own` outside reads like missing for a single plan; in the bulk form only the plans inside the scope are stamped and counted.
 - A race in which the patient leaves the scope while the reminder waits for the plan row.
 - Revocation.
+
+## 15. Slice 95 — historical onboarding and documents (G4-2, G4-6, G4-8)
+
+This section is written before the code. It covers the 13 legacy-only methods of the historical group. (`GET legacy-balance-arrangement` is already canonical, since slice 88.)
+
+| Part | Route | Methods | Legacy |
+|---|---|---|---|
+| 95a | `/api/patients/[id]/legacy` | GET | the patient gate and the money read |
+| 95a | `/api/patients/[id]/legacy-onboarding` | GET | the patient gate; plan sources by the plan-read rule |
+| 95a | `/api/patients/[id]/legacy-treatments` | GET | admin, reception; a doctor with "patient account" on own patients |
+| 95a | `/api/patients/[id]/historical-documents` | GET | the same |
+| 95b | `/api/patients/[id]/legacy-treatments` and `/preview` | POST | admin; reception when the setting allows |
+| 95b | `/api/patients/[id]/legacy-treatments/[agreementId]/void` | GET, POST | admin |
+| 95c | `/api/patients/[id]/historical-documents` and `/preview` | POST | admin, reception |
+| 95c | `/api/patients/[id]/historical-documents/[documentId]/correct` | POST | admin |
+| 95d | `/api/patients/[id]/legacy-balance-arrangement` | POST, PATCH | admin, reception |
+
+### 95a — the reads (G4-2)
+
+One read-only snapshot, inside the patient scope. A patient outside the scope reads exactly like a missing one.
+
+| Field group | Shown with |
+|---|---|
+| Existence and the clinical description: service, teeth and site, treatment dates, doctor, specialty, case and plan links, status, the onboarding steps and their clinical classification | the registered patient-record read |
+| Every amount, rate, balance, paid or remaining figure, discount, agreement term, instalment, repayment schedule, opening principal, account due, source hash and schedule version | `finance.patient-ledger.view` in addition |
+| The identities of new plans, plan items and historical documents in the onboarding reference | `clinical.plans.view` in addition (the legacy plan-read rule) |
+| The action flags (`access.add`, `access.edit`, `access.void`, `correctionAvailable`) | computed from the actor's canonical grants (95b–95d), never from a label or a setting |
+
+- `GET /legacy` is the old system's archive. It is all money (treatments with prices and paid amounts, payments). Without `finance.patient-ledger.view` the canonical read answers the legacy 403 refusal (no projection); with it, the archive as in legacy.
+- No grant other than the ledger view reveals an amount. `finance.legacy.record`, the history grants and collect do not.
+- **The original mixed attachment (G4-2):** none of these reads returns a file. The original attachment is served by the patient document routes, which keep their financial guard; nothing here relaxes it.
+
+### 95b–95d — the writes
+
+The writers are unchanged: keys and request hashes, the patient, debt-account, plan-item and document locks, opening ownership, the unallocated-receipt guard, the period lock, the discount controls and the audits. Each is split into an `…On` form on the admitted operation's transaction. The slice 91 branded actor re-proves the grants below at each point where the writer re-validated its session. The scope is decided right after the patient row lock; `own` takes the ownership witness `FOR SHARE NOWAIT`; outside reads as missing.
+
+| Act | Canonical grant |
+|---|---|
+| Record a pre-system treatment, preview it | `finance.legacy.record` |
+| Void a recorded agreement (read its preview, apply) | `finance.legacy.void` (the catalogue requires `finance.legacy.record`) |
+| Record a historical document, preview it | `patients.history.record` |
+| Correct a historical document | `patients.history.correct` (requires `patients.history.record`) **and** `finance.opening-balances.manage` |
+| Write a legacy balance arrangement | `finance.legacy.record` |
+| **Change an existing opening balance** in any of the acts above (anything beyond adding an opening for a currency that has none) | the act's grant **and** `finance.opening-balances.manage` |
+
+### Policy points the map leaves open (recommended; the owner may change them)
+
+1. **Add versus edit an opening.** Legacy splits opening rights by label: admin adds and edits; reception adds only, when `finance.reception_adds_opening_balance` is on. The canonical path keeps the same split by grant: the record grant adds; editing an existing opening also needs `finance.opening-balances.manage`. This is the map's grant for opening writes.
+2. **The reception setting is not a grant** (as G4-6 decided for `workflow.doctor_financial_view`). On the canonical path `finance.reception_adds_opening_balance` changes nothing; only explicit grants count. The legacy behaviour and the setting stay as they are.
+3. **Correction always rewrites the opening** (`addOnly: false`, a credit allowed). It was administrator-only, so it needs `finance.opening-balances.manage` together with `patients.history.correct`, not the correction grant alone.
+4. **Void lowers an opening** that the agreement owns. The map gives `finance.legacy.void` alone. I keep that: the void only removes what the same agreement added, under the ownership check, and never edits another source's opening.
+
+### Tests required before each part's commit
+
+- **95a:**
+  - the record read without the ledger view shows the clinical description and no amount, at any depth of the payload;
+  - with the ledger view, the legacy body;
+  - `GET /legacy` without the ledger view answers 403;
+  - the onboarding plan sources need `clinical.plans.view`;
+  - `own` outside reads as missing;
+  - revocation.
+- **95b–95d, for each writer:**
+  - the positive write and its audit, and replay;
+  - the grant matrix: the act's grant, the other finance grants, the label, the reception setting on the canonical path;
+  - editing an existing opening refused without `finance.opening-balances.manage` and accepted with it;
+  - `own` outside reads as missing;
+  - a race in which the patient leaves the scope while the writer waits for the patient row;
+  - revocation.
+
+### 95b detail, written before its code: pre-system treatments
+
+- **Record** (`POST /legacy-treatments`): `finance.legacy.record`. The writer receives `canEditOpening = finance.opening-balances.manage`, so an increase of an existing opening is refused without it (`opening_edit_forbidden`), as the legacy reception was. When repayment terms are sent, the writer's label-and-setting check is replaced by the branded actor's re-check of the same grants.
+- **Preview** (`POST /legacy-treatments/preview`): read-only, in one snapshot under the new read `read:legacy.record`, which needs `finance.legacy.record`. The opening effect (none, created, increased) is shown. The current and resulting opening amounts are shown only with `finance.patient-ledger.view`: the record grant does not reveal another person's opening amount.
+- **Void** (`GET` the impact preview under the new read `read:legacy.void`, `POST` apply): `finance.legacy.void` **and** `finance.patient-ledger.view`. The impact preview and the voided agreement show amounts recorded by someone else (principal, collections, remaining), and under G4-1 amounts need the ledger view; the void grant alone does not reveal them. The `manager_authorized` mode is the legacy administrator's exception, which removes principal although collections exist; it needs `finance.opening-balances.manage` as well. These are a fifth and sixth point, extending point 4.
+- Every refusal returns the legacy message and status. The operation then rolls back, so a refused act writes nothing.
+
+### 95c detail, written before its code: historical documents
+
+- **Record and preview** (`POST /historical-documents` and `/preview`): `patients.history.record` **and** `finance.patient-ledger.view`. The request carries the account position it was prepared against (`repaymentSourceHash`, `repaymentVersion`, `repaymentRemainingMinor`), and the preview shows the opening principal, the account due and the source hash. Under G4-1 those figures need the ledger view, and the history grant alone cannot prepare a valid request (point 7).
+  - Adding to an existing opening also needs `finance.opening-balances.manage` (point 1).
+  - Line prices and the discount follow the settled G4-1 price controls by grant (`finance.discounts.apply` with a reason within `billing.max_discount_percent`, `finance.discounts.override` beyond it, `finance.price-increases.apply` above the catalogue), as for invoices since slice 93b. The label is ignored.
+  - The preview runs read-only under the new read `read:history.record`.
+- **Correct** (`POST /[documentId]/correct`): `patients.history.correct`, `finance.opening-balances.manage` and `finance.patient-ledger.view` (point 3; the catalogue requires `patients.history.record` with the correction grant).
+- **`created_role`** (a published column, constrained to `admin` or `reception` and never read back) records the authority class the document was created under. On the canonical path it is `admin` when the actor holds `finance.opening-balances.manage` (it could edit an opening), otherwise `reception` (add only). The label is not stored there (point 8). The audit keeps the actor's username and label as everywhere else.
+- **Writers:** `createHistoricalDocumentOn` and `correctHistoricalDocumentOn` run on the admitted operation's transaction. The scope is decided right after the patient row lock, before the replay. The branded actor re-proves the act's grants at each point where the writer re-validated its session. Refusals keep the legacy codes and messages, and the operation rolls back.
+
+### 95d detail, written before its code: the previous-balance collection arrangement
+
+- **Create** (`POST /legacy-balance-arrangement`) and **cancel** (`PATCH`): `finance.legacy.record` **and** `finance.patient-ledger.view`. The create response carries the arrangement with the opening position it was set against (`startingDueMinor`, progress), and the screen that offers both acts is the ledger read (slice 88), so under G4-1 the amounts need the ledger view. This is a ninth point for the owner, in line with points 5 and 7; the map's grant for the act itself is unchanged.
+- An arrangement never changes an opening balance: it schedules the collection of what is already owed. It therefore does not need `finance.opening-balances.manage` (point 1 does not apply).
+- **Writers:** `createLegacyBalanceArrangementOn` and `cancelLegacyBalanceArrangementOn` run on the admitted operation's transaction. The scope is decided right after the patient row lock; outside reads as missing (`patient_not_found` for create, `not_found` for cancel). Refusals keep the legacy reasons, messages and statuses.
+- **Two gaps of the legacy path are closed on the canonical path only** (the legacy routes are unchanged):
+  - the audit row is written in the same transaction as the arrangement (`insertAuditRow`), where legacy writes it best-effort after the commit;
+  - cancel takes the patient row lock before the update, where legacy updates without a lock.
+- The label decides nothing. Request validation (currency, cadence, instalment amount, first due date not before today, cancel reason) is the legacy validation, unchanged.

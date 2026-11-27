@@ -41,8 +41,11 @@ afterAll(async () => {
   await db?.end();
 });
 
+let requestSerial = 0;
+// 0128: each expense create is a new intended voucher with its own request key.
 const post = (path: string, session: typeof h.sessions.admin, body: unknown) =>
-  authedMutation(path, session, "POST", JSON.stringify(body));
+  authedMutation(path, session, "POST", JSON.stringify(body),
+    path === "/api/expenses" ? { "Idempotency-Key": `syn-supplier-pay-${process.pid}-${++requestSerial}` } : {});
 
 async function lastAudit(action: string) {
   const { rows } = await db.query<{ actor: string; details: Record<string, unknown> }>(

@@ -19,7 +19,9 @@ function fail(code:string,status=409):never{throw new LabWorkIntentError(code,st
 const positive=(n:unknown):n is number=>Number.isSafeInteger(n)&&Number(n)>0;
 export type MaterializedLabWorkReceipt = Omit<LabWorkReceipt,"orderId"> & {orderId:number};
 /** Draft-save memberIds are current active members; materialized receipts identify only touched source members. */
-export interface LabWorkReceipt {intentId:string;orderId:number|null;revision:number;memberIds:string[];}
+/** How a grouped order's cost was obtained (0136). Pending states keep the cost NULL and create no payable. */
+export type LabPricingState="rule"|"missing_rule"|"missing_mapping"|"currency_mismatch"|"mixed_currency"|"manual";
+export interface LabWorkReceipt {intentId:string;orderId:number|null;revision:number;memberIds:string[];pricing?:{state:LabPricingState};}
 export type LabWorkCommandResult = {outcome:"applied";labWork:LabWorkReceipt[]} | {outcome:"rejected";code:string};
 export function assertLabWorkCommandApplied(result:LabWorkCommandResult):asserts result is Extract<LabWorkCommandResult,{outcome:"applied"}>{
   if(result.outcome==="rejected")throw new LabWorkIntentError(result.code,"عملية المختبر مرفوضة نهائيًا؛ استخدم طلبًا جديدًا بعد التصحيح.",409);
@@ -41,7 +43,7 @@ const isCanonicalLabActor = (source: LabActorSource): source is CanonicalLabActo
 export interface LabWorkCommandContext {
   patientId:number;sourceKind:"visit"|"invoice";sourceId:number;session:LabActorSource;requestKey:string;requestHash:string;
 }
-interface IntentRow {id:string;patient_id:number;origin_kind:"visit"|"invoice";origin_visit_id:number|null;origin_invoice_id:number|null;group_kind:"single"|"bridge";revision:number;state:"draft"|"materialized"|"cancelled";prescription:LabPrescriptionInput;initial_order_id:number|null;}
+interface IntentRow {id:string;patient_id:number;origin_kind:"visit"|"invoice";origin_visit_id:number|null;origin_invoice_id:number|null;group_kind:"single"|"bridge"|"grouped";instructions:string|null;revision:number;state:"draft"|"materialized"|"cancelled";prescription:LabPrescriptionInput;initial_order_id:number|null;}
 interface MemberRow {id:string;intent_id:string;patient_id:number;service_id:number;source_category:string;tooth_code:number;quantity:number;plan_item_id:number|null;doctor_id:number|null;created_revision:number;retired_revision:number|null;}
 export type InvoiceLabSourceRow=LabWorkSourceRow&{invoiceItemId:number};
 export type VisitLabSourceRow=LabWorkSourceRow&{procedureId:number};
@@ -156,13 +158,13 @@ async function prepareGroups(client:DbClient,input:LabWorkCommandContext,command
     if(!intent){
       if(!group||expected!==0||retirement)fail("unknown_intent");
       await validateProvider(client,group.prescription);
-      intent=(await client.query<IntentRow>(`INSERT INTO lab_work_intents(id,patient_id,origin_kind,origin_visit_id,origin_invoice_id,group_kind,prescription,created_by_user_id)
-        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8) RETURNING *`,[id,input.patientId,input.sourceKind,input.sourceKind==="visit"?input.sourceId:null,input.sourceKind==="invoice"?input.sourceId:null,group.groupKind,JSON.stringify(group.prescription),active.userId])).rows[0];
+      intent=(await client.query<IntentRow>(`INSERT INTO lab_work_intents(id,patient_id,origin_kind,origin_visit_id,origin_invoice_id,group_kind,prescription,created_by_user_id${group.instructions?",instructions":""})
+        VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8${group.instructions?",$9":""}) RETURNING *`,[id,input.patientId,input.sourceKind,input.sourceKind==="visit"?input.sourceId:null,input.sourceKind==="invoice"?input.sourceId:null,group.groupKind,JSON.stringify(group.prescription),active.userId,...(group.instructions?[group.instructions]:[])])).rows[0];
     }else{
       if(intent.patient_id!==input.patientId||intent.state==="cancelled"||intent.revision!==expected)fail("stale_intent");
       if(group&&intent.group_kind!==group.groupKind)fail("intent_repurposed");
       if(intent.state==="materialized"||intent.initial_order_id!==null){
-        if(retirement||!group||specKey(intent.prescription)!==specKey(group.prescription))fail("materialized_immutable");
+        if(retirement||!group||specKey(intent.prescription)!==specKey(group.prescription)||(intent.instructions??null)!==group.instructions)fail("materialized_immutable");
         for(const member of group.members){
           const saved=current.find(m=>m.id===member.memberId&&m.retired_revision===null);
           const planned=await exactPlanAlias(client,member.planItemId,id,member.memberId);
@@ -179,7 +181,7 @@ async function prepareGroups(client:DbClient,input:LabWorkCommandContext,command
         }
       }
       if(group)await validateProvider(client,group.prescription);
-      intent=(await client.query<IntentRow>("UPDATE lab_work_intents SET revision=revision+1,prescription=$2::jsonb,updated_at=clock_timestamp() WHERE id=$1 RETURNING *",[id,JSON.stringify(group?.prescription??intent.prescription)])).rows[0];
+      intent=(await client.query<IntentRow>("UPDATE lab_work_intents SET revision=revision+1,prescription=$2::jsonb,instructions=$3,updated_at=clock_timestamp() WHERE id=$1 RETURNING *",[id,JSON.stringify(group?.prescription??intent.prescription),group?group.instructions:intent.instructions])).rows[0];
     }
     for(const memberId of retirement?.memberIds??[]){
       const saved=current.find(m=>m.id===memberId&&m.retired_revision===null);
@@ -240,7 +242,8 @@ async function ensureOrder(client:DbClient,intent:IntentRow,actor:LabActor,actua
   const members=(await getMembers(client,intent.id)).filter(m=>m.retired_revision===null);
   if(!members.length)fail("empty_intent");
   const doctors=[...new Set(actualDoctors.filter((id):id is number=>id!==null))];
-  if(doctors.length>1)fail("ambiguous_source_doctor");
+  // A grouped order may span several doctors' teeth; commission then splits its cost by member (0136).
+  if(doctors.length>1&&intent.group_kind!=="grouped")fail("ambiguous_source_doctor");
   const p=specification(intent.prescription),lab=await validateProvider(client,p);
   // NOWAIT before touching lab rows avoids reversing the clinical authorization boundary.
   try{await client.query("LOCK TABLE lab_orders IN ROW EXCLUSIVE MODE NOWAIT");}catch(error){if((error as {code?:string}).code==="55P03")fail("clinical_boundary_busy");throw error;}
@@ -249,10 +252,57 @@ async function ensureOrder(client:DbClient,intent:IntentRow,actor:LabActor,actua
       sent_date,due_date,status,visit_id,tooth_code,source,doctor_id,note,lab_work_intent_id)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CURRENT_DATE,$11::date,'needed',$12,$13,$14,$15,$16,$17) RETURNING id`,
     [intent.patient_id,lab.name,lab.phone,p.partyId,workType,p.toothNumbers||[...new Set(members.map(member=>member.tooth_code))].sort((a,b)=>a-b).join(", "),p.shade||null,p.stumpShade||null,p.priority,p.impressionType,p.dueDate,
-      intent.origin_visit_id,members.length===1?members[0].tooth_code:null,intent.origin_kind==="visit"?"auto":"manual",doctors[0]??null,"مسوّدة إرسالية من هوية عمل صريحة — لم تُرسل للمختبر",intent.id])).rows[0];
+      intent.origin_visit_id,members.length===1?members[0].tooth_code:null,intent.origin_kind==="visit"?"auto":"manual",doctors.length===1?doctors[0]:null,
+      intent.instructions?`مسوّدة إرسالية من هوية عمل صريحة — لم تُرسل للمختبر. تعليمات: ${intent.instructions}`:"مسوّدة إرسالية من هوية عمل صريحة — لم تُرسل للمختبر",intent.id])).rows[0];
   const updated=(await client.query<IntentRow>("UPDATE lab_work_intents SET initial_order_id=$2,state='materialized',revision=revision+1,updated_at=clock_timestamp() WHERE id=$1 RETURNING *",[intent.id,order.id])).rows[0];
   await client.query("INSERT INTO lab_order_tracking(lab_order_id,action,to_status,notes,actor,actor_role) VALUES($1,'work_intent_materialized','needed',$2,$3,$4)",[order.id,`هوية العمل ${intent.id}`,actor.username,actor.role]);
+  if(intent.group_kind==="grouped")await priceGroupedOrder(client,updated,order.id,p.partyId,members,actor);
   return {orderId:order.id,created:true,intent:updated};
+}
+
+/** 0136 + owner 6932010630: each tooth is priced from its clinic service's lab-service mapping and the chosen
+ * lab's dated rule. Only a single currency equal to the invoice's becomes the order cost (one payable, written by
+ * the ordinary accounting writer). A missing mapping/rule or a foreign/mixed currency leaves the cost pending:
+ * never a computed zero, never a conversion. Every tooth's price is kept, in its own currency. */
+async function priceGroupedOrder(client:DbClient,intent:IntentRow,orderId:number,partyId:number|null,members:MemberRow[],actor:LabActor):Promise<LabPricingState>{
+  const db=await import("./db");const {clinicToday}=await import("./waiting-list-match");
+  const today=clinicToday();
+  type Priced={member:MemberRow;labServiceId:number|null;ruleId:number|null;unit:number|null;currency:string|null;state:"rule"|"missing_rule"|"missing_mapping"};
+  const priced:Priced[]=[];
+  for(const member of [...members].sort((a,b)=>a.tooth_code-b.tooth_code||a.id.localeCompare(b.id))){
+    const mapped=(await client.query<{lab_service_id:number|null}>("SELECT lab_service_id FROM services WHERE id=$1",[member.service_id])).rows[0]?.lab_service_id??null;
+    if(mapped===null){priced.push({member,labServiceId:null,ruleId:null,unit:null,currency:null,state:"missing_mapping"});continue;}
+    // A draft saved before a lab is chosen has no price yet: pending, never a guessed lab.
+    const rule=partyId===null?null:await db.resolveLabOrderPriceWith(client,partyId,mapped,today);
+    priced.push(rule?{member,labServiceId:mapped,ruleId:rule.ruleId,unit:rule.costMinor,currency:rule.costCurrency,state:"rule"}
+      :{member,labServiceId:mapped,ruleId:null,unit:null,currency:null,state:"missing_rule"});
+  }
+  for(const row of priced)await client.query(`INSERT INTO lab_order_member_prices(lab_order_id,member_id,tooth_code,lab_service_id,pricing_rule_id,unit_cost_minor,unit_cost_currency,state)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,[orderId,row.member.id,row.member.tooth_code,row.labServiceId,row.ruleId,row.unit,row.currency,row.state]);
+  const currencies=[...new Set(priced.map(row=>row.currency).filter((c):c is string=>c!==null))];
+  const invoiceCurrency=intent.origin_invoice_id===null?null:(await client.query<{currency:string}>("SELECT base_currency AS currency FROM invoices WHERE id=$1",[intent.origin_invoice_id])).rows[0]?.currency??null;
+  let state:LabPricingState;
+  if(priced.some(row=>row.state==="missing_mapping"))state="missing_mapping";
+  else if(priced.some(row=>row.state==="missing_rule"))state="missing_rule";
+  else if(currencies.length>1)state="mixed_currency";
+  else if(invoiceCurrency!==null&&currencies[0]!==invoiceCurrency)state="currency_mismatch";
+  else state="rule";
+  if(state==="rule"){
+    const total=priced.reduce((sum,row)=>sum+row.unit!,0);
+    if(!Number.isSafeInteger(total))fail("lab_price_invalid");
+    if(total>0){
+      const {resolveAutomaticLabPrice,LabOrderPricingConflict}=await import("./lab-order-pricing");const {CLINIC_BASE_CURRENCY}=await import("./money");
+      let auto:ReturnType<typeof resolveAutomaticLabPrice>|null=null;
+      try{auto=resolveAutomaticLabPrice({costMinor:total,costCurrency:currencies[0],quantity:1,baseCurrency:CLINIC_BASE_CURRENCY,settings:await db.getSettings()});}
+      catch(error){if(!(error instanceof LabOrderPricingConflict))throw error;}
+      // No trustworthy rate for the ledger snapshot: the invoice still saves and the cost stays pending (owner item 2/3).
+      if(!auto)state="currency_mismatch";
+      else await db.updateLabOrderAccountingOn(client,orderId,{costMinor:auto.costMinor,costCurrency:auto.costCurrency,exchangeRate:auto.exchangeRate},
+        {actor:{username:actor.username,role:actor.role},canAccessPatientMoney:null});
+    }
+  }
+  await client.query("UPDATE lab_orders SET pricing_state=$2 WHERE id=$1",[orderId,state]);
+  return state;
 }
 
 export async function materializeInvoiceLabWorkInTransaction(client:DbClient,input:{patientId:number;invoiceId:number;visitId?:number|null;session:LabActorSource;requestKey:string;requestHash:string;rows:readonly InvoiceLabSourceRow[];retirements?:unknown}):Promise<MaterializedLabWorkReceipt[]>{
@@ -284,7 +334,8 @@ export async function materializeInvoiceLabWorkInTransaction(client:DbClient,inp
       await linkSource(client,{patientId:input.patientId,intentId:intent.id,memberId:draft.memberId,kind:"invoice",sourceId:row.invoiceItemId,actorId:actor.userId!});
     }
     const created=await ensureOrder(client,intent,actor,group.members.map(m=>m.doctorId));intent=created.intent;
-    results.push({...receipt(intent,await getMembers(client,intent.id)),orderId:created.orderId,memberIds:group.members.map(member=>member.memberId).sort()});
+    const pricing=intent.group_kind==="grouped"?(await client.query<{pricing_state:LabPricingState|null}>("SELECT pricing_state FROM lab_orders WHERE id=$1",[created.orderId])).rows[0]?.pricing_state??null:null;
+    results.push({...receipt(intent,await getMembers(client,intent.id)),orderId:created.orderId,memberIds:group.members.map(member=>member.memberId).sort(),...(pricing?{pricing:{state:pricing}}:{})});
   }
   await recordVisitLabWorkCommandInTransaction(client,context,results);return results;
 }
@@ -329,7 +380,7 @@ export async function materializeVisitLabWorkInTransaction(client:DbClient,input
   return {handledProcedureIds,createdCount,labWork};
 }
 
-function readDraft(intent:IntentRow,member:MemberRow):LabWorkRead{return {labWork:{intentId:intent.id,memberId:member.id,expectedRevision:intent.revision,groupKind:intent.group_kind,prescription:specification(intent.prescription)},labWorkOrderId:intent.initial_order_id};}
+function readDraft(intent:IntentRow,member:MemberRow):LabWorkRead{return {labWork:{intentId:intent.id,memberId:member.id,expectedRevision:intent.revision,groupKind:intent.group_kind,prescription:specification(intent.prescription),...(intent.instructions?{instructions:intent.instructions}:{})},labWorkOrderId:intent.initial_order_id};}
 export async function readLabWorkForPlanItems(db:QueryDb,patientId:number,planItemIds:readonly number[]):Promise<Map<number,LabWorkRead>>{
   const result=new Map<number,LabWorkRead>();if(!planItemIds.length||!await labWorkIntentSupported(db))return result;
   const links=(await db.query<{plan_item_id:number;intent_id:string;member_id:string}>("SELECT plan_item_id,intent_id,member_id FROM lab_prescription_source_memberships WHERE patient_id=$1 AND plan_item_id=ANY($2::int[])",[patientId,planItemIds])).rows;

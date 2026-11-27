@@ -8,6 +8,7 @@ import { friendlyDateLong } from "@/lib/reminders";
 import { useSession } from "@/components/SessionProvider";
 import { canHandleMoney } from "@/lib/roles";
 import PayBillForm from "@/components/finance/PayBillForm";
+import PendingExpenseAttempts from "@/components/finance/PendingExpenseAttempts";
 
 /**
  * كشف حساب جهة — مختبر أو مورّد أو طبيب.
@@ -185,6 +186,8 @@ export default function PartyStatementPage({ params }: { params: Promise<{ id: s
         <p className="rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">جارٍ التحميل…</p>
       ) : readFailed ? null : (
         <>
+          {/* Review #483 6882465665: an unconfirmed bill payment of this user stays here until verified. */}
+          <PendingExpenseAttempts actor={session?.username} surface="bill" onSettled={() => { void load(); }} />
           <section className="mb-5" aria-label="الالتزامات">
             <h2 className="mb-2 text-sm font-bold">الالتزامات ({payables.length})</h2>
             {payables.length === 0 ? (

@@ -97,7 +97,7 @@ async function patientBuckets(patientId: number) {
 beforeAll(async () => {
   await dropPublicSchema(process.env.DATABASE_URL!);
   await ensureSchema();
-  await openShift({ openedBy: "cashier", opening: { YER: 0, SAR: 0, USD: 0 } });
+  await openShift({ openedBy: "cashier", opening: { YER: 100000000, SAR: 100000000, USD: 100000000 } }); // 0128: vouchers need drawer cash
 }, 180_000);
 afterAll(async () => { await resetPoolForTesting(); });
 

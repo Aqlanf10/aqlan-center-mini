@@ -1,12 +1,12 @@
 import { PrintMetadata, PrintTableFrame } from "@/components/PrintDocument";
 import { notFound } from "next/navigation";
-import { CLINIC_TIME_ZONE, getSettingsSafe, getShift, shiftDrawerBreakdown } from "@/lib/db";
+import { CLINIC_TIME_ZONE, getSettingsSafe, getShiftForViewer, shiftDrawerBreakdown, type CashierShift } from "@/lib/db";
 import { CURRENCIES, formatMoney, type Currency } from "@/lib/money";
 import { friendlyDateLong, friendlyTime } from "@/lib/reminders";
 import { clinicDateString } from "@/lib/schedule";
 import { PrintHeader, PrintFooter } from "@/components/PrintHeader";
 import { PrintButton } from "@/components/PrintButton";
-import { canViewMoney } from "@/lib/roles";
+import { canViewMoney, isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -36,8 +36,19 @@ export default async function ShiftCloseReportPage({ params }: { params: Promise
   const id = Number(rawId);
   if (!Number.isInteger(id) || id <= 0) notFound();
 
-  const [shift, settings] = await Promise.all([getShift(id), getSettingsSafe()]);
-  if (!shift) notFound();
+  const [view, settings] = await Promise.all([getShiftForViewer(id, { authorized: isAdmin(session.role) }), getSettingsSafe()]);
+  if (!view) notFound();
+  if ("sealed" in view && view.sealed) {
+    // 0129 §8.3: the latest close stays sealed until the next count is fixed; no amount, drawer line or note.
+    return (
+      <div className="sheet sheet-a5">
+        <PrintHeader settings={settings} title={`تقرير إقفال الوردية (Z) — رقم ${view.id}`} compact />
+        <p data-testid="shift-report-sealed">تقرير هذا الإقفال مختوم حتى افتتاح الوردية التالية؛ يعدّ الموظف النقد قبل رؤية رصيد الإقفال السابق. يراه المالك والمراجع المخوّل.</p>
+        <PrintFooter settings={settings} />
+      </div>
+    );
+  }
+  const shift = view as CashierShift;
   const drawer = await shiftDrawerBreakdown(shift);
   const expected = shift.expected;
   const opened = clockOf(shift.openedAt);

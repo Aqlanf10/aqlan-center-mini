@@ -16,6 +16,12 @@ import {labVisitSignatureVersion} from "./lab-visit-signature";
 import { labClinicalEditProblem, sameLabClinicalSnapshot, type LabClinicalSnapshot } from "./lab-clinical-edit";
 import { parseLabTeeth } from "./lab";
 import { LAB_SHADE_SPECIFICATION_SQL } from "./lab-shade-schema";
+import { COMMISSION_CASE_PARTICIPATIONS_SQL } from "./commission-participation-schema";
+import { EXPENSE_COMMANDS_SQL } from "./expense-commands-schema";
+import { EXPENSE_REQUEST_RETIREMENTS_SQL } from "./expense-request-retirements-schema";
+import { SHIFT_OPENING_REVIEWS_SQL } from "./shift-opening-reviews-schema";
+import { CASHIER_SHIFT_LIFECYCLE_LOCK, detectOpeningDifferences, listOpeningReviewsWith, pendingOpeningReviewCountWith, recordOpeningDifferences, sealedCloseIdWith, sealShiftForViewer, type OpeningReview, type SealedFields } from "./shift-opening-reviews";
+import { loadCaseParticipationsAt } from "./commission-participation-read";
 import { parseLabShadeSpecification, readLabShadeSpecification, type LabShadeSpecification } from "./lab-shades";
 import { guardLegacyClinicalMaterials, legacyInventoryWriteRefusal } from "./inventory-domain/legacy-write-guard";
 import { PLANNED_REBOOK_GENERATION_SQL, PLANNED_REBOOK_BLOCK_REASON_SQL, PLANNED_REBOOK_REASONS, type PlannedRebookBlockReason } from "./planned-visit-rebooking-contract";
@@ -71,7 +77,7 @@ import {
 import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomBytes } from "node:crypto";
-import { withTransaction } from "./transactions";
+import { withIsolation, withTransaction } from "./transactions";
 import { DOCTOR_COMMISSION_HISTORY_SQL } from "./commission-history-schema";
 import { SUPPLIER_PAYMENT_SETTLEMENT_SQL } from "./supplier-payment-schema";
 import { SHIFT_CLOSE_SQL } from "./shift-close-schema";
@@ -101,6 +107,8 @@ import { COMMISSION_CASE_OVERRIDES_SQL } from "./commission-overrides-schema";
 import { VISIT_CLEARANCE_SQL } from "./visit-clearance-schema";
 import { ORTHO_BILLING_DECISION_SQL } from "./ortho-billing-decision-schema";
 import { ORTHO_FOLLOWUP_COVERAGE_SQL } from "./ortho-followup-coverage-schema";
+import { GROUPED_LAB_ORDER_SQL } from "./grouped-lab-order-schema";
+import { comparableGroupedLabWeights, splitGroupedLabCost } from "./grouped-lab-cost-split";
 import { ENDODONTICS_SQL } from "./endodontics-schema";
 import { INVOICE_LINKAGE_SQL } from "./invoice-linkage-schema";
 import { LEGACY_TREATMENT_SQL } from "./legacy-treatment-schema";
@@ -2139,6 +2147,8 @@ export function ensureSchema(): Promise<void> {
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0082", name: "invoice_service_additions", filename: "0082_invoice_service_additions.sql", sql: INVOICE_SERVICE_ADDITIONS_SQL, checksum: checksumOf(INVOICE_SERVICE_ADDITIONS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0087", name: "agreement_reminder_metadata", filename: "0087_agreement_reminder_metadata.sql", sql: AGREEMENT_REMINDER_GUARD_SQL, checksum: checksumOf(AGREEMENT_REMINDER_GUARD_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0089", name: "lab_shade_specification", filename: "0089_lab_shade_specification.sql", sql: LAB_SHADE_SPECIFICATION_SQL, checksum: checksumOf(LAB_SHADE_SPECIFICATION_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0126", name: "commission_case_participations", filename: "0126_commission_case_participations.sql", sql: COMMISSION_CASE_PARTICIPATIONS_SQL, checksum: checksumOf(COMMISSION_CASE_PARTICIPATIONS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0136", name: "grouped_lab_orders", filename: "0136_grouped_lab_orders.sql", sql: GROUPED_LAB_ORDER_SQL, checksum: checksumOf(GROUPED_LAB_ORDER_SQL) }]);
     await getPool().query(HR_STAFF_SQL);
     await getPool().query(HR_TASKS_SQL);
     await getPool().query(HR_CONTRACTS_ATTENDANCE_LEAVES_SQL);
@@ -2146,6 +2156,9 @@ export function ensureSchema(): Promise<void> {
     await getPool().query(HR_PAYROLL_INTEGRITY_SQL);
     await applyRuntimeMigrationFiles(getPool(), HR_TEMPORAL_RUNTIME_MIGRATIONS);
     await applyOrthoAssessmentRuntime(getPool());
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0128", name: "expense_commands", filename: "0128_expense_commands.sql", sql: EXPENSE_COMMANDS_SQL, checksum: checksumOf(EXPENSE_COMMANDS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0129", name: "shift_opening_reviews", filename: "0129_shift_opening_reviews.sql", sql: SHIFT_OPENING_REVIEWS_SQL, checksum: checksumOf(SHIFT_OPENING_REVIEWS_SQL) }]);
+    await applyRuntimeMigrationFiles(getPool(), [{ version: "0133", name: "expense_request_retirements", filename: "0133_expense_request_retirements.sql", sql: EXPENSE_REQUEST_RETIREMENTS_SQL, checksum: checksumOf(EXPENSE_REQUEST_RETIREMENTS_SQL) }]);
     await applyRuntimeMigrationFiles(getPool(), [{ version: "0067", name: "patient_appointment_history_index", filename: "0067_patient_appointment_history_index.sql", sql: PATIENT_APPOINTMENT_HISTORY_SQL, checksum: checksumOf(PATIENT_APPOINTMENT_HISTORY_SQL) }]);
 
 
@@ -4143,8 +4156,16 @@ export async function patientLegacyHistory(patientId: number): Promise<{
   orphanPayments: LegacyTreatmentView["payments"];
 }> {
   await ensureSchema();
-  const [treatments, payments] = await Promise.all([
-    getPool().query<{
+  return patientLegacyHistoryWith(getPool(), patientId);
+}
+
+/** The archive read on a caller's reader (M2 slice 95a: the canonical read snapshot, where the
+ * two queries run one after the other on the snapshot client). */
+export async function patientLegacyHistoryWith(reader: Pick<DbClient, "query">, patientId: number): Promise<{
+  treatments: LegacyTreatmentView[];
+  orphanPayments: LegacyTreatmentView["payments"];
+}> {
+  const treatments = await reader.query<{
       id: number; legacy_number: number | null; treated_on: string | null; doctor_name: string | null; service: string | null;
       currency: string; price_minor: string; rate: string | null; paid_minor: string; remaining_minor: string;
       has_provenance: boolean; source_kind: string | null; historical_as_of: string | null;
@@ -4155,14 +4176,13 @@ export async function patientLegacyHistory(patientId: number): Promise<{
               to_jsonb(t)->>'source_kind' AS source_kind,
               to_jsonb(t)->>'historical_as_of' AS historical_as_of
          FROM legacy_treatments t WHERE patient_id = $1
-        ORDER BY treated_on NULLS LAST, legacy_number NULLS LAST, id`, [patientId]),
-    getPool().query<{
+        ORDER BY treated_on NULLS LAST, legacy_number NULLS LAST, id`, [patientId]);
+  const payments = await reader.query<{
       legacy_treatment_id: number | null; legacy_number: number; paid_on: string | null; currency: string;
       amount_minor: string; rate: string | null; method: string | null; cash_box: string | null;
     }>(
       `SELECT legacy_treatment_id, legacy_number, paid_on::text, currency, amount_minor::text, rate::text, method, cash_box
-         FROM legacy_payments WHERE patient_id = $1 ORDER BY paid_on NULLS LAST, legacy_number`, [patientId]),
-  ]);
+         FROM legacy_payments WHERE patient_id = $1 ORDER BY paid_on NULLS LAST, legacy_number`, [patientId]);
   const paymentOf = (row: typeof payments.rows[number]) => ({
     legacyNumber: row.legacy_number, paidOn: row.paid_on,
     currency: requireCurrency(row.currency, "دفعة قديمة", row.legacy_number),
@@ -6524,7 +6544,25 @@ export async function listLabOrdersWith(q: Pick<DbClient, "query">, filters: {
       ${limitClause}`,
     params,
   );
-  return rows.map(toLabOrder);
+  const orders = rows.map(toLabOrder);
+  if (orders.length) {
+    // Bounded by the already authorized order IDs; never widen patient scope.
+    const members = await q.query<{ order_id: number; member_id: string; tooth_code: number; service_name: string; lab_service_name: string | null; unit_cost_minor: string | null; unit_cost_currency: LabOrder["costCurrency"]; state: string }>(
+      `SELECT mp.lab_order_id AS order_id, m.id AS member_id, m.tooth_code, s.name AS service_name, ls.name AS lab_service_name,
+              mp.unit_cost_minor, mp.unit_cost_currency, mp.state
+         FROM lab_order_member_prices mp
+         JOIN lab_work_members m ON m.id=mp.member_id
+         JOIN services s ON s.id=m.service_id
+         LEFT JOIN lab_services ls ON ls.id=mp.lab_service_id
+        WHERE mp.lab_order_id=ANY($1::int[]) ORDER BY mp.lab_order_id,m.tooth_code,m.id`, [orders.map(order => order.id)]);
+    for (const order of orders) {
+      const own = members.rows.filter(member => member.order_id === order.id);
+      if (!own.length) continue;
+      order.members = own.map(member => ({ memberId: member.member_id, toothCode: member.tooth_code, serviceName: member.service_name, labServiceName: member.lab_service_name }));
+      order.memberPrices = own.map(member => ({ memberId: member.member_id, unitCostMinor: member.unit_cost_minor === null ? null : Number(member.unit_cost_minor), currency: member.unit_cost_currency ?? null, state: member.state }));
+    }
+  }
+  return orders;
 }
 
 /** أمر مختبر واحد بالمعرف — لشاشة التتبع وتاريخ الأحداث (المختبرات V2). */
@@ -7828,6 +7866,11 @@ export async function updateLabOrderAccountingOn(
           payableAccountCode: payableAccCode, isPosted },
       },
     });
+    /* 0136 (owner 6932010630 item 2): a cost typed on the lab board replaces a grouped order's automatic or
+       pending price; the order says so instead of keeping a stale rule/pending state. Other orders keep NULL. */
+    if (hasPositiveMoneyUpdate) {
+      await client.query("UPDATE lab_orders SET pricing_state='manual' WHERE id=$1 AND pricing_state IS NOT NULL AND pricing_state<>'manual'", [orderId]);
+    }
 
     return "updated";
 }
@@ -8008,21 +8051,40 @@ export async function setLabOrderStatusOn(
      * «معفى»، والمسدَّد يبقى أثرًا للتدقيق فالمال خرج فعلًا ولا يُمحو الإلغاءُ السريري
      * سجلَه المحاسبي. */
     if (status === "cancelled" && current.payable_id) {
-      const { rows: paidRows } = await client.query<{ count: string }>(
-        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = $1)
-               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = $1))::text AS count`,
+      /* The payable row is locked before its vouchers are counted: a payment that commits
+       * between the count and the DELETE would otherwise keep a link to a deleted payable.
+       * A payment in flight holds this row; the cancel waits for it and then counts it. */
+      await client.query(`SELECT id FROM payables WHERE id = $1 FOR UPDATE`, [current.payable_id]);
+      const { rows: paidRows } = await client.query<{ count: string; settled: string; amount: string }>(
+        `SELECT ((SELECT COUNT(*) FROM expenses WHERE payable_id = p.id)
+               + (SELECT COUNT(*) FROM expense_payable_allocations WHERE payable_id = p.id))::text AS count,
+                ${payableSettledTotalSql("p")}::text AS settled, ${payableAmountSql("p")}::text AS amount
+           FROM payables p WHERE p.id = $1`,
         [current.payable_id],
       );
       const paidCount = Number(paidRows[0]?.count ?? 0);
-      if (paidCount === 0) {
+      /* Owner decision 2026-11-11: a laboratory debt is never dropped merely because no voucher
+       * exists. Only an order that was never sent to the laboratory ("needed") commissioned no
+       * work, so the payable born with it goes with it. Once the order was sent, the laboratory
+       * was engaged: the payable and whatever is unpaid stay, and settling or waiving the
+       * remainder is a documented financial act under the laboratory's agreement. */
+      if (paidCount === 0 && prevStatus === "needed") {
         await client.query(`DELETE FROM payables WHERE id = $1`, [current.payable_id]);
         await client.query(
           `UPDATE lab_orders SET payable_id = NULL, financial_status = 'exempt' WHERE id = $1`,
           [id],
         );
-      } else {
+      } else if (paidRows[0] && BigInt(paidRows[0].settled) >= BigInt(paidRows[0].amount)) {
         await client.query(
           `UPDATE lab_orders SET financial_status = 'paid' WHERE id = $1 AND financial_status <> 'paid'`,
+          [id],
+        );
+      } else {
+        /* Not fully settled: no voucher on work that was sent, a part payment, or a payment
+         * that was voided (two rows, net zero). The payable stays, with its vouchers, as the
+         * audit trail; the order must not read "paid" while the laboratory is still owed. */
+        await client.query(
+          `UPDATE lab_orders SET financial_status = 'payable_created' WHERE id = $1 AND financial_status = 'paid'`,
           [id],
         );
       }
@@ -9557,6 +9619,38 @@ export async function createService(input: {
   return toService(rows[0]);
 }
 
+/** 0136 (owner #483 6932010630 item 1): which lab service each clinic service is sent as. Read separately from
+ * SERVICE_COLUMNS so every existing service read keeps its exact shape. */
+export async function listServiceLabMappings(): Promise<Map<number, number | null>> {
+  await ensureSchema();
+  const { rows } = await getPool().query<{ id: number; lab_service_id: number | null }>("SELECT id, lab_service_id FROM services");
+  return new Map(rows.map((row) => [row.id, row.lab_service_id]));
+}
+
+/** Sets or clears one mapping. Only an active lab service may be chosen; clearing (null) is always allowed. */
+export async function setServiceLabService(serviceId: number, labServiceId: number | null):
+  Promise<{ ok: true; previous: number | null } | { ok: false; reason: "service_not_found" | "lab_service_invalid" }> {
+  await ensureSchema();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const service = (await client.query<{ lab_service_id: number | null }>("SELECT lab_service_id FROM services WHERE id=$1 FOR UPDATE", [serviceId])).rows[0];
+    if (!service) { await client.query("ROLLBACK"); return { ok: false, reason: "service_not_found" }; }
+    if (labServiceId !== null) {
+      const active = (await client.query("SELECT 1 FROM lab_services WHERE id=$1 AND is_active FOR SHARE", [labServiceId])).rows.length > 0;
+      if (!active) { await client.query("ROLLBACK"); return { ok: false, reason: "lab_service_invalid" }; }
+    }
+    await client.query("UPDATE services SET lab_service_id=$2 WHERE id=$1", [serviceId, labServiceId]);
+    await client.query("COMMIT");
+    return { ok: true, previous: service.lab_service_id };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function updateService(id: number, input: {
   name?: string; category?: string | null; priceMinor?: number; isActive?: boolean;
   /** (DAY1) undefined يُبقي، null يمسح (فيعود التحويل بسعر الصرف). */
@@ -9839,6 +9933,10 @@ export interface CashierShift {
   /** المعدود − المتوقَّع (سالب = عجز) — null لوردية مفتوحة. */
   difference: Record<Currency, number> | null;
   differenceReason: string | null;
+  /** 0129: the opening's differences against the previous close (set by the opening and by shift reads that ask for them). */
+  openingReviews?: OpeningReview[];
+  /** 0129 §8.3: only a sealed view of a shift sets this (see `ShiftForViewer`); a full shift never does. */
+  sealed?: never;
 }
 
 interface ShiftRow {
@@ -9861,7 +9959,7 @@ function effectiveExpectedSql(currency: "yer" | "sar" | "usd"): string {
                   FROM payments p
                  WHERE p.shift_id = s.id AND p.currency = '${code}'
                    AND COALESCE(NULLIF(p.method, ''), 'cash') = 'cash'), 0)
-    - COALESCE((SELECT SUM(e.amount_minor) FROM expenses e
+    - COALESCE((SELECT SUM(COALESCE(e.drawer_amount_minor, e.amount_minor)) FROM expenses e
                  WHERE e.shift_id = s.id AND e.currency = '${code}'), 0))::text AS eff_expected_${currency}`;
 }
 
@@ -9916,16 +10014,33 @@ export async function getOpenShiftWith(q: Pick<DbClient, "query">, lock = false)
  * من جهازين في اللحظة نفسها كانتا ستفتحان ورديتين، فتتوزّع دفعات اليوم بينهما ولا
  * يُطابَق أيّهما. والفهرس الفريد على الحالة يمنعها حتى لو فشل هذا الشرط.
  */
-export async function openShift(input: {
-  openedBy: string; opening: Record<Currency, number>;
-}): Promise<CashierShift | null> {
+export interface OpenShiftInput { openedBy: string; opening: Record<Currency, number> }
+export async function openShift(input: OpenShiftInput): Promise<CashierShift | null> {
   await ensureSchema();
-  return openShiftWith(getPool(), input);
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    // 0129: serialized with the canonical open/close, so the comparison reads a settled previous close.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [CASHIER_SHIFT_LIFECYCLE_LOCK]);
+    const shift = await openShiftWith(client, input);
+    await client.query("COMMIT");
+    return shift;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
-/** The guarded open on the caller's runner (the unique open-shift index backs it). */
-export async function openShiftWith(q: Pick<DbClient, "query">, input: {
-  openedBy: string; opening: Record<Currency, number>;
-}): Promise<CashierShift | null> {
+/**
+ * The guarded open on the caller's transaction (the unique open-shift index backs it). 0129: after the
+ * insert, the opening is compared per currency with the previous close (docs/finance/SHIFT_OPENING_REVIEWS_0129.md
+ * §2.1, §8.2) and every difference is recorded for review in this same transaction. The count is never
+ * refused for differing (blind count): nothing before the commit depends on the previous close. The comparison
+ * runs after the insert so it reads the close that let the insert succeed. The returned rows are complete;
+ * each route projects them for its viewer.
+ */
+export async function openShiftWith(q: Pick<DbClient, "query">, input: OpenShiftInput): Promise<CashierShift | null> {
   const { rows } = await q.query<ShiftRow>(
     `INSERT INTO cashier_shifts (opened_by, opening_yer, opening_sar, opening_usd)
      SELECT $1, $2, $3, $4
@@ -9933,7 +10048,41 @@ export async function openShiftWith(q: Pick<DbClient, "query">, input: {
      RETURNING id`,
     [input.openedBy, input.opening.YER, input.opening.SAR, input.opening.USD],
   );
-  return rows[0] ? getShiftWith(q, rows[0].id) : null;
+  if (!rows[0]) return null;
+  const id = rows[0].id;
+  const differences = await detectOpeningDifferences(q, id, input.opening);
+  const openingReviews = differences.length ? await recordOpeningDifferences(q, id, differences, input.openedBy) : [];
+  const shift = await getShiftWith(q, id);
+  return shift ? { ...shift, openingReviews } : null;
+}
+
+/** 0129 reads on the pool (the legacy shift screen). */
+export async function listOpeningReviews(filter: { shiftId?: number; pendingOnly?: boolean; limit?: number } = {}): Promise<OpeningReview[]> {
+  await ensureSchema();
+  return listOpeningReviewsWith(getPool(), filter);
+}
+export async function pendingOpeningReviewCount(): Promise<number> {
+  await ensureSchema();
+  return pendingOpeningReviewCountWith(getPool());
+}
+
+/** 0129 §8.3: a shift as one viewer may see it; the latest close is sealed until the next count is fixed. */
+export type ShiftForViewer = CashierShift | (Omit<CashierShift, keyof SealedFields> & SealedFields);
+export async function listShiftsForViewer(viewer: { authorized: boolean }, limit = 30): Promise<ShiftForViewer[]> {
+  await ensureSchema();
+  return withIsolation(getPool(), "REPEATABLE READ", async client => {
+    const shifts = await listShiftsWith(client, limit);
+    const sealed = viewer.authorized ? null : await sealedCloseIdWith(client);
+    return shifts.map(shift => sealShiftForViewer(shift, sealed, viewer.authorized));
+  });
+}
+export async function getShiftForViewer(id: number, viewer: { authorized: boolean }): Promise<ShiftForViewer | null> {
+  await ensureSchema();
+  return withIsolation(getPool(), "REPEATABLE READ", async client => {
+    const shift = await getShiftWith(client, id);
+    if (!shift) return null;
+    return sealShiftForViewer(shift, viewer.authorized ? null : await sealedCloseIdWith(client), viewer.authorized);
+  });
 }
 
 export async function getShift(id: number): Promise<CashierShift | null> {
@@ -9953,7 +10102,8 @@ export async function shiftDrawerBreakdown(shift: CashierShift, client?: Pick<Db
     `SELECT kind, currency, amount_minor, method FROM payments WHERE shift_id = $1`, [shift.id],
   );
   const { rows: expenses } = await runner.query<{ currency: string; amount_minor: string }>(
-    `SELECT currency, amount_minor FROM expenses WHERE shift_id = $1`, [shift.id],
+    // 0128: only the drawer part of a voucher left the drawer (NULL = written before 0128 = all of it).
+    `SELECT currency, COALESCE(drawer_amount_minor, amount_minor) AS amount_minor FROM expenses WHERE shift_id = $1`, [shift.id],
   );
   return drawerBreakdown(
     shift.opening,
@@ -13379,6 +13529,13 @@ export interface Expense {
   payableSettledMinor: number | null;
   rateOverrideReason: string | null;
   reversalOfId: number | null;
+  /** 0128: where the money came from. A voucher written before 0128 reads as the drawer (its only source). */
+  paymentSource: "drawer" | "owner_private" | "drawer_and_owner_private";
+  /** The part that left the drawer, in the voucher currency (negative on a reversal). */
+  drawerAmountMinor: number;
+  /** The part the owner paid from a private source; never drawer cash. */
+  ownerPrivateAmountMinor: number;
+  ownerPrivateReason: string | null;
 }
 
 interface ExpenseRow {
@@ -13390,6 +13547,8 @@ interface ExpenseRow {
   payable_currency: string | null; payable_amount_minor: string | null;
   payable_exchange_rate: string | null; payable_settled_minor: string | null;
   rate_override_reason: string | null; reversal_of_id: number | null;
+  payment_source: string | null; drawer_amount_minor: string | null; owner_private_amount_minor: string | null;
+  owner_private_reason: string | null;
 }
 
 const toExpense = (row: ExpenseRow): Expense => ({
@@ -13418,14 +13577,29 @@ const toExpense = (row: ExpenseRow): Expense => ({
   payableSettledMinor: row.payable_settled_minor !== null ? toMinor(row.payable_settled_minor) : null,
   rateOverrideReason: row.rate_override_reason,
   reversalOfId: row.reversal_of_id,
+  ...expensePaymentParts(row),
 });
+
+/** 0128 parts of a voucher row; NULL (written before 0128) means the whole amount left the drawer. */
+function expensePaymentParts(row: Pick<ExpenseRow, "voucher_number" | "amount_minor" | "payment_source" | "drawer_amount_minor"
+  | "owner_private_amount_minor" | "owner_private_reason">): Pick<Expense, "paymentSource" | "drawerAmountMinor" | "ownerPrivateAmountMinor" | "ownerPrivateReason"> {
+  if (row.payment_source === null) {
+    return { paymentSource: "drawer", drawerAmountMinor: toMinor(row.amount_minor), ownerPrivateAmountMinor: 0, ownerPrivateReason: null };
+  }
+  if (row.payment_source !== "drawer" && row.payment_source !== "owner_private" && row.payment_source !== "drawer_and_owner_private") {
+    throw new Error(`مصدر دفع غير معروف في السند ${row.voucher_number}`);
+  }
+  return { paymentSource: row.payment_source, drawerAmountMinor: toMinor(row.drawer_amount_minor ?? "0"),
+    ownerPrivateAmountMinor: toMinor(row.owner_private_amount_minor ?? "0"), ownerPrivateReason: row.owner_private_reason };
+}
 
 const EXPENSE_SELECT = `
   SELECT e.id, e.voucher_number, e.category, e.party_id, t.name AS party_name, e.payee_text,
          e.shift_id, e.amount_minor, e.currency, e.exchange_rate, e.base_amount_minor,
          e.base_currency, e.payable_id, e.note, e.created_by, e.created_at,
          e.payable_currency, e.payable_amount_minor, e.payable_exchange_rate,
-         e.payable_settled_minor, e.rate_override_reason, e.reversal_of_id
+         e.payable_settled_minor, e.rate_override_reason, e.reversal_of_id,
+         e.payment_source, e.drawer_amount_minor, e.owner_private_amount_minor, e.owner_private_reason
     FROM expenses e LEFT JOIN parties t ON t.id = e.party_id`;
 
 export async function getExpense(id: number): Promise<Expense | null> {
@@ -13662,6 +13836,32 @@ export interface RecordExpenseInput {
   /** (P0-2) ما رآه المستخدم في المعاينة — إن تغيّر السعر أو المتبقي قبل التأكيد يُرفض
    * السند (`stale_quote`) ولا يُحفظ غير ما أُكِّد. */
   expectedQuote?: ExpectedQuote | null;
+  /**
+   * 0128 (docs/finance/EXPENSE_COMMANDS_0128.md §2.1): the request key and its fingerprint, both or
+   * neither. HTTP creates always carry them; internal settlements (payroll, lab batch) do not.
+   */
+  request?: { key: string; hash: string } | null;
+  /**
+   * 0128 (§2.2): how the amount was paid. Omitted = all from the drawer. A private part is accepted only
+   * from a caller that proved the protected owner inside this transaction; the writer re-checks the shape.
+   */
+  paymentSplit?: ExpensePaymentSplitInput | null;
+}
+
+export interface ExpensePaymentSplitInput {
+  drawerMinor: number;
+  ownerPrivateMinor: number;
+  ownerPrivateReason: string | null;
+  /** The protected owner proved by the caller inside this transaction. */
+  ownerUserId: number | null;
+  /** The configured funding account at the moment of the write (`finance.owner_private_funding_account`). */
+  accountCode: string | null;
+}
+
+/** The voucher source implied by its two parts. */
+export function expensePaymentSource(split: Pick<ExpensePaymentSplitInput, "drawerMinor" | "ownerPrivateMinor">): Expense["paymentSource"] {
+  if (split.ownerPrivateMinor === 0) return "drawer";
+  return split.drawerMinor === 0 ? "owner_private" : "drawer_and_owner_private";
 }
 
 export interface ExpectedQuote {
@@ -13675,6 +13875,81 @@ export interface RecordExpenseResult {
   expense: Expense | null;
   reason: SupplierPaymentRefusal | null;
   quote: SettlementQuote | null;
+  /** True when the key had already recorded this exact request: nothing new was written. */
+  replayed?: boolean;
+  /** True on a refusal decided after the key check under its lock: nothing is recorded under the key. */
+  keyUnused?: boolean;
+  /**
+   * 0133: "retired" only once a retirement of this request (key, fingerprint, actor) has COMMITTED after
+   * the refusal's rollback, so no later send of it can write a voucher. Absent when that is not proven.
+   */
+  keyState?: "retired";
+}
+
+/** 0133 (docs/finance/EXPENSE_REQUEST_RETIREMENTS_0133.md): the outcome of retiring one expense request. */
+export type ExpenseRequestRetirement = { state: "retired" } | { state: "saved"; expense: Expense } | { state: "conflict" };
+export interface ExpenseRequestBinding { key: string; hash: string; actor: string }
+/**
+ * Given only by an explicit retirement (the sender's «أنهِ هذا الطلب نهائيًا»): a newly written retirement then
+ * writes its audit row in the same transaction. An automatic retirement after a refusal passes none; its
+ * retirement row is its record.
+ */
+export interface ExpenseRequestRetirementAudit { actorRole: string | null }
+
+/**
+ * Retire one request under the 0128 key lock, on the caller's transaction. Saved first wins (its receipt
+ * is returned; nothing is cancelled); retired first wins for that exact request. Only the same key,
+ * fingerprint and actor count as the same request; anything else is a conflict and writes nothing.
+ */
+export async function retireExpenseRequestWith(c: DbClient, input: ExpenseRequestBinding,
+  audit?: ExpenseRequestRetirementAudit): Promise<ExpenseRequestRetirement> {
+  await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`aqlan.expense.request:${input.key}`]);
+  const { rows: prior } = await c.query<{ id: number; idempotency_request_hash: string }>(
+    "SELECT id, idempotency_request_hash FROM expenses WHERE idempotency_key = $1", [input.key]);
+  if (prior[0]) {
+    if (prior[0].idempotency_request_hash !== input.hash) return { state: "conflict" };
+    const { rows } = await c.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [prior[0].id]);
+    if (!rows[0]) throw new Error("Saved expense receipt missing");
+    return { state: "saved", expense: toExpense(rows[0]) };
+  }
+  const { rows: retired } = await c.query<{ request_hash: string; retired_by: string }>(
+    "SELECT request_hash, retired_by FROM expense_request_retirements WHERE idempotency_key = $1", [input.key]);
+  if (retired[0]) return retired[0].request_hash === input.hash && retired[0].retired_by === input.actor ? { state: "retired" } : { state: "conflict" };
+  await c.query("INSERT INTO expense_request_retirements (idempotency_key, request_hash, retired_by) VALUES ($1, $2, $3)",
+    [input.key, input.hash, input.actor]);
+  if (audit) {
+    await insertAuditRow(c, { action: "expense.request_retire", entity: "expense_request", entityId: input.key,
+      details: { مفتاح_الطلب: input.key }, actor: input.actor, actorRole: audit.actorRole });
+  }
+  return { state: "retired" };
+}
+/** The same on its own transaction; the answer is returned only after COMMIT succeeded. */
+export async function retireExpenseRequest(input: ExpenseRequestBinding,
+  audit?: ExpenseRequestRetirementAudit): Promise<ExpenseRequestRetirement> {
+  await ensureSchema();
+  return withTransaction(getPool(), c => retireExpenseRequestWith(c, input, audit));
+}
+/**
+ * After a refusal's rollback: retire that request and report "retired" only if the retirement committed.
+ * Any error, a saved voucher or a conflict reports nothing (the outcome stays unknown to the screen).
+ */
+export async function retireRefusedExpenseRequest(input: ExpenseRequestBinding): Promise<"retired" | undefined> {
+  try { return (await retireExpenseRequest(input)).state === "retired" ? "retired" : undefined; } catch { return undefined; }
+}
+
+/**
+ * Review #483 6882465665: prove, under the key's lock, that nothing is recorded under an expense request
+ * key. Used before a refusal is reported as `requestKeyState: "unused"`; on its own transaction, or on the
+ * caller's when one is given.
+ */
+export async function expenseRequestKeyIsUnused(key: string, client?: DbClient): Promise<boolean> {
+  const run = async (c: DbClient) => {
+    await c.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`aqlan.expense.request:${key}`]);
+    return (await c.query("SELECT 1 FROM expenses WHERE idempotency_key = $1", [key])).rows.length === 0;
+  };
+  if (client) return run(client);
+  await ensureSchema();
+  return withTransaction(getPool(), run);
 }
 
 /**
@@ -13687,6 +13962,14 @@ export async function recordExpenseInTx(
   input: RecordExpenseInput,
   settingsRates: RateMap,
 ): Promise<{ id: number | null; reason: SupplierPaymentRefusal | null; quote: SettlementQuote | null }> {
+  const split: ExpensePaymentSplitInput = input.paymentSplit
+    ?? { drawerMinor: input.amountMinor, ownerPrivateMinor: 0, ownerPrivateReason: null, ownerUserId: null, accountCode: null };
+  const privatePart = split.ownerPrivateMinor > 0;
+  if (!Number.isSafeInteger(split.drawerMinor) || !Number.isSafeInteger(split.ownerPrivateMinor) || split.drawerMinor < 0
+    || split.ownerPrivateMinor < 0 || split.drawerMinor + split.ownerPrivateMinor !== input.amountMinor
+    || privatePart !== (split.ownerUserId !== null && Boolean(split.ownerPrivateReason?.trim()) && Boolean(split.accountCode))) {
+    throw new Error("Invalid expense payment split");
+  }
   const baseAmount = toBaseAmount(input.amountMinor, input.currency, input.baseCurrency, input.exchangeRate);
   /* أسعار هذا السند: الإعدادات، ويعلوها سعر الدفع المقَرّ وسعر الفاتورة المقَرّ. */
   const rates: RateMap = { ...settingsRates, [input.currency]: input.exchangeRate };
@@ -13830,6 +14113,24 @@ export async function recordExpenseInTx(
     if (!fresh) return { id: null, reason: "stale_quote", quote };
   }
 
+  if (split.drawerMinor > 0) {
+    // 0128 (§2.2): drawer outflows of the clinic's single open drawer are serialized here, after the party
+    // and payable row locks (whose order the settlement writers rely on), so two vouchers cannot both pass
+    // against the same cash. A private-only voucher takes no drawer lock.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('aqlan.drawer-outflow.v1', 0))");
+    const code = input.currency.toLowerCase() as "yer" | "sar" | "usd";
+    const { rows: open } = await client.query<Record<string, string>>(
+      `SELECT ${effectiveExpectedSql(code)} FROM cashier_shifts s WHERE s.status = 'open' LIMIT 1 FOR SHARE OF s`);
+    // No open shift: the insert below refuses with no_shift, as before.
+    if (open[0]) {
+      const available = toMinor(open[0][`eff_expected_${code}`]);
+      if (split.drawerMinor > available) {
+        quote.drawer = { availableMinor: Math.max(0, available) };
+        return { id: null, reason: "exceeds_drawer_cash", quote };
+      }
+    }
+  }
+
   const note = quote.party?.prepayment
     ? `دفعة مقدمة: ${input.prepaymentReason!.trim().slice(0, 200)}${input.note ? ` — ${input.note}` : ""}`
     : input.note;
@@ -13838,11 +14139,14 @@ export async function recordExpenseInTx(
        voucher_number, category, party_id, payee_text, shift_id, amount_minor, currency,
        exchange_rate, base_amount_minor, base_currency, payable_id, note, created_by,
        payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor,
-       rate_override_reason)
+       rate_override_reason, idempotency_key, idempotency_request_hash,
+       payment_source, drawer_amount_minor, owner_private_amount_minor, owner_private_reason, owner_private_user_id,
+       owner_private_account_code)
      SELECT
        ${documentNumberSql("voucher")},
        $1, $2::int, $3::text, s.id, $4, $5, $6, $7, $8, $9::int, $10::text, $11,
-       $12::text, $13::bigint, $14::numeric, $15::bigint, $16::text
+       $12::text, $13::bigint, $14::numeric, $15::bigint, $16::text, $17::text, $18::text,
+       $19::text, $20::bigint, $21::bigint, $22::text, $23::int, $24::text
        FROM cashier_shifts s
       WHERE s.status = 'open'
       LIMIT 1
@@ -13854,6 +14158,11 @@ export async function recordExpenseInTx(
       input.exchangeRate, baseAmount, input.baseCurrency, input.payableId, note, input.createdBy,
       snapshot?.currency ?? null, snapshot?.amountMinor ?? null, snapshot?.exchangeRate ?? null,
       snapshot?.settledMinor ?? null, input.rateOverrideReason?.trim() || null,
+      input.request?.key ?? null, input.request?.hash ?? null,
+      expensePaymentSource(split), split.drawerMinor, split.ownerPrivateMinor,
+      split.ownerPrivateMinor > 0 ? split.ownerPrivateReason!.trim() : null,
+      split.ownerPrivateMinor > 0 ? split.ownerUserId : null,
+      split.ownerPrivateMinor > 0 ? split.accountCode : null,
     ],
   );
   if (!rows[0]) return { id: null, reason: "no_shift", quote };
@@ -13879,6 +14188,88 @@ export async function recordExpenseInTx(
  * الدفع، محفوظًا لقطةً في السند)، ولا صرف لمورد/مختبر فوق رصيده المستحق إلا
  * «دفعة مقدمة» بسببٍ مكتوب. والمعاينة (quoteOnly) هي الحساب نفسه بلا تسجيل.
  */
+/**
+ * The expense create on a caller-owned transaction (0128): request-key replay, the voucher, its receipt
+ * read and every audit row. It never commits or rolls back. A refusal or a replay wrote nothing, and the
+ * caller must roll back (or, for a replay, may commit an empty transaction).
+ */
+export async function recordExpenseOn(client: DbClient, input: RecordExpenseInput, settingsRates: RateMap): Promise<RecordExpenseResult> {
+  if (input.request && !input.quoteOnly) {
+    // Lock-then-admit on the key: concurrent sends of one key queue here, then see the winner's row.
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`aqlan.expense.request:${input.request.key}`]);
+    const { rows: prior } = await client.query<{ id: number; idempotency_request_hash: string }>(
+      "SELECT id, idempotency_request_hash FROM expenses WHERE idempotency_key = $1", [input.request.key]);
+    if (prior[0]) {
+      if (prior[0].idempotency_request_hash !== input.request.hash) {
+        return { expense: null, reason: "expense_request_conflict", quote: null };
+      }
+      const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [prior[0].id]);
+      if (!rows[0]) throw new Error("Replayed expense receipt missing");
+      return { expense: toExpense(rows[0]), reason: null, quote: null, replayed: true };
+    }
+    // 0133: this exact request was retired; a late send of it writes nothing (the insert trigger agrees).
+    const { rows: retired } = await client.query(
+      "SELECT 1 FROM expense_request_retirements WHERE idempotency_key = $1 AND request_hash = $2 AND retired_by = $3",
+      [input.request.key, input.request.hash, input.createdBy]);
+    if (retired[0]) return { expense: null, reason: "expense_request_retired", quote: null, keyState: "retired" };
+  }
+  const result = await recordExpenseInTx(client, input, settingsRates);
+  if (result.id === null) {
+    // Decided after the key check above (with its lock still held): nothing is recorded under this key.
+    return { expense: null, reason: result.reason, quote: result.quote, ...(input.request && result.reason ? { keyUnused: true } : {}) };
+  }
+  // Read the receipt and insert required evidence before committing. A failed
+  // audit/read must not leave cash out with missing evidence or a false failure.
+  const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [result.id]);
+  if (!rows[0]) throw new Error("Expense receipt missing inside its transaction");
+  const expense = toExpense(rows[0]);
+  const quote = result.quote;
+  const context = { entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
+    actor: input.createdBy, actorRole: input.actorRole ?? null };
+  await insertAuditRow(client, {
+    ...context, action: "expense.create",
+    details: {
+      البند: expense.category, المبلغ: expense.amountMinor, العملة: expense.currency,
+      سعر_الدفع: expense.exchangeRate, المكافئ: expense.baseAmountMinor,
+      الجهة: expense.partyId ?? expense.payeeText,
+      ...(input.request ? { مفتاح_الطلب: input.request.key } : {}),
+      // 0128 (§2.2): the real source and both parts; a private part also records the owner proof and the account.
+      مصدر_الدفع: expense.paymentSource, جزء_الدرج: expense.drawerAmountMinor, جزء_المالك: expense.ownerPrivateAmountMinor,
+      ...(expense.ownerPrivateAmountMinor !== 0 ? {
+        سبب_المالك: expense.ownerPrivateReason, حساب_تمويل_المالك: input.paymentSplit?.accountCode ?? null,
+        إثبات_المالك: input.paymentSplit?.ownerUserId != null,
+      } : {}),
+      ...(expense.payableId !== null ? {
+        الالتزام: expense.payableId, عملة_الفاتورة: expense.payableCurrency,
+        قيمة_الفاتورة: expense.payableAmountMinor, سعر_الفاتورة: expense.payableExchangeRate,
+        المخصوم_من_الفاتورة: expense.payableSettledMinor,
+        المتبقي_بعد: quote?.payable?.remainingAfterMinor,
+      } : {}),
+    },
+  });
+  if (expense.rateOverrideReason) {
+    await insertAuditRow(client, {
+      ...context, action: "expense.rate_override",
+      details: {
+        العملة: expense.currency, سعر_الإعدادات: rateOf(expense.currency, settingsRates),
+        السعر_المستعمل: expense.exchangeRate, عملة_الفاتورة: expense.payableCurrency,
+        سعر_الفاتورة_بالإعدادات: expense.payableCurrency ? settingsRates[expense.payableCurrency] ?? null : null,
+        سعر_الفاتورة_المستعمل: expense.payableExchangeRate, السبب: expense.rateOverrideReason,
+      },
+    });
+  }
+  if (quote?.party?.prepayment) {
+    await insertAuditRow(client, {
+      ...context, action: "expense.prepayment",
+      details: {
+        الجهة: expense.partyId, المبلغ: expense.amountMinor, العملة: expense.currency,
+        المستحق_قبل: quote.party.outstandingBeforeMinor, السبب: input.prepaymentReason,
+      },
+    });
+  }
+  return { expense, reason: null, quote };
+}
+
 export async function recordExpense(input: RecordExpenseInput): Promise<RecordExpenseResult> {
   await ensureSchema();
   const settingsRates = input.rates ?? ratesFromSettings(await getSettings());
@@ -13889,55 +14280,19 @@ export async function recordExpense(input: RecordExpenseInput): Promise<RecordEx
   };
   try {
     await client.query("BEGIN");
-    const result = await recordExpenseInTx(client, input, settingsRates);
-    if (result.id === null) {
+    const result = await recordExpenseOn(client, input, settingsRates);
+    if (result.expense === null || result.replayed) {
       await rollback();
-      return { expense: null, reason: result.reason, quote: result.quote };
-    }
-    // Read the receipt and insert required evidence before committing. A failed
-    // audit/read must not leave cash out with missing evidence or a false failure.
-    const { rows } = await client.query<ExpenseRow>(`${EXPENSE_SELECT} WHERE e.id = $1`, [result.id]);
-    if (!rows[0]) throw new Error("Expense receipt missing inside its transaction");
-    const expense = toExpense(rows[0]);
-    const quote = result.quote;
-    const context = { entity: "expense", entityId: expense.id, entityLabel: expense.voucherNumber,
-      actor: input.createdBy, actorRole: input.actorRole ?? null };
-    await insertAuditRow(client, {
-      ...context, action: "expense.create",
-      details: {
-        البند: expense.category, المبلغ: expense.amountMinor, العملة: expense.currency,
-        سعر_الدفع: expense.exchangeRate, المكافئ: expense.baseAmountMinor,
-        الجهة: expense.partyId ?? expense.payeeText,
-        ...(expense.payableId !== null ? {
-          الالتزام: expense.payableId, عملة_الفاتورة: expense.payableCurrency,
-          قيمة_الفاتورة: expense.payableAmountMinor, سعر_الفاتورة: expense.payableExchangeRate,
-          المخصوم_من_الفاتورة: expense.payableSettledMinor,
-          المتبقي_بعد: quote?.payable?.remainingAfterMinor,
-        } : {}),
-      },
-    });
-    if (expense.rateOverrideReason) {
-      await insertAuditRow(client, {
-        ...context, action: "expense.rate_override",
-        details: {
-          العملة: expense.currency, سعر_الإعدادات: rateOf(expense.currency, settingsRates),
-          السعر_المستعمل: expense.exchangeRate, عملة_الفاتورة: expense.payableCurrency,
-          سعر_الفاتورة_بالإعدادات: expense.payableCurrency ? settingsRates[expense.payableCurrency] ?? null : null,
-          سعر_الفاتورة_المستعمل: expense.payableExchangeRate, السبب: expense.rateOverrideReason,
-        },
-      });
-    }
-    if (quote?.party?.prepayment) {
-      await insertAuditRow(client, {
-        ...context, action: "expense.prepayment",
-        details: {
-          الجهة: expense.partyId, المبلغ: expense.amountMinor, العملة: expense.currency,
-          المستحق_قبل: quote.party.outstandingBeforeMinor, السبب: input.prepaymentReason,
-        },
-      });
+      // 0133: a refusal decided after the key check retires that request in its own transaction, after
+      // the rollback, so the retirement survives it and no late send of the same request can write.
+      if (result.keyUnused && input.request) {
+        const keyState = await retireRefusedExpenseRequest({ key: input.request.key, hash: input.request.hash, actor: input.createdBy });
+        return keyState ? { ...result, keyState } : result;
+      }
+      return result;
     }
     await client.query("COMMIT");
-    return { expense, reason: null, quote };
+    return result;
   } catch (error) {
     await rollback().catch(() => {});
     throw error;
@@ -14099,12 +14454,18 @@ export async function voidExpenseInTx(
       `INSERT INTO expenses (
          voucher_number, category, party_id, payee_text, shift_id, amount_minor, currency,
          exchange_rate, base_amount_minor, base_currency, note, created_by, reversal_of_id,
-         payable_id, payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor)
+         payable_id, payable_currency, payable_amount_minor, payable_exchange_rate, payable_settled_minor,
+         payment_source, drawer_amount_minor, owner_private_amount_minor, owner_private_reason, owner_private_user_id,
+         owner_private_account_code)
        SELECT
          ${documentNumberSql("reversal")},
          $1, $2::int, $3::text, $4, -$5::bigint, $6, $7::numeric, -$8::bigint, $9,
          $10::text, $11, $12::int,
-         $13::int, $14::text, $15::bigint, $16::numeric, -$17::bigint
+         $13::int, $14::text, $15::bigint, $16::numeric, -$17::bigint,
+         -- 0128: the reversal mirrors the source; the drawer part returns to the drawer, the private part to the owner.
+         o.payment_source, -o.drawer_amount_minor, -o.owner_private_amount_minor, o.owner_private_reason, o.owner_private_user_id,
+         o.owner_private_account_code
+         FROM expenses o WHERE o.id = $12::int
        RETURNING id, voucher_number`,
       [
         current.category, current.party_id, current.payee_text,
@@ -14421,8 +14782,8 @@ export async function settleLabOrdersBatch(input: {
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
 import {
-  buildCaseOverrideResolver, commissionForPatientAtEventTime, resolvePolicyForShare, summarizeCommissions,
-  type CommissionDetailLine, type CommissionInvoice, type ServiceRateFinding,
+  allocateInvoiceDiscount, buildCaseOverrideResolver, commissionForPatientAtEventTime, discountGroupKey, effectiveDoctorShares, resolvePolicyForShare, summarizeCommissions,
+  type CommissionDetailLine, type CommissionInvoice, type DoctorShareItem, type ServiceRateFinding,
 } from "./commission";
 import { FULL_RATE_BP } from "./materialRate";
 import { invoiceNet } from "./money";
@@ -14562,6 +14923,7 @@ export async function commissionReport(
   const byPatient = new Map<number, Map<number, CommissionInvoice>>();
   const clinicDateOfInvoice = new Map<number, string>();
   const allocationTimeOfInvoice = new Map<number, string>();
+  const lineGroupsOfInvoice = new Map<number, { amountMinor: number; share: DoctorShareItem | null; key: string }[]>();
   for (const row of invoiceRows) {
     if (typeof row.allocation_origin_id !== "number" || !Number.isSafeInteger(row.allocation_origin_id) || row.allocation_origin_id <= 0) {
       throw new Error("تعذّر إثبات أصل ترتيب عمولة الفاتورة من سجل التصحيح.");
@@ -14578,22 +14940,46 @@ export async function commissionReport(
       createdAt: commissionTimestampIso(row.created_at, row.created_at_us),
       doctorShares: [],
     };
+    /* Every line group of the invoice is kept (with or without a doctor) so the invoice
+       discount can be spread over all of them before any percentage is applied. */
+    const group: { amountMinor: number; share: DoctorShareItem | null; key: string } = { amountMinor: toMinor(row.share_minor), share: null,
+      key: discountGroupKey({ doctorId: row.doctor_id, serviceId: row.service_id, category: row.category, serviceName: row.service_name, caseId: row.case_id, planId: row.plan_id }) };
     if (row.doctor_id) {
       /* حصة الطبيب تحمل هوية الخدمة وفئتها وعملة فاتورتها (محرك الوكيل المساعد):
          بها يجد النسبة الخاصة إن وُجدت — تقويم ٣٥٪ وزراعة ٣٠٪ على الطبيب نفسه. */
-      invoice.doctorShares.push({
+      group.share = {
         doctorId: row.doctor_id,
-        amountMinor: toMinor(row.share_minor),
+        amountMinor: group.amountMinor,
         currency: invoice.currency,
         serviceId: row.service_id ?? undefined,
         serviceName: row.service_name ?? undefined,
         category: row.category ?? undefined,
         caseId: row.case_id ?? undefined,
         planId: row.plan_id ?? undefined,
-      });
+      };
+      invoice.doctorShares.push(group.share);
     }
+    const groups = lineGroupsOfInvoice.get(row.invoice_id) ?? [];
+    groups.push(group);
+    lineGroupsOfInvoice.set(row.invoice_id, groups);
     patientInvoices.set(row.invoice_id, invoice);
     byPatient.set(row.patient_id, patientInvoices);
+  }
+  /* Owner decision 2026-11-11 (finance point 1): the doctor's share is taken after the invoice
+     discount. The discount (line total minus the invoice net, in the invoice currency) is spread
+     over the invoice's line groups exactly; each doctor share becomes its amount after its part
+     of the discount, so the shares of a fully discounted-and-paid invoice add up to what was
+     collected. Laboratory and material costs are deducted afterwards, by the doctor's policy. */
+  for (const patientInvoices of byPatient.values()) {
+    for (const invoice of patientInvoices.values()) {
+      const groups = lineGroupsOfInvoice.get(invoice.id) ?? [];
+      const gross = groups.reduce((sum, group) => sum + Math.max(0, group.amountMinor), 0);
+      const discountMinor = gross - invoice.netMinor;
+      if (discountMinor <= 0) continue;
+      // Ties are broken by the group's identity, never by the order the rows were read in.
+      const parts = allocateInvoiceDiscount(groups.map(group => group.amountMinor), discountMinor, groups.map(group => group.key));
+      groups.forEach((group, index) => { if (group.share) group.share.amountMinor = group.amountMinor - parts[index]; });
+    }
   }
 
   const patientIds = [...byPatient.keys()];
@@ -14805,6 +15191,11 @@ export async function commissionReport(
   const policyAt = commissionPolicyResolver(policies);
   /* (F-11) النسب الخاصة بالحالات — تُحلّ داخل المحرّك وقت كل حدث. */
   const overrideAt = buildCaseOverrideResolver(await loadCaseOverrideRows(pool));
+  /* Doctors sharing a case (owner decision 2026-11-11, point 3): the centre's decision in force at
+     the end of the report range. An approved split pays each participant at his own rate on his
+     part of the line; a shared case without an approved split is held and paid to nobody. */
+  const caseParticipations = await loadCaseParticipationsAt(to, pool as Parameters<typeof loadCaseParticipationsAt>[1], CLINIC_TIME_ZONE);
+  const participationAt = caseParticipations.size > 0 ? (caseId: number) => caseParticipations.get(caseId) : undefined;
 
   /* (P0-1) تكلفة المختبر — تُخصم من حصة الطبيب **في الفاتورة التي جاء منها عمله**،
    * مرّةً واحدة، وبعملتها حصرًا. الربط صريح في المخطط لا تخمين:
@@ -14821,10 +15212,19 @@ export async function commissionReport(
   if (invoiceById.size > 0) {
     const { rows: labRows } = await pool.query<{
       lab_order_id: number; invoice_ids: number[]; doctor_id: number | null; cost_minor: string; cost_currency: string | null;
+      member_split: { doctorId: number | null; weight: string | number | null; currency: string | null }[] | null;
     }>(
       `SELECT l.id AS lab_order_id, COALESCE(aliases.invoice_ids, ARRAY[v.invoice_id]) AS invoice_ids,
-              COALESCE(l.doctor_id, v.doctor_id) AS doctor_id, l.cost_minor, l.cost_currency
+              COALESCE(l.doctor_id, v.doctor_id) AS doctor_id, l.cost_minor, l.cost_currency, members.split AS member_split
          FROM lab_orders l
+         LEFT JOIN LATERAL (
+           -- 0136: a grouped order spanning several doctors carries its members' doctors and price weights.
+           SELECT json_agg(json_build_object('doctorId', m.doctor_id, 'weight', mp.unit_cost_minor, 'currency', mp.unit_cost_currency) ORDER BY m.tooth_code, m.id) AS split
+             FROM lab_work_intents wi
+             JOIN lab_work_members m ON m.intent_id = wi.id AND m.retired_revision IS NULL
+             LEFT JOIN lab_order_member_prices mp ON mp.lab_order_id = l.id AND mp.member_id = m.id
+            WHERE wi.id = l.lab_work_intent_id AND wi.group_kind = 'grouped'
+         ) members ON TRUE
          LEFT JOIN visits v ON v.id = l.visit_id AND v.patient_id = l.patient_id
          LEFT JOIN LATERAL (
            SELECT array_agg(DISTINCT inv.id ORDER BY inv.id) AS invoice_ids
@@ -14847,17 +15247,34 @@ export async function commissionReport(
       // correction preserves cancelled-original aliases. Never multiply cost by joins.
       const ids = row.invoice_ids.filter((id) => id !== null);
       if (ids.length > 1) throw new CommissionLabLineageError(row.lab_order_id);
-      if (row.doctor_id === null) continue;
       const candidates = ids.map((id) => invoiceById.get(id)).filter((invoice): invoice is CommissionInvoice => Boolean(invoice));
-      for (const invoice of candidates) {
-        const hasShare = invoice.doctorShares.some((share) => share.doctorId === row.doctor_id);
+      // A single known doctor receives the explicit order total without comparing tooth prices.
+      // Several doctors require comparable weights; an incidental visit doctor cannot override them.
+      const soleMemberDoctor = row.member_split?.length && row.member_split[0].doctorId !== null
+        && row.member_split.every(member => member.doctorId === row.member_split![0].doctorId)
+        ? row.member_split[0].doctorId : null;
+      const weights = soleMemberDoctor !== null ? [{ doctorId: soleMemberDoctor, weight: 1 }]
+        : row.member_split === null ? null : comparableGroupedLabWeights(row.member_split, row.cost_currency);
+      if (row.member_split !== null && weights === null) {
+        for (const doctorId of new Set(row.member_split.map(member => member.doctorId).filter((id): id is number => id !== null))) {
+          for (const invoice of candidates) {
+            const key = `${doctorId}:${invoice.currency}:${invoice.id}`;
+            labNotDeducted.set(key, (labNotDeducted.get(key) ?? 0) + 1);
+          }
+        }
+        continue;
+      }
+      const parts = weights !== null ? splitGroupedLabCost(toMinor(row.cost_minor), weights)
+        : row.doctor_id !== null ? [{ doctorId: row.doctor_id, costMinor: toMinor(row.cost_minor) }] : [];
+      for (const part of parts) for (const invoice of candidates) {
+        const hasShare = invoice.doctorShares.some((share) => share.doctorId === part.doctorId);
         if (!hasShare || row.cost_currency !== invoice.currency) {
-          const exceptionKey = `${row.doctor_id}:${invoice.currency}:${invoice.id}`;
+          const exceptionKey = `${part.doctorId}:${invoice.currency}:${invoice.id}`;
           labNotDeducted.set(exceptionKey, (labNotDeducted.get(exceptionKey) ?? 0) + 1);
           continue;
         }
-        const key = `${invoice.id}:${row.doctor_id}`;
-        labByInvoiceDoctor.set(key, (labByInvoiceDoctor.get(key) ?? 0) + toMinor(row.cost_minor));
+        const key = `${invoice.id}:${part.doctorId}`;
+        labByInvoiceDoctor.set(key, (labByInvoiceDoctor.get(key) ?? 0) + part.costMinor);
       }
     }
     /* التوزيع على بنود الطبيب نفسه في الفاتورة بالتناسب (والباقي للأكبر) — فمجموع
@@ -15021,6 +15438,8 @@ export async function commissionReport(
       (invoice) => inRange(invoice.id),
       {
         overrideAt,
+        participationAt,
+        onHeld: detail ? (held) => (detail.heldParticipations ??= []).push({ ...held, patientId }) : undefined,
         sink: detail ? (line) => detail.lines.push({ ...line, invoiceCreatedAt: new Date(line.invoiceCreatedAt).toISOString(), patientId }) : undefined,
       },
     ));
@@ -15031,7 +15450,7 @@ export async function commissionReport(
       if (chunk.amount <= 0) continue;
       const invoice = invoices.get(chunk.invoiceId);
       if (!invoice || !inRange(invoice.id) || invoice.netMinor <= 0) continue;
-      for (const share of invoice.doctorShares) {
+      for (const share of effectiveDoctorShares(invoice, participationAt)) {
         /* (F-4) حصةٌ خُصمت تكلفة موادّها الفعلية بسياسة وقت هذه الدفعة لا تُقدَّر
            موادّها بنسبة التخصص مرّةً ثانية — لا خصمٌ مزدوج لموادّ عملٍ واحد. */
         if (share.materialCostMinor && share.materialCostMinor > 0) {
@@ -16796,8 +17215,10 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
       payable_id: number | null; linked_payable_id: number | null; linked_party_id: number | null;
       linked_payable_currency: string | null; linked_settled_minor: string | null;
       linked_payable_account_code: string | null; linked_snapshot_currency: string | null;
+      drawer_amount_minor: string | null; owner_private_amount_minor: string | null; owner_private_account_code: string | null;
     }>(
       `SELECT e.id, e.voucher_number, e.created_at, e.category, e.currency, e.amount_minor, ec.category_match_count,
+              e.drawer_amount_minor, e.owner_private_amount_minor, e.owner_private_account_code,
               e.party_id, t.kind AS party_kind, t.name AS party_name, e.payee_text,
               COALESCE(t.expense_account_code, ec.account_code) AS expense_account_code,
               t.payable_account_code,
@@ -17039,6 +17460,10 @@ export async function journalEntries(from: string, to: string, queryRunner?:DbCl
       settlements,
       expenseAccountCode: row.expense_account_code,
       payableAccountCode: row.payable_account_code,
+      // 0128: only the drawer part credits cash; a private part credits the account captured on the voucher.
+      drawerMinor: row.drawer_amount_minor === null ? amountMinor : toMinor(row.drawer_amount_minor),
+      ownerPrivate: row.owner_private_amount_minor === null || toMinor(row.owner_private_amount_minor) === 0 ? null
+        : { amountMinor: toMinor(row.owner_private_amount_minor), accountCode: row.owner_private_account_code ?? invalidSettlement("حساب تمويل المالك غير محفوظ") },
     }));
   }
 
@@ -22363,8 +22788,10 @@ export async function removePlanItemOn(
   const allowed = canEditItems({ status: plan.status, consentAt: plan.consentAt?.toISOString() ?? null });
   if (!allowed.ok) { return allowed; }
 
-  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1
-    AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL}`, [itemId]);
+  // Scope the lineage check to the already-authorized plan before reading financial history.
+  // Otherwise an out-of-plan item ID can reveal whether that other patient's item was billed.
+  const { rows: [financial] } = await client.query(`SELECT 1 FROM plan_items i WHERE i.id = $1 AND i.plan_id = $2
+    AND ${PLAN_ITEM_FINANCIAL_LINEAGE_SQL}`, [itemId, planId]);
   if (financial) { return { ok: false, message: "البند له سجل مالي أو اتفاق تاريخي محفوظ؛ لا يُحذف." }; }
   const { rows: [removed] } = await client.query<PlanItemAuditRow>(
     `DELETE FROM plan_items WHERE id = $1 AND plan_id = $2 RETURNING ${PLAN_ITEM_AUDIT_COLUMNS}`, [itemId, planId],
@@ -30542,7 +30969,7 @@ export async function removePlanItemDependency(input: RemovePlanDependencyInput)
 
 import {
   RULE_SOURCE_LABEL, resolveLegacyServiceRateNames,
-  type CaseOverrideRow, type CommissionRuleSource,
+  type CaseOverrideRow, type CommissionRuleSource, type HeldParticipationShare,
 } from "./commission";
 import { CATEGORY_LABEL } from "./services-catalog";
 
@@ -30563,6 +30990,8 @@ export interface CommissionDetailCollector {
   unallocatedMaterials: UnallocatedMaterial[];
   serviceRateFindings: ServiceRateFinding[];
   invoiceClinicDate: Map<number, string>;
+  /** Lines of a shared case whose split is not approved: held, paid to nobody (owner decision 2026-11-11, point 3). */
+  heldParticipations?: Array<HeldParticipationShare & { patientId: number }>;
 }
 
 export const UNALLOCATED_MATERIAL_REASON: Record<UnallocatedMaterial["reason"], string> = {

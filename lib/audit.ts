@@ -23,6 +23,9 @@ export type AuditAction =
   | "payment.correct"
   | "expense.create"
   | "shift.open" | "shift.close"
+  | "expense.request_retire"
+  | "shift.opening_review"
+  | "shift.opening_correct"
   | "patient.create" | "patient.update" | "patient.number.change" | "patient.numbering.configure"
   /* (P2-7) دمج ملفٍّ مكرَّر في الملف الأصلي. */
   | "patient.merge"
@@ -41,7 +44,7 @@ export type AuditAction =
   | "visit.price_override"
   /* (P1-4) الجهات والخدمات وأسعارها — كانت تتغيّر بلا أثر. */
   | "party.create" | "party.update"
-  | "service.create" | "service.update" | "service.prices.batch" | "service.prices.provisional"
+  | "service.create" | "service.update" | "service.lab_mapping" | "service.prices.batch" | "service.prices.provisional"
   | "plan.create" | "plan.create_v2" | "plan.installment" | "plan.status" | "plan.consent" | "plan.financial_approval" | "plan.agreement_reconciliation" | "plan.agreement_reconciliation_refused" | "plan.agreement_delta_amendment" | "plan.approved_collection" | "plan.proposal_contact"
   /* (FIA-1) الأرصدة الافتتاحية للمعامل والموردين: دَينٌ سابق وتصحيحه، ورصيدٌ مقدَّم وإلغاؤه. */
   | "party_opening.create" | "party_opening.adjust" | "party_advance.create" | "party_advance.void"
@@ -66,6 +69,7 @@ export type AuditAction =
   | "auth.canonical_login" | "staff.capabilities.update" | "staff.account.update"
   /* (COMM-DETAIL-1) نسبة خاصة بحالة/خطة لطبيب — تعيين أو إلغاء بصفٍّ جديد مسبَّب. */
   | "commission.case_override.set" | "commission.case_override.void"
+  | "commission.case_participation.set" | "commission.case_participation.void"
   | "backup.download" | "export.download"
   | "document.reprint"
   | "chart.record" | "perio.record" | "visit.sign" | "visit.addendum"
@@ -198,8 +202,11 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "payment.correct": "تصحيح سند قبض",
   "payment.idempotent_replay": "إعادة طلب مالي بمفتاح الإعادة",
   "expense.create": "سند صرف",
+  "expense.request_retire": "إنهاء طلب صرف معلّق نهائيًا دون سند",
   "shift.open": "فتح وردية",
   "shift.close": "إغلاق وردية وجرد",
+  "shift.opening_review": "مراجعة فرق افتتاح وردية",
+  "shift.opening_correct": "تصحيح عدّ افتتاح وردية مفتوحة",
   "patient.create": "إضافة مريض",
   "patient.update": "تعديل بيانات مريض",
   "patient.number.change": "تعديل رقم ملف المريض",
@@ -220,6 +227,7 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "party.update": "تعديل بيانات جهة",
   "service.create": "إضافة خدمة إلى الدليل",
   "service.update": "تعديل خدمة أو سعرها",
+  "service.lab_mapping": "ربط خدمة العيادة بخدمة المختبر",
   "service.prices.batch": "تسعير الدليل دفعةً واحدة",
   "service.prices.provisional": "إكمال أسعار تقديرية للدليل",
   "plan.create": "إنشاء خطة علاج",
@@ -264,6 +272,8 @@ export const AUDIT_LABEL: Record<AuditAction, string> = {
   "staff.account.update": "تعديل حساب موظف (تفعيل/إيقاف/اسم/دور/ربط طبيب/كلمة مرور مؤقتة)",
   "commission.case_override.set": "تعيين نسبة عمولة خاصة بحالة",
   "commission.case_override.void": "إلغاء نسبة عمولة خاصة بحالة",
+  "commission.case_participation.set": "اعتماد توزيع مشاركة الأطباء في حالة",
+  "commission.case_participation.void": "إلغاء توزيع مشاركة الأطباء في حالة",
   "backup.download": "تنزيل نسخة احتياطية",
   "export.download": "تصدير بيانات",
   "document.reprint": "إعادة طباعة مستند",
@@ -439,6 +449,7 @@ export const SENSITIVE_ACTIONS: AuditAction[] = [
   "user.disable", "doctor.permissions.update", "user.finance-permissions.update", "doctor.commission.update",
   "staff.capabilities.update", "staff.account.update",
   "commission.case_override.set", "commission.case_override.void",
+  "commission.case_participation.set", "commission.case_participation.void",
   "backup.download", "export.download", "document.reprint",
   "visit.addendum", "visit.clearance_bypass", "ai.settings.update", "ai.provider.save", "ai.provider.delete",
 ];

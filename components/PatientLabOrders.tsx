@@ -27,7 +27,7 @@ import { useSession } from "./SessionProvider";
 import { isAdmin } from "@/lib/roles";
 
 const STATUS_MAP: Record<string, { label: string; bg: string; text: string }> = {
-  needed: { label: "لم يُرسل بعد — من إجراء الزيارة", bg: "bg-sky-50 border-sky-200", text: "text-sky-700" },
+  needed: { label: "لم يُرسل بعد", bg: "bg-sky-50 border-sky-200", text: "text-sky-700" },
   sent: { label: "قيد العمل بالمختبر", bg: "bg-amber-50 border-amber-200", text: "text-amber-700" },
   in_progress: { label: "قيد التصنيع في المعمل", bg: "bg-violet-50 border-violet-200", text: "text-violet-700" },
   received: { label: "مستلم بالعيادة", bg: "bg-blue-50 border-blue-200", text: "text-blue-700" },
