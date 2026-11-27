@@ -27,6 +27,7 @@ import {
   Point2D,
   computeCephalometricMetrics,
 } from '../utils/orthoMath';
+import { validateOrthoCephApprovalGate } from '@/lib/ortho-scientific-analyses';
 
 interface CephTracingStudioProps {
   patient: PatientCase;
@@ -285,6 +286,14 @@ export const CephTracingStudio: React.FC<CephTracingStudioProps> = ({
   const handleSaveCeph = () => {
     const version = cephHistory.length + 1;
     const sysLabel = SYSTEMS.find((s) => s.id === system)?.en || 'Comprehensive';
+    const isCalibrated = Boolean(selectedMedia?.calibration.isCalibrated && (selectedMedia.calibration.pixelsPerMm ?? 0) > 0);
+    const approvalGate = validateOrthoCephApprovalGate({
+      calibrationValid: isCalibrated,
+      pixelsPerMm: selectedMedia?.calibration.pixelsPerMm ?? null,
+      landmarks,
+      actorRole: role,
+    });
+    const canApproveNow = approvalGate.ok && (role === 'doctor' || role === 'admin');
     const newAnalysis: MeasurementAnalysis = {
       id: `ana-ceph-${Date.now()}`,
       version,
@@ -294,21 +303,26 @@ export const CephTracingStudio: React.FC<CephTracingStudioProps> = ({
       templateName: `Aqlan Ceph Studio — ${sysLabel}`,
       normSource: 'Steiner / Tweed / Ricketts / McNamara / Jarabak',
       linkedMediaId: selectedMedia?.id,
-      calibrationValid: Boolean(selectedMedia?.calibration.isCalibrated),
+      calibrationValid: isCalibrated,
       calibrationSource: selectedMedia?.calibration.source || tr(lang, 'غير معاير', 'Uncalibrated'),
       landmarks,
       metrics: allComputedMetrics,
       examiner: actorName,
       createdAt: new Date().toISOString(),
-      approvedBy: role === 'doctor' ? actorName : undefined,
-      approvedAt: role === 'doctor' ? new Date().toISOString() : undefined,
+      approvedBy: canApproveNow ? actorName : undefined,
+      approvedAt: canApproveNow ? new Date().toISOString() : undefined,
     };
     onChange(
       { ...patient, analyses: [newAnalysis, ...patient.analyses] },
-      {
-        ar: `حفظ رسم وتحليل سيفالومتري ${stage} (نسخة ${version})`,
-        en: `Saved ${stage} Cephalometric Tracing (v${version})`,
-      },
+      canApproveNow
+        ? {
+            ar: `اعتماد رسم وتحليل سيفالومتري ${stage} (${approvalGate.confirmedLandmarkCount} معلمًا معايرًا — نسخة ${version})`,
+            en: `Approved ${stage} Cephalometric Tracing (${approvalGate.confirmedLandmarkCount} calibrated landmarks — v${version})`,
+          }
+        : {
+            ar: !approvalGate.ok ? approvalGate.messageAr : `حفظ مسودة سيفالومتري ${stage} (نسخة ${version})`,
+            en: !approvalGate.ok ? approvalGate.messageEn : `Saved ${stage} Cephalometric Draft (v${version})`,
+          },
     );
   };
 

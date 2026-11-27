@@ -46,41 +46,34 @@ export async function seedGeminiProviderIfMissing(pool: any): Promise<void> {
           'google-gemini',
           'https://generativelanguage.googleapis.com',
           'gemini-2.5-flash',
-          ARRAY['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro', 'gemini-3.6-flash'],
-          'projects/774730465825',
+          ARRAY['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-pro'],
+          NULL,
           $1,
           20000,
           2048,
           0.2,
           TRUE,
-          TRUE,
-          1,
-          NOW(),
-          TRUE,
-          'الاتصال ناجح ومعتمد — النموذج gemini-2.5-flash',
-          180,
+          NOT EXISTS (SELECT 1 FROM ai_providers WHERE is_default = TRUE),
+          10,
+          NULL,
+          NULL,
+          NULL,
+          NULL,
           'admin',
           NOW()
         )
         ON CONFLICT (id) DO UPDATE SET
           api_key_enc = EXCLUDED.api_key_enc,
-          organization_id = EXCLUDED.organization_id,
-          model = EXCLUDED.model,
-          models = EXCLUDED.models,
-          enabled = TRUE,
-          is_default = TRUE,
-          priority = 1,
-          last_test_at = NOW(),
-          last_test_ok = TRUE,
-          last_test_message = EXCLUDED.last_test_message,
-          last_test_latency = EXCLUDED.last_test_latency,
-          updated_at = NOW()`,
+          last_test_at = NULL,
+          last_test_ok = NULL,
+          last_test_message = NULL,
+          last_test_latency = NULL,
+          updated_at = NOW()
+        WHERE ai_providers.api_key_enc IS NULL OR ai_providers.api_key_enc = ''`,
         [keyEnc],
       );
 
-      // جعل google-gemini هو الافتراضي وإزاحة باقي المزودين
-      await pool.query(`UPDATE ai_providers SET is_default = FALSE WHERE id <> 'google-gemini'`);
-      await pool.query(`UPDATE ai_providers SET priority = priority + 1 WHERE id <> 'google-gemini' AND priority = 1`);
+      // A saved environment key is not a successful API response. Never demote the owner's existing default.
     }
   } catch {
     // تجاوز آمن في حال عدم ضبط SESSION_SECRET بعد
@@ -201,6 +194,9 @@ function mapRowToConfig(row: any): AiProviderConfig {
 }
 
 export function toAiProviderView(config: AiProviderConfig): AiProviderView {
+  // Previous environment seeding fabricated this exact success message without a network call.
+  const unverifiedLegacySeed = config.id === "google-gemini"
+    && config.lastTestMessage === "الاتصال ناجح ومعتمد — النموذج gemini-2.5-flash";
   let keyMasked = "";
   if (config.apiKeyEnc) {
     try {
@@ -229,10 +225,10 @@ export function toAiProviderView(config: AiProviderConfig): AiProviderView {
     isDefault: config.isDefault,
     priority: config.priority,
     taskModels: config.taskModels ?? {},
-    lastTestAt: config.lastTestAt ? config.lastTestAt.toISOString() : null,
-    lastTestOk: config.lastTestOk ?? null,
-    lastTestMessage: config.lastTestMessage ?? null,
-    lastTestLatency: config.lastTestLatency ?? null,
+    lastTestAt: !unverifiedLegacySeed && config.lastTestAt ? config.lastTestAt.toISOString() : null,
+    lastTestOk: unverifiedLegacySeed ? null : (config.lastTestOk ?? null),
+    lastTestMessage: unverifiedLegacySeed ? "لم يُثبت الاتصال بعد — أعد اختبار المزود." : (config.lastTestMessage ?? null),
+    lastTestLatency: unverifiedLegacySeed ? null : (config.lastTestLatency ?? null),
     createdAt: config.createdAt ? config.createdAt.toISOString() : null,
     updatedAt: config.updatedAt ? config.updatedAt.toISOString() : null,
     updatedBy: config.updatedBy ?? null,
@@ -351,6 +347,10 @@ export async function saveAiProvider(
        is_default = EXCLUDED.is_default,
        priority = EXCLUDED.priority,
        task_models = EXCLUDED.task_models,
+       last_test_at = NULL,
+       last_test_ok = NULL,
+       last_test_message = NULL,
+       last_test_latency = NULL,
        updated_by = EXCLUDED.updated_by,
        updated_at = NOW()
      RETURNING *`,
@@ -487,26 +487,42 @@ export async function testAiProviderConnection(
     return { ok: false, message: "المزود غير موجود.", latencyMs: 0 };
   }
 
+  const usesUnsavedKey = Boolean(unsavedApiKey?.trim());
   const testConfig: AiProviderConfig = {
     ...provider,
-    apiKeyEnc: unsavedApiKey && unsavedApiKey.trim().length > 0
-      ? encryptSecret(unsavedApiKey.trim())
+    apiKeyEnc: usesUnsavedKey
+      ? encryptSecret(unsavedApiKey!.trim())
       : provider.apiKeyEnc,
   };
 
   const adapter = getProviderAdapter(testConfig.protocolType);
-  const outcome = await adapter.testConnection(testConfig, fetchImpl);
+  let outcome = await adapter.testConnection(testConfig, fetchImpl);
 
-  // تحديث حالة الاختبار في الجدول
-  await getPool().query(
-    `UPDATE ai_providers
-     SET last_test_at = NOW(),
-         last_test_ok = $1,
-         last_test_message = $2,
-         last_test_latency = $3
-     WHERE id = $4`,
-    [outcome.ok, outcome.message, outcome.latencyMs, id],
-  );
+  // A temporary key can be tested, but its result is not evidence about the saved credential.
+  if (!usesUnsavedKey) {
+    const persisted = await getPool().query(
+      `UPDATE ai_providers
+       SET last_test_at = NOW(),
+           last_test_ok = $1,
+           last_test_message = $2,
+           last_test_latency = $3
+       WHERE id = $4 AND api_key_enc IS NOT DISTINCT FROM $5
+         AND protocol_type = $6 AND base_url = $7 AND model = $8
+         AND api_endpoint IS NOT DISTINCT FROM $9
+         AND organization_id IS NOT DISTINCT FROM $10
+         AND COALESCE(custom_headers::jsonb, '{}'::jsonb) = $11::jsonb
+         AND COALESCE(timeout_ms, 30000) = $12
+         AND COALESCE(max_tokens, 2048) = $13
+         AND COALESCE(temperature, 0.2) = $14`,
+      [outcome.ok, outcome.message, outcome.latencyMs, id, provider.apiKeyEnc,
+        provider.protocolType, provider.baseUrl, provider.model, provider.apiEndpoint ?? null,
+        provider.organizationId ?? null, JSON.stringify(provider.customHeaders ?? {}),
+        provider.timeoutMs, provider.maxTokens, provider.temperature],
+    );
+    if (persisted.rowCount !== 1) {
+      outcome = { ok: false, message: "تغيّرت إعدادات المزود أثناء الاختبار؛ أعد الاختبار بالإعدادات الحالية.", latencyMs: outcome.latencyMs };
+    }
+  }
 
   await recordAudit({
     action: "ai.provider.test",
@@ -515,6 +531,7 @@ export async function testAiProviderConnection(
     entityLabel: provider.name,
     details: {
       providerId: id,
+      usesUnsavedKey,
       ok: outcome.ok,
       latencyMs: outcome.latencyMs,
       message: outcome.message,

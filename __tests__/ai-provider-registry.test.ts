@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { decryptSecret, encryptSecret, maskKey } from "../lib/secretbox";
 import {
   OpenAiCompatibleAdapter,
+  OpenAiResponsesAdapter,
   AnthropicCompatibleAdapter,
   GoogleGeminiAdapter,
   getProviderAdapter,
@@ -208,7 +209,7 @@ describe("AI Provider Adapters (هندسة المحولات)", () => {
 
   it("getProviderAdapter يرجع المحول المطابق للبروتوكول", () => {
     expect(getProviderAdapter("openai-compatible")).toBeInstanceOf(OpenAiCompatibleAdapter);
-    expect(getProviderAdapter("openai-responses")).toBeInstanceOf(OpenAiCompatibleAdapter);
+    expect(getProviderAdapter("openai-responses")).toBeInstanceOf(OpenAiResponsesAdapter);
     expect(getProviderAdapter("anthropic-compatible")).toBeInstanceOf(AnthropicCompatibleAdapter);
     expect(getProviderAdapter("google-gemini")).toBeInstanceOf(GoogleGeminiAdapter);
     expect(getProviderAdapter("custom-http")).toBeInstanceOf(OpenAiCompatibleAdapter);

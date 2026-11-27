@@ -871,3 +871,74 @@ export function computePermanentArchSpace(input: {
     interpretationAr,
   };
 }
+
+/* ─────────────────────────── 10. Cephalometric Clinical Approval Gate (Charter §12, TD-11) ─────────────────────────── */
+
+export const MIN_CEPH_APPROVAL_LANDMARKS = 24 as const;
+
+export interface CephApprovalGateInput {
+  calibrationValid: boolean;
+  pixelsPerMm?: number | null;
+  landmarks: Record<string, { x: number; y: number; source?: string } | undefined> | null | undefined;
+  actorRole?: string | null;
+}
+
+export type CephApprovalGateResult =
+  | { ok: true; confirmedLandmarkCount: number }
+  | {
+      ok: false;
+      reason: "uncalibrated" | "insufficient_landmarks" | "unconfirmed_suggested" | "unauthorized_role";
+      confirmedLandmarkCount: number;
+      messageAr: string;
+      messageEn: string;
+    };
+
+export function validateOrthoCephApprovalGate(input: CephApprovalGateInput): CephApprovalGateResult {
+  const entries = Object.entries(input.landmarks ?? {}).filter(
+    ([, pt]) => pt != null && typeof pt.x === "number" && Number.isFinite(pt.x) && typeof pt.y === "number" && Number.isFinite(pt.y),
+  );
+  const suggestedEntries = entries.filter(([, pt]) => pt?.source === "suggested");
+  const confirmedCount = entries.length - suggestedEntries.length;
+
+  if (!input.calibrationValid || (input.pixelsPerMm !== undefined && (input.pixelsPerMm === null || input.pixelsPerMm <= 0))) {
+    return {
+      ok: false,
+      reason: "uncalibrated",
+      confirmedLandmarkCount: confirmedCount,
+      messageAr: "حُفظت الدراسة كمسودة غير معتمدة: يُشترط إجراء معايرة المسطرة (mm) أولًا قبل الاعتماد السريري.",
+      messageEn: "Saved as unapproved draft: ruler calibration (mm) is required before clinical approval.",
+    };
+  }
+
+  if (suggestedEntries.length > 0) {
+    return {
+      ok: false,
+      reason: "unconfirmed_suggested",
+      confirmedLandmarkCount: confirmedCount,
+      messageAr: "حُفظت الدراسة كمسودة: توجد معالم مقترحة آليًا يجب تأكيدها يدويًا من الطبيب قبل الاعتماد.",
+      messageEn: "Saved as draft: AI-suggested landmarks must be manually confirmed by the clinician before approval.",
+    };
+  }
+
+  if (confirmedCount < MIN_CEPH_APPROVAL_LANDMARKS) {
+    return {
+      ok: false,
+      reason: "insufficient_landmarks",
+      confirmedLandmarkCount: confirmedCount,
+      messageAr: `حُفظت الدراسة كمسودة غير معتمدة: يلزم تحديد ${MIN_CEPH_APPROVAL_LANDMARKS} معلمًا تشريحيًا على الأقل للاعتماد السريري الشامل (المحدد حاليًا: ${confirmedCount}).`,
+      messageEn: `Saved as unapproved draft: at least ${MIN_CEPH_APPROVAL_LANDMARKS} confirmed anatomical landmarks are required for clinical approval (placed: ${confirmedCount}).`,
+    };
+  }
+
+  if (input.actorRole && input.actorRole !== "doctor" && input.actorRole !== "admin") {
+    return {
+      ok: false,
+      reason: "unauthorized_role",
+      confirmedLandmarkCount: confirmedCount,
+      messageAr: "الاعتماد السريري للسيفالومتري محصور بالطبيب المختص.",
+      messageEn: "Clinical cephalometric approval is restricted to clinicians.",
+    };
+  }
+
+  return { ok: true, confirmedLandmarkCount: confirmedCount };
+}

@@ -6,6 +6,7 @@ import {
   type OrthoWorkspaceRecord,
 } from "./ortho-workspace-types";
 import type { OrthoSectionKey, ResolvedOrthoAccess } from "./ortho-privacy";
+import { validateOrthoCephApprovalGate } from "./ortho-scientific-analyses";
 
 /**
  * Case-Scoped, Atomic CAS Orthodontic Clinical Workspace Store (Charter §9, TD-04..TD-06):
@@ -626,6 +627,29 @@ export async function saveOrthoWorkspaceRecord(
     }
 
     const merged = applyTypedSectionCommand(existing, command, incoming, actorUsername, options?.reason);
+    // Server-side Ceph Clinical Approval Gate (Charter §12, TD-11): strip uncalibrated or <24-landmark ceph approvals
+    if (merged.orthoCoreCase && typeof merged.orthoCoreCase === "object") {
+      const oc = { ...(merged.orthoCoreCase as Record<string, unknown>) };
+      if (Array.isArray(oc.analyses)) {
+        oc.analyses = (oc.analyses as Array<Record<string, unknown>>).map((ana) => {
+          if (ana && typeof ana === "object" && ana.analysisType === "cephalometric" && (ana.approvedAt || ana.approvedBy)) {
+            const gate = validateOrthoCephApprovalGate({
+              calibrationValid: ana.calibrationValid === true,
+              landmarks: (ana.landmarks as Record<string, { x: number; y: number; source?: string }>) ?? {},
+              actorRole,
+            });
+            if (!gate.ok) {
+              const copy = { ...ana };
+              delete copy.approvedAt;
+              delete copy.approvedBy;
+              return copy;
+            }
+          }
+          return ana;
+        });
+      }
+      merged.orthoCoreCase = oc;
+    }
     const next: OrthoWorkspaceRecord = {
       ...merged,
       patientId,

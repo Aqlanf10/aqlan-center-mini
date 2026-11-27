@@ -26846,6 +26846,7 @@ export async function updateCephLandmarksInTransaction(
     return { ok: false, message: "التحليل المعتمد لا يُعدَّل — افتح نسخة جديدة عنه." };
   }
   for (const pt of clean) {
+    const isSuggested = pt.source === "suggested";
     await client.query(
       `INSERT INTO ceph_landmarks (analysis_id, code, x, y, source, confirmed_by)
        VALUES ($1, $2, $3, $4, $5, $6)
@@ -26853,7 +26854,7 @@ export async function updateCephLandmarksInTransaction(
        DO UPDATE SET x = EXCLUDED.x, y = EXCLUDED.y,
           source = EXCLUDED.source, confirmed_by = EXCLUDED.confirmed_by,
           confirmed_at = NOW()`,
-      [id, pt.code, pt.x, pt.y, pt.source === "suggested" ? "suggested" : "manual", by],
+      [id, pt.code, pt.x, pt.y, isSuggested ? "suggested" : "manual", isSuggested ? "" : by],
     );
   }
   return { ok: true, count: clean.length };
@@ -27033,18 +27034,37 @@ export async function completeCephAnalysisInTransaction(
   if (analysis.status !== "draft") {
     return { result: { ok: false, message: "التحليل مرفوض — لا يُعتمد." } };
   }
-  if (analysis.mm_per_pixel == null) {
+  if (analysis.mm_per_pixel == null || !Number.isFinite(analysis.mm_per_pixel) || analysis.mm_per_pixel <= 0) {
     return { result: { ok: false, message: "اعتمد بلا معايرة ممنوع: عاير الشععة أولًا حتى تكون الأطوال بالمليمتر." } };
   }
 
-  const { rows: lm } = await client.query<{ code: string; x: number; y: number }>(
-    `SELECT code, x, y FROM ceph_landmarks WHERE analysis_id = $1`, [id],
+  const { rows: lm } = await client.query<{ code: string; x: number; y: number; source: string; confirmed_by: string }>(
+    `SELECT code, x, y, source, confirmed_by FROM ceph_landmarks WHERE analysis_id = $1`, [id],
   );
   const map: LandmarkMap = {};
-  for (const r of lm) if (isCephLandmarkCode(r.code)) map[r.code as LandmarkCode] = { x: r.x, y: r.y };
+  const unconfirmedRequired: LandmarkCode[] = [];
+  for (const r of lm) {
+    if (isCephLandmarkCode(r.code)) {
+      map[r.code as LandmarkCode] = { x: r.x, y: r.y };
+      if (
+        REQUIRED_LANDMARKS.includes(r.code as LandmarkCode) &&
+        (r.source === "suggested" || !r.confirmed_by || !r.confirmed_by.trim())
+      ) {
+        unconfirmedRequired.push(r.code as LandmarkCode);
+      }
+    }
+  }
   const missing = REQUIRED_LANDMARKS.filter((c) => map[c] == null);
   if (missing.length > 0) {
     return { result: { ok: false, message: `المعالم ناقصة: ${missing.join("، ")}` } };
+  }
+  if (unconfirmedRequired.length > 0) {
+    return {
+      result: {
+        ok: false,
+        message: `لا يُعتمد التحليل بمعالم مقترحة آليًا دون مراجعة وتأكيد يدوي من الطبيب: ${unconfirmedRequired.join("، ")}`,
+      },
+    };
   }
 
   const results = computeAll(map, analysis.mm_per_pixel);

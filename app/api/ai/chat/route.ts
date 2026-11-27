@@ -1,9 +1,16 @@
 import { NextResponse } from "next/server";
 import { requireSession } from "@/lib/session";
-import { findUserByUsername, getSettingsSafe, personNameTokens, recordAudit } from "@/lib/db";
+import { findUserByUsername, getPool, getSettingsSafe, personNameTokens, recordAudit } from "@/lib/db";
 import { type Role, canUseAiChat } from "@/lib/roles";
 import { clinicalCapabilityOf } from "@/lib/clinical-identity";
 import { aiChat, getAiSettings, type AiChatMessage } from "@/lib/ai";
+import { executeAiChatWithFallback, listAiProviders } from "@/lib/ai-providers/registry";
+import {
+  checkAiExternalBudget,
+  recordAiUsageLedger,
+  allowedAiToolGroupsForUser,
+  type AiBudgetCheckResult,
+} from "@/lib/ai-budget-governance";
 import { deIdentifyClinicalContext } from "@/lib/ai-tools/privacy";
 import { ADMIN_ASSISTANT_SYSTEM_PROMPT, CLINICAL_SCOPE_NOTICE, externalConsultPlan, redactPersonNames } from "@/lib/ai-scope";
 import type { AiToolContext, StructuredAiResponse } from "@/lib/ai-tools/types";
@@ -13,6 +20,7 @@ import { dbTodayISO } from "@/lib/reports";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { AI_CHAT_BODY_LIMIT_BYTES, AI_CHAT_RATE_LIMIT } from "@/lib/security-limits";
 import { consumeSecurityLimit } from "@/lib/security-rate-limit";
+import { withIsolation } from "@/lib/transactions";
 
 export const dynamic = "force-dynamic";
 
@@ -129,9 +137,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اكتب رسالتك أو استفسارك أولاً." }, { status: 400 });
   }
 
-  // التحقق من تفعيل خدمة الذكاء الاصطناعي
-  const settings = await getAiSettings();
-  if (!settings.enabled) {
+  // Decoupled from legacy ai_settings singleton: local assistant works even without an ai_settings row,
+  // unless the owner explicitly disabled AI service in ai_settings.
+  const [legacySettings, configuredProviders, safeSettings] = await Promise.all([
+    getAiSettings().catch(() => ({ enabled: true, hasKey: false })),
+    listAiProviders().catch(() => []),
+    getSettingsSafe().catch(() => null),
+  ]);
+  if (legacySettings.enabled === false) {
     return NextResponse.json(
       {
         message: "خدمة الذكاء الاصطناعي غير مفعّلة في المركز حالياً. يمكن للمدير تفعيلها من شاشة الإعدادات > الذكاء الاصطناعي.",
@@ -223,17 +236,42 @@ export async function POST(request: Request) {
     role: session.role,
     doctorPartyId,
   });
-  const clinicalExternalAllowed = settings.hasKey
-    ? (await getSettingsSafe().catch(() => null))?.["ai.clinical_external"] === "true"
-    : false;
+  const allowedToolGroups = allowedAiToolGroupsForUser(session.role as Role, user.permissions ?? null);
+
+  // Structural Zero-PHI & Default-OFF External AI Governance (Charter §21, TD-12):
+  // 1. External assistant is STRICTLY OFF by default (`ai.external_assistant === "true"` required).
+  // 2. Clinical prompts are STRUCTURALLY LOCKED to local processing (`clinicalExternalAllowed = false`).
+  // 3. Any active patient/visit/case/ceph context in the request hard-blocks external consultation.
+  const externalAssistantEnabled = safeSettings?.["ai.external_assistant"] === "true";
+  const hasAnyExternalKey =
+    configuredProviders.some((p) => p.enabled && Boolean(p.apiKeyEnc)) || Boolean(legacySettings.hasKey);
+  const hasActivePatientContext =
+    conversationPatientId !== null ||
+    droppedPatientContext ||
+    source.patientId != null ||
+    source.visitId != null ||
+    source.caseId != null ||
+    source.orthoCaseId != null ||
+    source.cephId != null;
+
   const plan = externalConsultPlan({
     intent: response.intent,
     message: latestUserMsg,
-    hasKey: settings.hasKey,
-    clinicalExternalAllowed,
+    hasKey: externalAssistantEnabled && hasAnyExternalKey && !hasActivePatientContext,
+    clinicalExternalAllowed: false,
     clinicalIdentity: clinicalCapability.ok,
   });
-  if (plan.kind === "clinical_blocked") {
+
+  let usedExternalProvider = false;
+  if (hasActivePatientContext && externalAssistantEnabled && isDbConnected) {
+    response = {
+      ...response,
+      warnings: [
+        ...(response.warnings || []),
+        "حماية خصوصية المرضى (Zero-PHI): أُبقي الاستفسار داخل المحرك المحلي بالكامل لوجود سياق ملف مريض نشط.",
+      ],
+    };
+  } else if (plan.kind === "clinical_blocked") {
     response = {
       ...response,
       warnings: [
@@ -243,38 +281,84 @@ export async function POST(request: Request) {
           : "الاستشارة السريرية النصية (دوائية/علاجية) متاحة للحسابات ذات الهوية السريرية — الرد أعلاه من المحرك المحلي ضمن صلاحياتك الإدارية.",
       ],
     };
-  } else if (plan.kind === "clinical" || plan.kind === "administrative") {
+  } else if (plan.kind === "administrative") {
     try {
-      const outboundMessages: AiChatMessage[] = plan.kind === "clinical"
-        ? [
-          { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
-          // تعقيم كامل سجل المحادثة قبل إرساله — ورسائل system من العميل أُسقطت أصلًا (P0.5).
-          ...incomingMessages.map((m) => ({ role: m.role, content: deIdentifyClinicalContext(m.content) })),
-        ]
-        : [
-          { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
-          // أسماء المسجّلين في المركز تُقنَّع أولًا، ثم الهواتف والأرقام والبريد.
-          { role: "user", content: deIdentifyClinicalContext(redactPersonNames(latestUserMsg, await personNameTokens().catch(() => new Set<string>()))) },
-        ];
+      const budgetCheck: AiBudgetCheckResult = isDbConnected
+        ? await withIsolation(getPool(), "READ COMMITTED", (client) =>
+            checkAiExternalBudget(client, "global", 1),
+          ).catch((): AiBudgetCheckResult => ({ allowed: true }))
+        : { allowed: true };
 
-      const cloudResult = await aiChat({
-        messages: outboundMessages,
-        maxTokens: plan.kind === "clinical" ? 1500 : 800,
-        temperature: 0.3,
-      });
-
-      if (cloudResult.ok && cloudResult.content.trim()) {
+      if (!budgetCheck.allowed) {
         response = {
           ...response,
-          answer: cloudResult.content.trim(),
-          model: cloudResult.model,
-          sourceType: "external_ai",
-          latencyMs: cloudResult.latencyMs,
+          warnings: [
+            ...(response.warnings || []),
+            budgetCheck.reasonAr ?? "تم بلوغ سقف ميزانية المساعد الخارجي؛ استمر الرد عبر المحرك المحلي.",
+          ],
         };
+      } else {
+        const outboundMessages: AiChatMessage[] = [
+          { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: deIdentifyClinicalContext(
+              redactPersonNames(latestUserMsg, await personNameTokens().catch(() => new Set<string>())),
+            ),
+          },
+        ];
+
+        const registryResult =
+          configuredProviders.some((p) => p.enabled && Boolean(p.apiKeyEnc))
+            ? await executeAiChatWithFallback({
+                messages: outboundMessages,
+                maxTokens: 800,
+                temperature: 0.3,
+              })
+            : null;
+
+        const cloudResult =
+          registryResult && registryResult.ok
+            ? {
+                ok: true as const,
+                content: registryResult.content,
+                model: registryResult.model,
+                latencyMs: registryResult.latencyMs,
+              }
+            : legacySettings.hasKey
+              ? await aiChat({
+                  messages: outboundMessages,
+                  maxTokens: 800,
+                  temperature: 0.3,
+                })
+              : null;
+
+        if (cloudResult && cloudResult.ok && cloudResult.content.trim()) {
+          usedExternalProvider = true;
+          response = {
+            ...response,
+            answer: cloudResult.content.trim(),
+            model: cloudResult.model,
+            sourceType: "external_ai",
+            latencyMs: cloudResult.latencyMs,
+          };
+        }
       }
     } catch {
       // الاستمرار على رد المحرك المحلي عند فشل المزوّد
     }
+  }
+
+  if (isDbConnected) {
+    await recordAiUsageLedger(getPool(), {
+      userId: user.id,
+      username: session.username,
+      role: session.role,
+      scope: "global",
+      model: response.model ?? null,
+      estimatedCostMinor: usedExternalProvider ? 1 : 0,
+      localOnly: !usedExternalProvider,
+    }).catch(() => {});
   }
 
   // تسجيل تدقيق أمني للطلب
@@ -288,6 +372,7 @@ export async function POST(request: Request) {
         role: session.role,
         intent: response.intent,
         toolsUsed: response.toolsUsed,
+        allowedToolGroups: [...allowedToolGroups],
         sourceType: response.sourceType,
         model: response.model,
         latencyMs: Date.now() - started,
