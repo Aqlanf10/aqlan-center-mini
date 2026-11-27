@@ -4,6 +4,7 @@ import { CATEGORY_LABEL } from "@/lib/services-catalog";
 import { useCallback, useEffect, useState } from "react";
 import { formatMoney, isCurrency, type Currency } from "@/lib/money";
 import { friendlyDate } from "@/lib/reminders";
+import { patientTimelineDateTimeParts } from "@/lib/patient-timeline-display-clock";
 import {
   filterTimeline,
   TIMELINE_GROUP_LABEL,
@@ -50,18 +51,19 @@ const KIND_STYLE: Record<string, string> = {
   diagnosis: "border-violet-200 bg-violet-50/40",
 };
 
-function eventDateTime(at: string): string {
-  const date = at.slice(0, 10);
-  const time = at.slice(11, 16);
+function eventDateTime(event: TimelineEvent, clinicZone?: string): string {
+  const { date, time } = patientTimelineDateTimeParts(event, clinicZone);
   return `${friendlyDate(date)}${time ? ` · ${time}` : ""}`;
 }
 
 export function PatientTimeline({
   patientId,
   base,
+  clinicZone,
 }: {
   patientId: number;
   base: Currency;
+  clinicZone?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [events, setEvents] = useState<TimelineEvent[] | null>(null);
@@ -161,7 +163,7 @@ export function PatientTimeline({
                           </span>
                         </p>
                         <p className="mt-0.5 text-[11px] text-slate-500">
-                          {eventDateTime(event.at)}
+                          {eventDateTime(event, clinicZone)}
                           {event.detail ? ` · ${event.detail}` : ""}
                         </p>
                         {event.doctorName || event.caseTitle || event.specialties?.length ? (

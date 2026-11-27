@@ -19,7 +19,7 @@ vi.mock("@/lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", printCount: async ()
   getSettingsSafe: async () => SETTING_DEFAULTS,
   patientAppointmentsFrom: async () => [{ id: 1, patientId: 2, scheduledDate: "2031-01-04", scheduledTime: "09:30", status: "booked" }],
   getPatient: async (id: number) => id === 2 ? ({ id: 2, fullName: "SYN-PRINT-1234567890123", patientNumber: "SYN-PRINT-1234567890123", phone: null, createdAt: "2031-01-04T09:00:00Z" }) : ({ id: 1, fullName: "SYN-RX-PATIENT", patientNumber: "SYN-RX-001", birthYear: 1990, gender: "male", medicalAlert: null }),
-  getPrescription: async () => ({ id: 11, patientId: 1, createdBy: "SYN-SAVED-CLINICIAN", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: [{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }] }),
+  getPrescription: async () => ({ id: 11, patientId: 1, createdBy: "SYN-SAVED-RX-ISSUER", prescribingDoctorName: "SYN-SAVED-CLINICIAN", createdAt: "2031-01-15T10:00:00.000Z", instructionsLang: "both", diagnosis: "SYN-SAVED-DIAGNOSIS", notes: "", items: [{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }] }),
   getLabOrderById: async () => dispatchOrder({ labName: "SYNTHETIC-DISPATCH-LAB-A-1234567890123", labPhone: "777123456", serviceName: "SYNTHETIC-DISPATCH-SERVICE-1234567890123", workType: "SYNTHETIC-DISPATCH-SERVICE-1234567890123" }),
   getPayment: async () => ({ id: 1, receiptNumber: "SYN-PROV-ORIGINAL-BHGFBCDEFABCD", patientName: "SYNTHETIC-RECEIPT-PROVENANCE", invoiceId: 1, kind: "payment", amountMinor: 50000, currency: "YER", method: "cash", createdBy: "SYNTHETIC-SIGNER", createdAt: "2000-03-02T22:00:00.000Z" }),
 }));
@@ -51,12 +51,10 @@ function labCss() {
   return css.toString();
 }
 describe("native compact print regression witnesses", () => {
-  it.each(["receipt", "lab", "prescription-saved", "prescription-draft", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
+  it.each(["receipt", "lab", "prescription-saved", "patient-card"] as const)("preserves %s paper and field integrity", async kind => {
     const prescription = kind.startsWith("prescription-");
     const node = kind === "patient-card" ? await PatientCardPage({ params: Promise.resolve({ id: "2" }) }) : prescription
-      ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve(kind === "prescription-saved"
-        ? { rx: "11", diagnosis: "SYN-URL-TAMPER" }
-        : { draft: "1", lang: "both", diagnosis: "SYN-DRAFT-DIAGNOSIS", items: JSON.stringify([{ name: "SYNTHETIC-RX-MEDICATION", dose: "SYN-DOSE", form: "Tablets", frequency: "SYN-FREQUENCY", duration: "SYN-DURATION", instructions: "تعليمات اصطناعية للاختبار", instructionsEn: "SYN-INSTRUCTIONS" }]) }) })
+      ? await PrescriptionPage({ params: Promise.resolve({ id: "1" }), searchParams: Promise.resolve({ rx: "11", doctorName: "SYN-URL-TAMPER" }) })
       : await (kind === "receipt" ? ReceiptPage : LabPage)({ params: Promise.resolve({ id: "1" }) });
     const body = renderToStaticMarkup(<><PrintDocumentWatermark /><div className="print-root">{node}</div></>);
     const logo = `data:image/png;base64,${readFileSync(resolve("public/logo.png")).toString("base64")}`;
@@ -103,7 +101,7 @@ describe("native compact print regression witnesses", () => {
         }
         const text = execFileSync("pdftotext", ["-layout", "-", "-"], { input: pdf, encoding: "utf8" });
         const references = kind === "patient-card" ? ["SYN-PRINT-1234567890123", "04/01/2031", "9:30", SETTING_DEFAULTS["clinic.phone"]] : prescription
-          ? ["SYN-RX-PATIENT", "SYN-RX-001", "SYNTHETIC-RX-MEDICATION", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", kind === "prescription-saved" ? "SYN-SAVED-CLINICIAN" : "SYN-DRAFT-CLINICIAN", kind === "prescription-saved" ? "SYN-SAVED-DIAGNOSIS" : "SYN-DRAFT-DIAGNOSIS"]
+          ? ["SYN-RX-PATIENT", "SYN-RX-001", "SYNTHETIC-RX-MEDICATION", "SYN-DOSE", "SYN-FREQUENCY", "SYN-DURATION", "SYN-INSTRUCTIONS", "SYN-SAVED-DIAGNOSIS"]
           : ["SYN-PROV-ORIGINAL-BHGFBCDEFABCD", "SYN-REV-00002", "SYN-REP-00003"];
         for (const reference of references) expect(text).toContain(reference);
         if (kind === "patient-card") {
@@ -112,7 +110,10 @@ describe("native compact print regression witnesses", () => {
         }
         if (prescription) {
           expect(text).not.toContain("SYN-URL-TAMPER");
-          expect(text.includes("DRAFT")).toBe(kind === "prescription-draft");
+          expect(text).not.toContain("SYN-SAVED-RX-ISSUER");
+          expect(text).not.toContain("SYN-DRAFT-CLINICIAN");
+          expect(text).toContain("SYN-SAVED-CLINICIAN");
+          expect(text).not.toContain("DRAFT");
         }
       }
     } finally { await browser.close(); }

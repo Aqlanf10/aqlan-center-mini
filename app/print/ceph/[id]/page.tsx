@@ -75,7 +75,9 @@ export default async function CephPrintReportPage({
   params: Promise<{ id: string }>;
 }) {
   const session = await requireSession();
-  if (!session) notFound();
+  // P0 privacy: legacy canAccessPatient admits reception even for canViewXrays.
+  // Deny nonclinical roles before any cephalometric study/analysis or patient data is read.
+  if (!session || (session.role !== "admin" && session.role !== "doctor")) notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);

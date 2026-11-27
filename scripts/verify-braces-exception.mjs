@@ -9,9 +9,26 @@ import { inspectInstalledBraces, sha256 } from "./dependency-security/installed-
 import { runAuditJson, preserveRawAudit } from "./dependency-security/audit-process.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+const GHSA_RECORD_URL = `https://api.github.com/advisories/${PIN.ghsa}`;
+const GHSA_MATCHES_URL = "https://api.github.com/advisories?ecosystem=npm&affects=braces%403.0.3&per_page=100";
+const REGISTRY_URL = "https://registry.npmjs.org/braces";
 export async function fetchOfficialJson(url, fetchImpl = fetch) {
-  const response = await fetchImpl(url, { headers: { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Cache-Control": "no-cache", "User-Agent": "aqlan-scoped-braces-verifier" }, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(30_000) });
-  invariant(response.ok && response.url === url, `official lookup failed: ${url}`);
+  const headers = { Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+    "Cache-Control": "no-cache", "User-Agent": "aqlan-scoped-braces-verifier" };
+  const githubAdvisory = url === GHSA_RECORD_URL || url === GHSA_MATCHES_URL;
+  const endpoint = url === GHSA_RECORD_URL ? "GitHub advisory record" : url === GHSA_MATCHES_URL ? "GitHub advisory search"
+    : url === REGISTRY_URL ? "npm package metadata" : "unrecognized endpoint";
+  invariant(endpoint !== "unrecognized endpoint", "unexpected official evidence endpoint");
+  const token = process.env.AQLAN_ADVISORY_READ_TOKEN;
+  if (githubAdvisory && token) headers.Authorization = `Bearer ${token}`;
+  let response;
+  try {
+    response = await fetchImpl(url, { headers, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(30_000) });
+  } catch {
+    invariant(false, `official lookup failed (request error): ${endpoint}`);
+  }
+  invariant(response.ok, `official lookup failed (HTTP ${response.status}): ${endpoint}`);
+  invariant(response.url === url, `official lookup failed (unexpected response URL): ${endpoint}`);
   invariant(!/rel="next"/.test(response.headers.get("link") ?? ""), "official advisory result pagination unexpected");
   invariant(/json/.test(response.headers.get("content-type") ?? ""), "official endpoint returned non-JSON");
   const length = response.headers.get("content-length");
@@ -20,13 +37,19 @@ export async function fetchOfficialJson(url, fetchImpl = fetch) {
   const chunks = [];
   let size = 0;
   while (true) {
-    const { done, value } = await reader.read();
+    let next;
+    try { next = await reader.read(); } catch { invariant(false, `official lookup failed (response read error): ${endpoint}`); }
+    const { done, value } = next;
     if (done) break;
     size += value.length;
-    if (size > 4 * 1024 * 1024) { await reader.cancel(); throw new Error("Official response exceeded limit"); }
+    if (size > 4 * 1024 * 1024) {
+      await reader.cancel().catch(() => {});
+      invariant(false, "official response exceeded limit");
+    }
     chunks.push(Buffer.from(value));
   }
-  return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); }
+  catch { invariant(false, `official lookup failed (invalid JSON): ${endpoint}`); }
 }
 
 /** Taken BEFORE both audits run; verification requires the installation to be byte-identical afterwards. */
@@ -47,9 +70,9 @@ export async function verifyBracesException(fullRun, productionRun, projectRoot 
   const disposition = mode === "active" ? validateScopedAudit(fullRun, installed) : validateWithdrawnDisposition(fullRun, installed);
   invariant(fullRun.report.metadata.dependencies.total === installed.lockPackageCount
     && productionRun.report.metadata.dependencies.total === installed.lockPackageCount, "audit dependency total differs from complete lock graph");
-  const advisory = await fetchJson(`https://api.github.com/advisories/${PIN.ghsa}`);
-  const matching = await fetchJson("https://api.github.com/advisories?ecosystem=npm&affects=braces%403.0.3&per_page=100");
-  const registry = await fetchJson("https://registry.npmjs.org/braces");
+  const advisory = await fetchJson(GHSA_RECORD_URL);
+  const matching = await fetchJson(GHSA_MATCHES_URL);
+  const registry = await fetchJson(REGISTRY_URL);
   const official = mode === "active" ? validateOfficialEvidence(advisory, matching, registry) : validateWithdrawnOfficialEvidence(advisory, matching, registry, clock());
   const proof = {
     format: mode === "active" ? "aqlan-scoped-braces-exception-v1" : "aqlan-braces-advisory-withdrawn-v1", mode, ...disposition, official,

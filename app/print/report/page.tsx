@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { PrintButton } from "@/components/PrintButton";
 import { PrintableReportDocument } from "@/components/reports/PrintableReportDocument";
-import { canAccessUnifiedReport } from "@/lib/report-access";
-import { buildReport, dbTodayISO, parseFilters, ReportInputError } from "@/lib/reports";
+import { canAccessUnifiedReport, isDisbursementReport } from "@/lib/report-access";
+import { buildReport, dbTodayISO, parseFilters, ReportInputError, validateCustomReportRange } from "@/lib/reports";
 import { CLINIC_TIME_ZONE, getSettingsSafe } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { parseReportView } from "@/lib/report-view";
@@ -28,22 +28,24 @@ export default async function OfficialReportPrintPage({
   const session = await requireSession();
   if (!session) notFound();
 
-  const params = toParams(await searchParams);
+  const search = await searchParams;
+  const params = toParams(search);
   const report = params.get("report") ?? "daily";
   if (!canAccessUnifiedReport(session.role, report, session.financeAccess) || report === "options") notFound();
 
-  const [today, settings] = await Promise.all([dbTodayISO(), getSettingsSafe()]);
-
-  let filters;
-  try {
-    filters = parseFilters(params, today);
-  } catch (error) {
-    if (error instanceof ReportInputError) notFound();
-    throw error;
-  }
-
+  let settings: Awaited<ReturnType<typeof getSettingsSafe>>;
   let result: Awaited<ReturnType<typeof buildReport>>;
   try {
+    if (isDisbursementReport(report)) {
+      for (const key of ["report", "currency", "preset", "from", "to", "expenseRecipient", "expenseCategory"]) {
+        const values = search[key];
+        if (Array.isArray(values) && values.length > 1) notFound();
+      }
+    }
+    if (report === "debt" || isDisbursementReport(report)) validateCustomReportRange(params);
+    const [today, printSettings] = await Promise.all([dbTodayISO(), getSettingsSafe()]);
+    settings = printSettings;
+    const filters = parseFilters(params, today);
     result = await buildReport(report, filters);
   } catch (error) {
     if (error instanceof ReportInputError) notFound();

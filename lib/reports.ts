@@ -5,6 +5,8 @@ import { invoiceSettlementLineage } from "./invoice-settlement-lineage";
 import {withFinancialReadSnapshot} from "./financial-read-snapshot";
 import {usesSharedLocalDatabaseConnection,type DbClient,type DbPool} from "./db";
 import {readCurrencyReclassificationEvidence} from "./invoice-currency-evidence";
+import { isDisbursementReport, type DisbursementReportId } from "./report-access";
+import { loadDisbursementReport } from "./report-disbursements";
 /**
  * محرك التقارير — كل الحساب يجري هنا على الخادم.
  *
@@ -1195,9 +1197,18 @@ async function loadVisits(filters: ReportFilters): Promise<ReportVisit[]> {
 
 /** يبني التقرير كاملًا وفق نوعه وفلاتره. */
 export async function buildReport(report: string, filters: ReportFilters): Promise<ReportResult> {
-  // الطلب السنوي محدود الحجم قبل تحميل أي سياق مالي، من دون اقتطاع المدى.
-  if (report === "annual") {
-    const range = validateAnnualReportRange(filters.from, filters.to);
+  // These reports use a dedicated snapshot, not the shared report context.
+  switch (report) {
+    case "daily-outflow":
+    case "expense-payees":
+      validateDisbursementDays(report, filters.from, filters.to);
+      return withFinancialReadSnapshot(getPool(), runner =>
+        loadDisbursementReport(report, filters, CLINIC_TIME_ZONE, runner), usesSharedLocalDatabaseConnection());
+  }
+
+  // نتحقق من المدى قبل تحميل السياق حتى عند استدعاء الباني مباشرةً.
+  const range = validateReportMonthRange(report, filters.debtMode, filters.from, filters.to);
+  if (range) {
     filters = { ...filters, from: range.from, to: range.to };
   }
 
@@ -2216,19 +2227,35 @@ function debtReport(ctx: ReportContext): ReportResult {
   };
 }
 
-/** حركة المديونية الشهرية (الوضع الرابع) — رصيد أول الشهر → آخره. */
+/** حركة المديونية الشهرية ضمن حدود الفترة المختارة. */
 function debtMovementReport(ctx: ReportContext): ReportResult {
   const { filters, base, doctors } = ctx;
-  const year = Number(filters.from.slice(0, 4));
+  const currency = filters.currency;
+  const visibleCurrencies = currency === "all" ? CURRENCIES : [currency];
+  // The report's chart uses the base currency; never show it for another bucket.
+  const showBaseChart = currency === "all" || currency === base;
+  const movementKpis = (key: string, label: string, amounts: Record<Currency, number>, tone?: KpiItem["tone"]) => {
+    if (currency === "all") return moneyKpis(key, label, amounts, tone);
+    const suffix = currency === base ? "" : `-${currency}`;
+    return [moneyKpi(key + suffix, suffix ? `${label} (${currency})` : label, amounts[currency], currency, tone)];
+  };
+  const firstYear = filters.from.slice(0, 4);
+  const lastYear = filters.to.slice(0, 4);
+  const spansYears = firstYear !== lastYear;
+  const yearLabel = spansYears ? `${firstYear} – ${lastYear}` : `سنة ${firstYear}`;
   const monthlyRows: ReportRow[] = [];
   // (P-01/D-1) الأشرطة بدلو العملة الأساسية وحده — التفصيل الكامل بكل عملة في الجدول.
   const bars: { label: string; minor: number }[] = [];
 
-  for (let month = 1; month <= 12; month++) {
-    const mFrom = `${year}-${String(month).padStart(2, "0")}-01`;
-    const mTo = endOfMonth(mFrom);
-    if (mFrom > filters.to) break;
-    if (mTo < filters.from) continue;
+  const cursor = new Date(toUTC(startOfMonth(filters.from)));
+  const end = toUTC(filters.to);
+  for (; cursor.getTime() <= end; cursor.setUTCMonth(cursor.getUTCMonth() + 1)) {
+    const monthStart = fromUTC(cursor.getTime());
+    const monthEnd = endOfMonth(monthStart);
+    const mFrom = monthStart < filters.from ? filters.from : monthStart;
+    const mTo = monthEnd > filters.to ? filters.to : monthEnd;
+    const name = monthName(cursor.getUTCMonth() + 1);
+    const monthLabel = spansYears ? `${name} ${monthStart.slice(0, 4)}` : name;
 
     const newDebtByCurrency = emptyCurrencyRecord();
     const collectedByCurrency = emptyCurrencyRecord();
@@ -2249,13 +2276,13 @@ function debtMovementReport(ctx: ReportContext): ReportResult {
     const closingByCurrency = balanceAsOf(ctx, mTo);
 
     // (P-01/D-1) صفٌّ لكل (شهر × عملة نشطة) — لا عمود يمزج الدلاء.
-    for (const currency of CURRENCIES) {
+    for (const currency of visibleCurrencies) {
       const active = newDebtByCurrency[currency] !== 0 || collectedByCurrency[currency] !== 0
         || refundsByCurrency[currency] !== 0 || openingByCurrency[currency] !== 0
         || closingByCurrency[currency] !== 0;
       if (!active) continue;
       monthlyRows.push({
-        monthLabel: monthName(month),
+        monthLabel,
         currency,
         openingMinor: openingByCurrency[currency],
         newDebtMinor: newDebtByCurrency[currency],
@@ -2264,11 +2291,11 @@ function debtMovementReport(ctx: ReportContext): ReportResult {
         closingMinor: closingByCurrency[currency],
       });
     }
-    bars.push({ label: monthName(month), minor: closingByCurrency[base] });
+    if (showBaseChart) bars.push({ label: monthLabel, minor: closingByCurrency[base] });
   }
 
-  const openingYear = balanceAsOf(ctx, addDays(filters.from, -1));
-  const closingYear = balanceAsOf(ctx, filters.to);
+  const periodOpening = balanceAsOf(ctx, addDays(filters.from, -1));
+  const periodClosing = balanceAsOf(ctx, filters.to);
   const sumByCurrency = (key: string): Record<Currency, number> => {
     // نجمع داخل الدلو فقط: كل صفٍّ يحمل عملته فتُضاف قيمته إلى دلوها.
     const result = emptyCurrencyRecord();
@@ -2282,25 +2309,25 @@ function debtMovementReport(ctx: ReportContext): ReportResult {
   return {
     report: "debt",
     title: "حركة المديونية الكاملة",
-    subtitle: `سنة ${year} — رصيد أول المدة، ديون جديدة، تحصيل، تسويات، رصيد آخرها — لكل عملة دلوها`,
+    subtitle: `${yearLabel} — رصيد أول المدة، ديون جديدة، تحصيل، تسويات، رصيد آخرها — لكل عملة دلوها`,
     periodLabel: `${formatArabicDate(filters.from)} → ${formatArabicDate(filters.to)}`,
     from: filters.from, to: filters.to, baseCurrency: base,
     kpis: [
-      ...moneyKpis("opening", "مديونية أول الفترة", openingYear),
-      ...moneyKpis("new", "ديون جديدة", sumByCurrency("newDebtMinor"), undefined, "warn"),
-      ...moneyKpis("collected", "تحصيل ديون", sumByCurrency("collectedMinor"), undefined, "good"),
-      ...moneyKpis("adj", "تسويات (استردادات)", sumByCurrency("adjustmentsMinor"), undefined, "bad"),
-      ...moneyKpis("closing", "مديونية آخر الفترة", closingYear, "warn"),
+      ...movementKpis("opening", "مديونية أول الفترة", periodOpening),
+      ...movementKpis("new", "ديون جديدة", sumByCurrency("newDebtMinor"), "warn"),
+      ...movementKpis("collected", "تحصيل ديون", sumByCurrency("collectedMinor"), "good"),
+      ...movementKpis("adj", "تسويات (استردادات)", sumByCurrency("adjustmentsMinor"), "bad"),
+      ...movementKpis("closing", "مديونية آخر الفترة", periodClosing, "warn"),
     ],
     monthly: {
       columns: [
         { key: "monthLabel", label: "الشهر" },
         { key: "currency", label: "العملة" },
-        { key: "openingMinor", label: "مديونية أول الشهر", type: "money", currencyKey: "currency" },
+        { key: "openingMinor", label: "مديونية أول المدة", type: "money", currencyKey: "currency", aggregate: "none" },
         { key: "newDebtMinor", label: "ديون جديدة", type: "money", currencyKey: "currency" },
         { key: "collectedMinor", label: "تحصيل ديون", type: "money", currencyKey: "currency" },
         { key: "adjustmentsMinor", label: "تسويات", type: "money", currencyKey: "currency" },
-        { key: "closingMinor", label: "مديونية آخر الشهر", type: "money", currencyKey: "currency" },
+        { key: "closingMinor", label: "مديونية آخر المدة", type: "money", currencyKey: "currency", aggregate: "none" },
       ],
       rows: monthlyRows,
       barKey: "closingMinor",
@@ -2308,9 +2335,12 @@ function debtMovementReport(ctx: ReportContext): ReportResult {
     bars,
     filtersLabel: filtersLabelOf(filters, doctors),
     notes: [
-      "رصيد أول الشهر = رصيد آخر اليوم الذي قبله (لا مجموع مستقل) — فلا يفترق الميزان.",
+      "حركات كل شهر ضمن الأيام المختارة. الافتتاح رصيد نهاية اليوم السابق لأول يوم معروض، والإقفال رصيد نهاية آخر يوم معروض.",
       "«التسويات» هنا = الاستردادات؛ قيود التسوية اليدوية على ذمم المرضى تُقرأ من دفتر اليومية.",
-      "(P-01) كل شهر بصفوفٍ لعملاته النشطة — والأشرطة بدلو العملة الأساسية وحده.",
+      "فلتر العملة في حركة المديونية يختار عملة تسوية الحساب، وقد تختلف عن عملة السند.",
+      showBaseChart
+        ? "(P-01) الأشرطة بدلو العملة الأساسية وحده."
+        : "أُخفي الرسم لأن العملة المختارة تختلف عن العملة الأساسية.",
     ],
   };
 }
@@ -2979,7 +3009,7 @@ export function collectionsReport(ctx: ReportContext, caller = "collections"): R
   const refundsByCurrency = emptyCurrencyRecord();
   const nativeCurrencies = new Set<Currency>();
   const refundCurrencies = new Set<Currency>();
-  const rows: ReportRow[] = [];
+  const orderedReceipts: { row: ReportRow; sourceAt: string; id: number }[] = [];
 
   for (const patient of ctx.movements) {
     if (filters.specialty && !patientHasSpecialty(patient, filters.specialty)) continue;
@@ -3009,13 +3039,14 @@ export function collectionsReport(ctx: ReportContext, caller = "collections"): R
       const hasRecordedTarget = payment.invoiceId != null || payment.planId != null || payment.openingCurrency != null;
       const crossCurrency = hasRecordedTarget && payment.settlementCurrency !== payment.currency;
 
-      rows.push({
+      const row: ReportRow = {
         receiptId: payment.id,
         date: formatArabicDate(payment.date),
         patientId: patient.patientId,
         patientName: patient.name,
         patientNumber: patient.patientNumber,
-        kindLabel: payment.kind === "refund" ? "استرداد" : "قبض",
+        // The stored refund kind also covers accounting reversals of wrong receipts.
+        kindLabel: payment.kind === "refund" ? "استرداد / عكس" : "قبض",
         currency: payment.currency,
         nativeMinor,
         // Legacy payload compatibility only. Not an available report column:
@@ -3028,10 +3059,15 @@ export function collectionsReport(ctx: ReportContext, caller = "collections"): R
         methodLabel: PAYMENT_METHOD_LABEL[payment.method] ?? payment.method,
         receiver: payment.createdBy ?? "—",
         note: payment.note ?? "",
-      });
+      };
+      orderedReceipts.push({ row, sourceAt: payment.at ?? payment.date, id: payment.id });
     }
   }
-  rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  // Source instants are normalized ISO UTC by the movement loader. Keep the
+  // internal sort facts out of the public rows and use receipt ID for exact ties.
+  const rows = orderedReceipts.sort((a, b) =>
+    a.sourceAt === b.sourceAt ? b.id - a.id : a.sourceAt < b.sourceAt ? 1 : -1,
+  ).map(({ row }) => row);
 
   const visibleCurrencies = CURRENCIES.filter((currency) => nativeCurrencies.has(currency)
     || filters.currency === currency || (rows.length === 0 && filters.currency === "all"));
@@ -6049,12 +6085,14 @@ export class ReportInputError extends Error {
  * سقف تقني لحجم الطلب الواحد، لا حد للاحتفاظ بالتاريخ المالي.
  * يمكن طلب تاريخ أطول في نوافذ منفصلة؛ 120 شهرًا ميزانية محافظة لا ضمان أداء.
  */
-const MAX_ANNUAL_REPORT_MONTHS = 120;
+const MAX_REPORT_MONTHS = 120;
 
 /** يتحقق من التقويم والمدى قبل تحميل المالية؛ لا يقتطع أي جزء منه بصمت. */
-export function validateAnnualReportRange(from: string | null | undefined, to: string | null | undefined) {
+function validateMonthRange(from: string | null | undefined, to: string | null | undefined, kind: "annual" | "movement") {
+  const title = kind === "annual" ? "التقرير السنوي" : "تقرير حركة المديونية";
+  const forReport = kind === "annual" ? "للتقرير السنوي" : "لتقرير حركة المديونية";
   const parseDate = (value: string | null | undefined): { date: string; month: number } => {
-    const invalid = () => new ReportInputError("أدخل تاريخي بداية ونهاية صالحين للتقرير السنوي بصيغة YYYY-MM-DD.");
+    const invalid = () => new ReportInputError(`أدخل تاريخي بداية ونهاية صالحين ${forReport} بصيغة YYYY-MM-DD.`);
     if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) throw invalid();
     const instant = toUTC(value);
     if (!Number.isFinite(instant) || fromUTC(instant) !== value) throw invalid();
@@ -6065,9 +6103,9 @@ export function validateAnnualReportRange(from: string | null | undefined, to: s
   const last = parseDate(to);
   const firstMonth = Math.min(first.month, last.month);
   const lastMonth = Math.max(first.month, last.month);
-  if (lastMonth - firstMonth + 1 > MAX_ANNUAL_REPORT_MONTHS) {
+  if (lastMonth - firstMonth + 1 > MAX_REPORT_MONTHS) {
     throw new ReportInputError(
-      "التقرير السنوي يدعم حتى 120 شهرًا في الطلب الواحد. اختر فترة أقصر، ويمكن عرض التاريخ الأطول على فترات منفصلة.",
+      `${title} يدعم حتى ${MAX_REPORT_MONTHS} شهرًا في الطلب الواحد. اختر فترة أقصر، ويمكن عرض التاريخ الأطول على فترات منفصلة.`,
     );
   }
   return {
@@ -6078,14 +6116,68 @@ export function validateAnnualReportRange(from: string | null | undefined, to: s
   };
 }
 
+export function validateAnnualReportRange(from: string | null | undefined, to: string | null | undefined) {
+  return validateMonthRange(from, to, "annual");
+}
+
+function validateReportMonthRange(
+  report: string | null, debtMode: string | null, from: string | null, to: string | null,
+) {
+  if (report === "annual") return validateAnnualReportRange(from, to);
+  if (report === "debt" && debtMode === "movement") return validateMonthRange(from, to, "movement");
+}
+
+const EXPENSE_SELECTOR = /^[0-9a-f]{64}$/;
+function validateDisbursementDays(report: DisbursementReportId, from: string | null, to: string | null): void {
+  const date = (value: string | null) => {
+    if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000-")) return NaN;
+    const instant = toUTC(value);
+    return Number.isFinite(instant) && fromUTC(instant) === value ? instant : NaN;
+  };
+  const first = date(from), last = date(to);
+  if (!Number.isFinite(first) || !Number.isFinite(last) || first > last) {
+    throw new ReportInputError("اختر تاريخي بداية ونهاية صحيحين بالترتيب.");
+  }
+  // Count both clinic dates; two calendar years can include one leap day.
+  const inclusiveDays = (last - first) / 86_400_000 + 1;
+  const maxDays = report === "expense-payees" ? 731 : 366;
+  if (inclusiveDays > maxDays) {
+    const limit = maxDays.toLocaleString("ar-YE-u-nu-arab", { useGrouping: false });
+    throw new ReportInputError(`اختر فترة لا تتجاوز ${limit} يومًا. يمكنك تصدير فترات أطول على دفعات.`);
+  }
+}
+
+export function validateCustomReportRange(params: URLSearchParams) {
+  const report = params.get("report");
+  if (isDisbursementReport(report)) {
+    for (const key of ["report", "currency", "preset", "from", "to", "expenseRecipient", "expenseCategory"]) {
+      if (params.getAll(key).length > 1) throw new ReportInputError("الفلاتر المكررة غير صالحة.");
+    }
+    const currency = params.get("currency");
+    if (currency !== null && currency !== "all" && !isCurrency(currency)) {
+      throw new ReportInputError("اختر عملة صحيحة.");
+    }
+    if (report === "expense-payees") {
+      for (const key of ["expenseRecipient", "expenseCategory"]) {
+        const value = params.get(key);
+        if (value !== null && !EXPENSE_SELECTOR.test(value)) throw new ReportInputError("اختيار المستفيد أو البند غير صالح.");
+      }
+    }
+    if (params.get("preset") === "custom") validateDisbursementDays(report, params.get("from"), params.get("to"));
+    return;
+  }
+
+  if (params.get("preset") === "custom") {
+    validateReportMonthRange(params.get("report"), params.get("debtMode"), params.get("from"), params.get("to"));
+  }
+}
+
 export function parseFilters(params: URLSearchParams, today?: string): ReportFilters {
-  const presetRaw = params.get("preset") ?? "this_month";
+  const presetRaw = params.get("preset") ?? (isDisbursementReport(params.get("report")) ? "today" : "this_month");
   const preset = (["today", "yesterday", "this_week", "this_month", "prev_month", "this_quarter", "this_year", "prev_year", "custom"] as const)
     .includes(presetRaw as PeriodPreset) ? (presetRaw as PeriodPreset) : "this_month";
-  // روابط التقرير السنوي المحفوظة والطباعة تمرّ أيضًا بهذا المحلّل.
-  if (params.get("report") === "annual" && preset === "custom") {
-    validateAnnualReportRange(params.get("from"), params.get("to"));
-  }
+  // فحص تواريخ الرابط الخام قبل أن يستبدل محلّل الفلاتر القيم الناقصة.
+  validateCustomReportRange(params);
   const { from, to } = resolvePeriod(preset, params.get("from"), params.get("to"), today);
 
   const doctorIdRaw = params.get("doctorId");
@@ -6122,6 +6214,10 @@ export function parseFilters(params: URLSearchParams, today?: string): ReportFil
     currency, patientStatus, debtStatus, debtMode, compare,
     method: params.get("method") || null,
     receivedBy: params.get("receivedBy") || null,
+    ...(params.get("report") === "expense-payees" ? {
+      expenseRecipient: params.get("expenseRecipient"),
+      expenseCategory: params.get("expenseCategory"),
+    } : {}),
   };
 }
 

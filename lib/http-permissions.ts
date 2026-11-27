@@ -141,7 +141,7 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/finance/expense-categories": { GET: ["admin", "reception", "doctor", "cashier", "accountant"], POST: ADMIN, PATCH: ADMIN, DELETE: ADMIN },
   "/api/finance/fx": { GET: ["admin", "accountant"], POST: ADMIN },
   "/api/finance/lab-accounting": { GET: ["admin", "reception", "accountant"], PATCH: ADMIN },
-  "/api/finance/lab-reconciliation": { GET: ["admin", "reception", "doctor", "accountant"], POST: ADMIN },
+  "/api/finance/lab-reconciliation": { GET: ["admin", "accountant"], POST: ADMIN },
   "/api/finance/reconciliation": { GET: ["admin", "reception", "accountant"] },
   "/api/finance/report": { GET: ["admin", "doctor", "accountant"] },
   "/api/health": { GET: PUBLIC },

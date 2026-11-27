@@ -7,6 +7,7 @@ import {
   UPLOAD_BODY_LIMIT_BYTES,
 } from "@/lib/security-limits";
 import { verifiedSessionAccess } from "@/lib/proxy-role";
+import { LEGACY_RX_DRAFT_KEYS } from "@/lib/prescription-print-query";
 import { ROLE_HOME, RESTRICTED_ROUTE_DENIED, isGatedRole, restrictedRouteAllowed } from "@/lib/role-routes";
 import { API_METHOD_NOT_ALLOWED_MESSAGE, API_ROUTE_UNKNOWN_MESSAGE, apiRouteVerdict } from "@/lib/http-permissions";
 import {
@@ -348,6 +349,19 @@ export async function proxy(request: NextRequest) {
     ? await restrictedRoleVerdict(request, hasAuthHeader ? authHeader!.slice(7).trim() : null)
     : null;
   if (roleDenied && !pathname.startsWith("/api/portal/")) return roleDenied;
+
+  // A page-level notFound() can still serialize the incoming query into the
+  // App Router response. End legacy Rx draft requests here, with no redirect,
+  // page rendering, or use of their values. Saved-only links still go through
+  // the existing page's patient scope, role and prescription checks.
+  if ((pathname === "/print/prescription" || pathname.startsWith("/print/prescription/"))
+    && LEGACY_RX_DRAFT_KEYS.some(key => request.nextUrl.searchParams.has(key))) {
+    return new NextResponse(null, { status: 404, headers: {
+      "Cache-Control": "private, no-store",
+      "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+      "Referrer-Policy": "no-referrer",
+    } });
+  }
 
   if (PUBLIC_API.has(pathname)
     || PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {

@@ -2,8 +2,11 @@ import { spawnSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 export function runAuditJson(production = false) {
+  // This step's read token is for the in-process GitHub verifier, not npm or its diagnostics.
+  const env = { ...process.env };
+  delete env.AQLAN_ADVISORY_READ_TOKEN;
   const result = spawnSync("npm", ["audit", "--json", "--audit-level=moderate", "--registry=https://registry.npmjs.org", ...(production ? ["--omit=dev"] : []), "--fetch-timeout=120000", "--fetch-retries=0"],
-    { encoding: "utf8", shell: false, timeout: 150_000, maxBuffer: 16 * 1024 * 1024 });
+    { env, encoding: "utf8", shell: false, timeout: 150_000, maxBuffer: 16 * 1024 * 1024 });
   let report = null;
   try { report = JSON.parse(result.stdout ?? ""); } catch { /* Missing/malformed output fails closed. */ }
   return { code: result.status, signal: result.signal, error: result.error, report, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };

@@ -1,6 +1,7 @@
 import { readLegacyStaffSchema, assertLegacyPermissionEnvelope } from "./legacy-staff-boundary";
 import { getPool } from "./db";
 import { isAdmin } from "./roles";
+import { classifyStaffPermissionEnvelope } from "./staff-permission-envelope";
 import { withDefaults, type SettingsMap } from "./settings";
 import { readSessionPayload } from "./session";
 import { sessionCredentialVersion } from "./auth";
@@ -63,7 +64,7 @@ export interface BackupAdminSession {
 
 export type BackupAdminAuthResult =
   | { ok: true; session: BackupAdminSession }
-  | { ok: false; reason: "no-session" | "user-gone" | "inactive" | "credential-changed" | "users-unreadable" };
+  | { ok: false; reason: "no-session" | "user-gone" | "inactive" | "credential-changed" | "authority-changed" | "users-unreadable" };
 
 /**
  * جلسة مدير النسخ — بلا أي DDL ضمني.
@@ -85,7 +86,7 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
   const payload = await readSessionPayload();
   if (!payload?.credentialVersion) return { ok: false, reason: "no-session" };
 
-  let userRow: {
+  type BackupUserRow = {
     id: number;
     username: string;
     password_hash: string;
@@ -93,43 +94,49 @@ export async function requireBackupAdminReadOnly(): Promise<BackupAdminAuthResul
     is_active: boolean;
     party_id: number | null;
     permissions: unknown;
-  } | null = null;
+  };
+  let userRow: BackupUserRow | null = null;
   let client: Awaited<ReturnType<ReturnType<typeof getPool>["connect"]>> | null = null;
-  let discard=false;
+  let discard = false;
   try {
-    client=await getPool().connect();
+    client = await getPool().connect();
     await client.query("BEGIN TRANSACTION ISOLATION LEVEL READ COMMITTED READ ONLY");
-    await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))",["aqlan.canonical.identity.substrate.v1:public"]);
-    if(await readLegacyStaffSchema(client)!=="base")throw new Error("LEGACY_STAFF_BASE_SCHEMA_UNREADABLE");
-    const { rows } = await client.query<{
-      id: number;
-      username: string;
-      password_hash: string;
-      role: string;
-      is_active: boolean;
-      party_id: number | null;
-      permissions: unknown;
-    }>(
+    await client.query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1,0))", ["aqlan.canonical.identity.substrate.v1:public"]);
+    if (await readLegacyStaffSchema(client) !== "base") throw new Error("LEGACY_STAFF_BASE_SCHEMA_UNREADABLE");
+    const { rows } = await client.query<BackupUserRow>(
       `SELECT id, username, password_hash, role, is_active, party_id, permissions
          FROM users
-        WHERE LOWER(username) = LOWER($1)
-        LIMIT 1`,
-      [payload.username],
+        WHERE id = $1`,
+      [payload.userId],
     );
     userRow = rows[0] ?? null;
-    if(userRow)assertLegacyPermissionEnvelope(userRow.permissions);
+    if (userRow) assertLegacyPermissionEnvelope(userRow.permissions);
     await client.query("COMMIT");
   } catch {
-    if(client)await client.query("ROLLBACK").catch(()=>{discard=true;});
+    if (client) await client.query("ROLLBACK").catch(() => { discard = true; });
     return { ok: false, reason: "users-unreadable" };
   } finally { client?.release(discard); }
 
+  // Recheck after the awaited SELECT: a session can expire waiting for a connection.
+  if (payload.expiresAt <= Date.now()) return { ok: false, reason: "no-session" };
   if (!userRow) return { ok: false, reason: "user-gone" };
-  if(payload.expiresAt<=Date.now())return {ok:false,reason:"no-session"};
   if (!userRow.is_active) return { ok: false, reason: "inactive" };
-  if (userRow.id !== payload.userId || userRow.username !== payload.username || userRow.role !== payload.role) return { ok: false, reason: "user-gone" };
+  if (userRow.id !== payload.userId) return { ok: false, reason: "user-gone" };
+  // A previous role or login name must not inherit newly granted backup privileges.
+  if (userRow.username !== payload.username || userRow.role !== payload.role) {
+    return { ok: false, reason: "authority-changed" };
+  }
   if (payload.credentialVersion !== sessionCredentialVersion(userRow.password_hash)) {
     return { ok: false, reason: "credential-changed" };
+  }
+
+  // This is a legacy-only reader. Never reinterpret a future or invalid staff
+  // envelope as the legacy admin role; do not activate or translate grants here.
+  const envelope = classifyStaffPermissionEnvelope(userRow.permissions);
+  // "confirmation" is reserved by the later candidate but not by staging's
+  // five-field parser. Even that marker alone must never imply legacy access.
+  if (envelope.kind !== "legacy" || (envelope.value && Object.hasOwn(envelope.value, "confirmation"))) {
+    return { ok: false, reason: "authority-changed" };
   }
 
   return {

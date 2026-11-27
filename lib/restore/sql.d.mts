@@ -7,20 +7,12 @@ export declare function prepareBackupSql(sql: string): {
   sqlRowsStatementLines: number;
   patientNumberSequence: PatientNumberSequenceSnapshot | null;
 };
-export declare function prepareBackupSql(sql: string, options: { inspectHistorical0079: true; rejectUnsupportedHistoricalSchema?: true }): {
+export declare function prepareBackupSql(sql: string, options: { inspectHistorical0079: true; rejectUnsupportedHistoricalSchema?: boolean }): {
   sql: string;
   dataSql: string;
   skippedMigrationRecordLines: number;
   sqlRowsStatementLines: number;
   patientNumberSequence: PatientNumberSequenceSnapshot | null;
-  historical0079: { appliedAt: string } | null;
-  historical0079Footprint: boolean;
-};
-export declare function prepareBackupSql(sql: string, options: { inspectHistorical0079: true }): {
-  sql: string;
-  dataSql: string;
-  skippedMigrationRecordLines: number;
-  sqlRowsStatementLines: number;
   historical0079: { appliedAt: string } | null;
   historical0079Footprint: boolean;
 };

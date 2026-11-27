@@ -168,6 +168,42 @@ html[data-reprint="true"] .reprint-mark {
 }
 .report-table th { white-space: nowrap; }
 
+/* Only official debt-detail tables: long headings and currency
+   footers must not set a larger min-content width than the A4 sheet. */
+table.items[data-report-debt-detail] {
+  table-layout: fixed;
+  width: 100%;
+}
+table.items[data-report-debt-detail] :is(th, td) {
+  padding-inline: .8mm;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+table.items[data-report-debt-detail] th {
+  line-height: 1.2;
+}
+table.items[data-report-debt-detail] td:is([data-report-column="date"], [data-report-column="planStart"], [data-report-column="lastPaymentDate"]) {
+  direction: ltr;
+  unicode-bidi: isolate;
+  white-space: nowrap;
+}
+table.items[data-report-debt-detail] td:is([data-report-column="currency"], [data-report-column="planCurrency"]) {
+  white-space: nowrap;
+}
+table.items[data-report-debt-detail] td [data-report-currency-total] {
+  /* The inherited print adapter emits nowrap inline; a very large amount can
+     still wrap within its currency line rather than overprint the next cell. */
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+  padding-block: .25mm;
+}
+table.items[data-report-debt-detail] td .report-total-label {
+  display: block;
+  text-align: right;
+  margin-bottom: .5mm;
+}
+
 /* Chromium's DejaVuSans fallback shapes Arabic lam-alef correctly on screen but
  * may export it as reversed Unicode (بلا -> بال) in a PDF. The hosted PDF
  * witness verified both rendered glyphs and pdftotext copy order with these
@@ -233,11 +269,13 @@ html[data-reprint="true"] .reprint-mark {
   }
   /* When more space is needed, carry the closing notes with the contact footer
      instead of creating a page containing only the address and phone number. */
-  .sheet-report[data-report="collections"] .report-notes {
+  .sheet-report[data-report="collections"] .report-notes,
+  .sheet-report[data-report-debt-detail-sheet] .report-notes {
     break-after: avoid-page;
     page-break-after: avoid;
   }
-  .sheet-report[data-report="collections"] .report-contact-footer {
+  .sheet-report[data-report="collections"] .report-contact-footer,
+  .sheet-report[data-report-debt-detail-sheet] .report-contact-footer {
     break-before: avoid-page;
     page-break-before: avoid;
     break-inside: avoid-page;

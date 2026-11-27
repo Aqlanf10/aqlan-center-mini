@@ -1,3 +1,9 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { DataTable, KpiGrid } from "../components/reports/shared";
+import { reportCsv } from "../lib/report-export";
+import { PrintableReportDocument } from "../components/reports/PrintableReportDocument";
+import { SETTING_DEFAULTS } from "../lib/settings";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 // Synthetic fixtures; the PostgreSQL wrapper supplies its newly isolated database.
@@ -138,5 +144,166 @@ describe("outstanding debt uses one inclusive clinic-date cutoff", () => {
       await expect(report(pid)).rejects.toThrow("synthetic payment read failed");
       expect(injectedFailures).toBe(1);
     } finally { querySpy.mockRestore(); connectSpy.mockRestore(); }
+  });
+});
+
+describe("debt movement clips each monthly row to the selected clinic dates", () => {
+  async function movement(pid: number, from: string, to: string) {
+    const params = new URLSearchParams({ report: "debt", debtMode: "movement", preset: "custom", from, to, patientId: String(pid) });
+    return buildReport("debt", parseFilters(params));
+  }
+
+  it("reports December and January in order and reconciles movements and boundary balances by currency", async () => {
+    const pid = await patient();
+    const cases = [
+      { currency: "YER", prior: 120, december: 50, january: 10, paid: 20 },
+      { currency: "SAR", prior: 35, december: 11, january: 8, paid: 5 },
+      { currency: "USD", prior: 52, december: 9, january: 4, paid: 3 },
+    ];
+    for (const { currency, prior, december, january, paid } of cases) {
+      const old = await invoice(pid, currency, prior + 2, "2026-12-29T12:00:00+03:00");
+      await payment(pid, old, currency, 2, "2026-12-30T20:59:59.999Z");
+      const first = await invoice(pid, currency, december, "2026-12-30T21:00:00Z");
+      const collected = await payment(pid, first, currency, paid, "2026-12-31T20:59:59.999Z");
+      await payment(pid, first, currency, paid, "2026-12-31T21:00:00Z", collected);
+      await invoice(pid, currency, january, "2027-01-01T20:59:59.999Z");
+      await invoice(pid, currency, 70, "2027-01-01T21:00:00Z");
+    }
+
+    const result = await movement(pid, "2026-12-31", "2027-01-01");
+    expect(result.monthly?.rows).toHaveLength(6);
+    // Screen and print use this metadata to total flows but never balance snapshots.
+    expect(result.monthly?.columns.filter(column => column.type === "money" && column.aggregate !== "none")
+      .map(column => column.key)).toEqual(["newDebtMinor", "collectedMinor", "adjustmentsMinor"]);
+    for (const { currency, prior, december, january, paid } of cases) {
+      const minor = (value: number) => toMinor(value, currency);
+      const decClosing = prior + december - paid;
+      const janClosing = decClosing + january + paid;
+      expect(result.monthly?.rows.filter(row => row.currency === currency)).toEqual([
+        { monthLabel: "ديسمبر 2026", currency, openingMinor: minor(prior), newDebtMinor: minor(december),
+          collectedMinor: minor(paid), adjustmentsMinor: 0, closingMinor: minor(decClosing) },
+        { monthLabel: "يناير 2027", currency, openingMinor: minor(decClosing), newDebtMinor: minor(january),
+          collectedMinor: 0, adjustmentsMinor: minor(paid), closingMinor: minor(janClosing) },
+      ]);
+      const cards = Object.fromEntries(result.kpis.filter(kpi => kpi.currency === currency).map(kpi => [kpi.key, kpi.minor]));
+      const suffix = currency === "YER" ? "" : `-${currency}`;
+      expect(cards).toEqual({
+        [`opening${suffix}`]: minor(prior), [`new${suffix}`]: minor(december + january),
+        [`collected${suffix}`]: minor(paid), [`adj${suffix}`]: minor(paid), [`closing${suffix}`]: minor(janClosing),
+      });
+    }
+    expect(result.bars).toEqual([{ label: "ديسمبر 2026", minor: 150 }, { label: "يناير 2027", minor: 180 }]);
+
+    // Tone is styling, not a patient-facing hint, for every currency card.
+    const tones = { new: "warn", collected: "good", adj: "bad" } as const;
+    for (const [key, tone] of Object.entries(tones)) {
+      for (const suffix of ["", "-SAR", "-USD"]) {
+        const card = result.kpis.find(kpi => kpi.key === key + suffix);
+        expect(card?.tone).toBe(tone);
+        expect(card?.hint).toBeUndefined();
+      }
+    }
+    const screen = renderToStaticMarkup(createElement(KpiGrid, { kpis: result.kpis, base: result.baseCurrency }));
+    const print = renderToStaticMarkup(createElement(PrintableReportDocument, {
+      result, settings: SETTING_DEFAULTS, generatedAt: "2027-01-02", generatedBy: "اختبار",
+    }));
+    for (const html of [screen, print]) {
+      expect(html).not.toMatch(/>\s*(good|bad|warn)\s*</);
+      for (const card of result.kpis) expect(html).toContain(card.label);
+    }
+  });
+
+  it("filters each output by settlement currency, not the tender currency", async () => {
+    const pid = await patient();
+    const yer = await invoice(pid, "YER", 10_000, "2026-12-31T12:00:00+03:00");
+    const sar = await invoice(pid, "SAR", 40, "2027-01-01T12:00:00+03:00");
+    await invoice(pid, "USD", 20, "2027-01-01T12:00:00+03:00");
+    const cross = async (kind: "payment" | "refund", tender: number, settled: number, at: string, reversed: number | null) =>
+      (await q(`INSERT INTO payments (receipt_number,patient_id,invoice_id,shift_id,kind,amount_minor,currency,
+        exchange_rate,base_amount_minor,base_currency,method,created_at,reversal_of_id)
+        VALUES ($1,$2,$3,$4,$5,$6,'SAR',150,$7,'YER','cash',$8::timestamptz,$9) RETURNING id`,
+      [`CUT-P-${++serial}`,pid,yer,shift,kind,tender,settled,at,reversed])).rows[0].id as number;
+    const original = await cross("payment", 1_000, 1_500, "2026-12-31T13:00:00+03:00", null);
+    await cross("refund", 100, 150, "2027-01-31T23:59:59+03:00", original);
+    await payment(pid, sar, "SAR", 5, "2027-01-01T13:00:00+03:00");
+
+    const run = (currency: "all" | "YER" | "SAR" | "USD", to = "2027-01-31") => buildReport("debt",
+      parseFilters(new URLSearchParams({ report: "debt", debtMode: "movement", preset: "custom",
+        from: "2026-12-31", to, patientId: String(pid), currency })));
+    const all = await run("all");
+    expect(all.monthly?.rows.map(row => row.currency)).toEqual(["YER", "YER", "SAR", "USD"]);
+    const filtered = await run("SAR");
+    expect(filtered.monthly?.rows).toEqual([{
+      monthLabel: "يناير 2027", currency: "SAR", openingMinor: 0, newDebtMinor: 4_000,
+      collectedMinor: 500, adjustmentsMinor: 0, closingMinor: 3_500,
+    }]);
+    expect(filtered.kpis.map(card => [card.key, card.currency, card.minor])).toEqual([
+      ["opening-SAR", "SAR", 0], ["new-SAR", "SAR", 4_000], ["collected-SAR", "SAR", 500],
+      ["adj-SAR", "SAR", 0], ["closing-SAR", "SAR", 3_500],
+    ]);
+    expect(filtered.bars).toEqual([]);
+    const monthly = filtered.monthly!;
+    const screens = [
+      renderToStaticMarkup(createElement(DataTable, { columns: monthly.columns, rows: monthly.rows, base: filtered.baseCurrency })),
+      renderToStaticMarkup(createElement(PrintableReportDocument, {
+        result: filtered, settings: SETTING_DEFAULTS, generatedAt: "2027-01-31", generatedBy: "اختبار",
+      })),
+    ];
+    for (const page of screens) {
+      expect(page).toContain("35.00 ر.س");
+      expect(page).not.toContain("8,650");
+      expect(page).not.toContain("report-bars-table");
+    }
+    const csv = reportCsv(monthly.columns, monthly.rows, filtered.baseCurrency);
+    expect(csv.split("\r\n")).toHaveLength(2);
+    expect(csv).toContain('"35.00 SAR"');
+    expect(csv).not.toMatch(/YER|USD/);
+    const base = await run("YER");
+    expect(base.monthly?.rows.map(row => [row.collectedMinor, row.adjustmentsMinor])).toEqual([[1_500, 0], [0, 150]]);
+    expect(base.bars).toEqual(all.bars);
+    expect((await run("YER", "2027-01-01")).monthly?.rows.every(row => row.adjustmentsMinor === 0)).toBe(true);
+    expect((await run("USD")).monthly?.rows).toEqual(all.monthly?.rows.filter(row => row.currency === "USD"));
+  });
+
+  it("keeps native amounts at both endpoints of a 120-month window ending on January 1", async () => {
+    const pid = await patient();
+    await invoice(pid, "YER", 101, "2017-02-28T00:00:00+03:00");
+    await invoice(pid, "SAR", 23, "2027-01-01T23:59:59+03:00");
+    await invoice(pid, "SAR", 79, "2027-01-02T00:00:00+03:00");
+
+    const result = await movement(pid, "2027-01-01", "2017-02-28");
+    expect(result.bars).toHaveLength(120);
+    expect(result.bars?.at(-1)).toEqual({ label: "يناير 2027", minor: 101 });
+    expect(result.monthly?.rows.filter(row => row.newDebtMinor !== 0)).toEqual([
+      expect.objectContaining({ monthLabel: "فبراير 2017", currency: "YER", newDebtMinor: 101 }),
+      expect.objectContaining({ monthLabel: "يناير 2027", currency: "SAR", newDebtMinor: toMinor(23, "SAR") }),
+    ]);
+  });
+
+  it("shows a newly recorded opening balance without inventing a movement", async () => {
+    const pid = await patient();
+    await opening(pid, "SAR", "2027-01-03", 20);
+    const result = await movement(pid, "2027-01-02", "2027-01-04");
+    expect(result.monthly?.rows).toEqual([{ monthLabel: "يناير", currency: "SAR", openingMinor: 0,
+      newDebtMinor: 0, collectedMinor: 0, adjustmentsMinor: 0, closingMinor: toMinor(20, "SAR") }]);
+    expect(result.kpis.filter(kpi => kpi.currency === "SAR").map(kpi => [kpi.key, kpi.minor]))
+      .toEqual([["closing-SAR", toMinor(20, "SAR")]]);
+    expect(result.bars).toEqual([{ label: "يناير", minor: 0 }]);
+  });
+
+  it("excludes the January 31 refund on January 1, then includes it for the full month", async () => {
+    const pid = await patient();
+    const old = await invoice(pid, "YER", 100, "2026-12-31T12:00:00+03:00");
+    const collected = await payment(pid, old, "YER", 30, "2027-01-01T12:00:00+03:00");
+    await payment(pid, old, "YER", 30, "2027-01-31T12:00:00+03:00", collected);
+
+    for (const [to, refund, closing] of [["2027-01-01", 0, 70], ["2027-01-31", 30, 100]] as const) {
+      const result = await movement(pid, "2027-01-01", to);
+      expect(result.monthly?.rows).toEqual([{ monthLabel: "يناير", currency: "YER", openingMinor: 100,
+        newDebtMinor: 0, collectedMinor: 30, adjustmentsMinor: refund, closingMinor: closing }]);
+      expect(result.kpis.find(kpi => kpi.key === "adj")?.minor).toBe(refund);
+      expect(result.kpis.find(kpi => kpi.key === "closing")?.minor).toBe(closing);
+      expect(result.bars).toEqual([{ label: "يناير", minor: closing }]);
+    }
   });
 });

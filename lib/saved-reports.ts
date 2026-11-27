@@ -8,7 +8,7 @@ const REPORT_QUERY_KEYS = [
   "report", "preset", "from", "to", "specialty", "doctorId", "patientId", "serviceId",
   "currency", "patientStatus", "debtStatus", "debtMode", "compare", "method", "receivedBy",
   // (Reports R3) العرض المخصّص: الأعمدة بترتيبها، ترتيب الصفوف، التجميع.
-  "columns", "sort", "group",
+  "columns", "sort", "group", "expenseRecipient", "expenseCategory",
 ] as const;
 
 export interface SavedReport {
@@ -71,6 +71,11 @@ export function normalizeSavedReportQuery(reportIdRaw: unknown, rawQuery: unknow
   for (const key of REPORT_QUERY_KEYS) {
     if (key === "report") continue;
     const value = input.get(key);
+    if (key === "expenseRecipient" || key === "expenseCategory") {
+      if (input.getAll(key).length > 1 || (value !== null && (savedReportId !== "expense-payees" || !/^[0-9a-f]{64}$/.test(value)))) {
+        throw new SavedReportInputError("اختيار المستفيد أو البند غير صالح.");
+      }
+    }
     if (value !== null && value !== "") output.set(key, value.slice(0, 256));
   }
   return { reportId: savedReportId, queryString: output.toString() };

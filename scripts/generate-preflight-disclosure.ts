@@ -53,9 +53,9 @@ export async function generatePreflightDisclosure(): Promise<FingerprintDisclosu
       // Only the pinned historical 0079 contract may create this third schema.
       // It is generated from template0 and the same reviewed immutable files,
       // never learned from an arbitrary live database or existing fixture.
-      const historical = new Pool({ connectionString: urlFor(names.historical), ssl: false });
-      try { await migrate(historical, { apply: true, files: await loadMigrationFiles(), historical0079: true }); }
-      finally { await historical.end(); }
+      const historicalPool = new Pool({ connectionString: urlFor(names.historical), ssl: false });
+      try { await migrate(historicalPool, { apply: true, files: await loadMigrationFiles(), historical0079: true }); }
+      finally { await historicalPool.end(); }
       const catalogs: DetailedSchemaCatalog[] = [];
       async function capture() {
         for (const name of Object.values(names)) {

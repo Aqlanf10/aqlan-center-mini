@@ -191,6 +191,18 @@ export function DataTable({
     return output;
   }, [filtered, groupKey]);
 
+  // Preserve the label cell and the selected column grid, even for money-only
+  // views. The official print renderer owns its own totals on a separate route.
+  function renderLeadingScreenTotal(totalRows: ReportRow[]) {
+    const first = columns[0];
+    if (first?.type !== "money" || first.aggregate === "none") return null;
+    return (
+      <span className="block font-mono tabular-nums print:hidden">
+        {currencyTotalsContent(totalRows, first, base)}
+      </span>
+    );
+  }
+
   function renderRow(row: ReportRow, index: number) {
     return (
       <tr
@@ -298,7 +310,10 @@ export function DataTable({
                 {segment.rows.map((row, index) => renderRow(row, index))}
                 {hasMoneyColumns ? (
                   <tr className="border-b border-slate-200 bg-white text-[11px] font-bold text-navy-800">
-                    <td className="px-2.5 py-1.5">مجموع {segment.label}</td>
+                    <td className="px-2.5 py-1.5">
+                      مجموع {segment.label}
+                      {renderLeadingScreenTotal(segment.rows)}
+                    </td>
                     {columns.slice(1).map((column) => (
                       <td key={column.key} className="px-2.5 py-1.5 font-mono tabular-nums">
                         {column.type === "money" ? currencyTotalsContent(segment.rows, column, base) : ""}
@@ -312,7 +327,10 @@ export function DataTable({
           {hasMoneyColumns && filtered.length > 0 ? (
             <tfoot>
               <tr className="border-t-2 border-slate-200 bg-navy-50/60 font-bold text-navy-900 print:bg-white">
-                <td className="px-2.5 py-2.5">الإجمالي ({filtered.length} صفًا)</td>
+                <td className="px-2.5 py-2.5">
+                  الإجمالي ({filtered.length} صفًا)
+                  {renderLeadingScreenTotal(filtered)}
+                </td>
                 {columns.slice(1).map((column) => (
                   <td key={column.key} className="px-2.5 py-2.5 font-mono tabular-nums">
                     {column.type === "money" ? currencyTotalsContent(filtered, column, base) : ""}
@@ -475,16 +493,28 @@ export interface FilterState {
   compare: CompareMode;
   method: string | null;
   receivedBy: string | null;
+  expenseRecipient?: string | null;
+  expenseCategory?: string | null;
 }
 
+export type ExpenseChoiceScope = {
+  status: "loading" | "unavailable" | "unapplied" | "ready";
+  noMatches?: boolean;
+  applied?: { from: string; to: string; currency: FilterState["currency"] };
+};
+
 export function FilterBar({
-  state, onChange, options, showDebtMode, showCompare, onPatientPicked, onApply,
+  state, onChange, options, showDebtMode, showCompare, disbursementMode, expenseOptions, expenseChoiceScope,
+  onPatientPicked, onApply,
 }: {
   state: FilterState;
   onChange: (patch: Partial<FilterState>) => void;
   options: ReportOptions | null;
   showDebtMode: boolean;
   showCompare: boolean;
+  disbursementMode?: "daily-outflow" | "expense-payees";
+  expenseOptions?: ReportResult["expenseFilterOptions"];
+  expenseChoiceScope?: ExpenseChoiceScope;
   onPatientPicked: (patient: { id: number; name: string } | null) => void;
   onApply: () => void;
 }) {
@@ -492,6 +522,12 @@ export function FilterBar({
   const [patientSearch, setPatientSearch] = useState("");
   const [patientResults, setPatientResults] = useState<{ id: number; name: string }[]>([]);
   const [patientBusy, setPatientBusy] = useState(false);
+  const expenseStatus = expenseChoiceScope?.status ?? (expenseOptions ? "ready" : "unapplied");
+  const expenseReady = expenseStatus === "ready";
+  const expenseApplyLabel = expenseStatus === "loading" ? "جارٍ تحديث خيارات المصروفات…"
+    : expenseStatus === "unavailable" ? "إعادة محاولة تحميل خيارات المصروفات"
+      : expenseStatus === "unapplied" ? "تطبيق الفترة والعملة وتحديث الخيارات"
+        : "تطبيق وإظهار التقرير";
 
   async function searchPatients(term: string) {
     if (term.trim().length < 2) { setPatientResults([]); return; }
@@ -599,8 +635,63 @@ export function FilterBar({
         </div>
       ) : null}
 
+      {disbursementMode ? (
+        <div className="mt-2.5 grid grid-cols-1 gap-2 border-t border-slate-100 pt-2.5 sm:grid-cols-3">
+          <label className="block text-xs font-bold text-slate-600">
+            العملة
+            <select value={state.currency} onChange={(event) => onChange({ currency: event.target.value as FilterState["currency"] })}
+              className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-2 py-2">
+              <option value="all">كل العملات</option>
+              {["YER", "SAR", "USD"].map(currency => <option key={currency} value={currency}>{currency}</option>)}
+            </select>
+          </label>
+          {disbursementMode === "expense-payees" ? ([
+            { key: "expenseRecipient", label: "المستفيد", selected: "المستفيد المحدد", empty: "كل المستفيدين", entries: expenseOptions?.payees },
+            { key: "expenseCategory", label: "بند المصروف", selected: "البند المحدد", empty: "كل البنود", entries: expenseOptions?.categories },
+          ] as const).map(field => {
+            const heldValue = state[field.key] ?? "";
+            const held = field.entries?.find(option => option.value === heldValue);
+            return (
+              <label key={field.key} className="block text-xs font-bold text-slate-600">
+                {field.label}
+                <select value={heldValue} disabled={!expenseReady}
+                  onChange={(event) => onChange({ [field.key]: event.target.value || null })}
+                  className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-2 py-2 disabled:bg-slate-100">
+                  <option value="">{field.empty}</option>
+                  {heldValue && (!expenseReady || !held) ? (
+                    <option value={heldValue}>{expenseReady
+                      ? field.selected + " غير موجود في الفترة"
+                      : (held?.label ?? field.selected) + " (اختيار محفوظ)"}</option>
+                  ) : null}
+                  {expenseReady ? field.entries?.map(option => <option key={option.value} value={option.value}>{option.label}</option>) : null}
+                </select>
+              </label>
+            );
+          }) : null}
+          {disbursementMode === "expense-payees" ? (
+            <p role="status" className="text-[11px] text-slate-700 sm:col-span-3">
+              {expenseStatus === "loading" ? "جارٍ تحديث خيارات المصروفات…"
+                : expenseStatus === "unavailable" ? "تعذّر تحميل خيارات المصروفات. لم تُمسح اختياراتك."
+                  : expenseStatus === "unapplied" ? "طبّق الفترة والعملة أولًا لتحميل المستفيدين والبنود المسجّلة. لن تُمسح الاختيارات السابقة."
+                    : expenseOptions && !expenseOptions.payees.length && !expenseOptions.categories.length
+                      ? "لا توجد سندات صرف مسجّلة في هذه الفترة."
+                      : expenseChoiceScope?.noMatches
+                        ? "لا توجد سندات تطابق العملة والفلاتر في التقرير المطبّق. تبقى خيارات الأسماء والبنود متاحة للفترة."
+                        : "خيارات المستفيد والبند من الفترة المطبّقة. اختيار العملة يصفّي السندات فقط."}
+              {expenseChoiceScope?.applied && expenseStatus !== "loading" ? (
+                <span className="mt-1 block">
+                  {expenseReady ? "الفترة والعملة المطبّقتان: " : "التقرير المعروض بحسب آخر تطبيق: "}
+                  <bdi>{expenseChoiceScope.applied.from} ← {expenseChoiceScope.applied.to}</bdi>
+                  {" · "}{expenseChoiceScope.applied.currency === "all" ? "كل العملات" : expenseChoiceScope.applied.currency}
+                </span>
+              ) : null}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* الفلاتر المتقدمة */}
-      <div className="mt-2.5 border-t border-slate-100 pt-2.5">
+      {!disbursementMode ? <div className="mt-2.5 border-t border-slate-100 pt-2.5">
         <button
           type="button"
           onClick={() => setAdvancedOpen((open) => !open)}
@@ -779,7 +870,7 @@ export function FilterBar({
             </div>
           </div>
         ) : null}
-      </div>
+      </div> : null}
 
       <div className="mt-2.5 flex items-center justify-between border-t border-slate-100 pt-2.5">
         <p className="text-[10px] font-medium text-slate-400">
@@ -788,9 +879,10 @@ export function FilterBar({
         <button
           type="button"
           onClick={onApply}
-          className="rounded-xl bg-navy-900 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-navy-800"
+          disabled={disbursementMode === "expense-payees" && expenseStatus === "loading"}
+          className="rounded-xl bg-navy-900 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-navy-800 disabled:opacity-50"
         >
-          تطبيق وإظهار التقرير
+          {disbursementMode === "expense-payees" ? expenseApplyLabel : "تطبيق وإظهار التقرير"}
         </button>
       </div>
     </div>

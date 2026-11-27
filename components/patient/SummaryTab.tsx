@@ -649,7 +649,7 @@ export function SummaryTab({
 
       {/* الخط الزمني الموحَّد (§٢٩-٣٠) — يُحمَّل عند فتحه، والفلترة تُجيب تاريخ
           العلاج وتاريخ المال من مكان واحد. */}
-      <PatientTimeline patientId={patientId} base={base} />
+      <PatientTimeline patientId={patientId} base={base} clinicZone={summary.timeZone} />
 
       <CollectPaymentModal
         patientId={patientId}

@@ -4,13 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { useClinicName } from "@/components/SettingsProvider";
 import { Icon, type IconName } from "@/components/Icon";
-import { FilterBar, type FilterState } from "@/components/reports/shared";
+import { FilterBar, type ExpenseChoiceScope, type FilterState } from "@/components/reports/shared";
 import { ReportView } from "@/components/reports/ReportView";
 import { SavedReportsBar } from "@/components/reports/SavedReportsBar";
 import { EMPTY_REPORT_VIEW, parseReportView, writeReportView, type ReportViewSpec } from "@/lib/report-view";
 import { financeLinks } from "@/components/financeLinks";
 import type { ReportOptions, ReportResult } from "@/lib/reports-types";
-import { reportVisibleToRole } from "@/lib/report-access";
+import { isDisbursementReport, reportVisibleToRole } from "@/lib/report-access";
 import { useSession } from "@/components/SessionProvider";
 
 /**
@@ -67,7 +67,9 @@ const SECTIONS: { id: SectionId; label: string; icon: IconName; reports: ReportT
     reports: [
       { id: "monthly", label: "التقرير الشهري", hint: "مع مقارنة اختيارية بالشهر السابق أو قبل سنة" },
       { id: "annual", label: "التقرير السنوي", hint: "الأشهر الاثنا عشر + إجماليات ومتوسطات" },
-      { id: "collections", label: "تقرير التحصيل", hint: "تحصيل جديد مفصولًا عن مديونية سابقة" },
+      { id: "collections", label: "تقرير التحصيل", hint: "سندات التحصيل والرد والعكس بعملة كل سند" },
+      { id: "daily-outflow", label: "حركة الخرج اليومية", hint: "سندات الصرف وردود المرضى والحوالات الداخلية بأقسام واضحة" },
+      { id: "expense-payees", label: "المصروفات حسب المستفيد والبند", hint: "اعرض سندات شخص أو جهة وبند مثل الإيجار، خلال فترة تختارها" },
       { id: "services", label: "الخدمات والإجراءات", hint: "ما أُنجز فعلًا وقيمته" },
       { id: "suppliers", label: "الموردون والذمم الدائنة", hint: "المستحق، المدفوع، المتبقي وتواريخ الاستحقاق" },
     ],
@@ -121,12 +123,34 @@ interface LoadedReport {
   sectionId: SectionId;
 }
 
+function sameExpenseScope(a: FilterState, b: FilterState): boolean {
+  return a.preset === b.preset && a.currency === b.currency
+    && (a.preset !== "custom" || (a.from === b.from && a.to === b.to));
+}
+
+function validExpenseOptions(value: unknown): value is NonNullable<ReportResult["expenseFilterOptions"]> {
+  if (typeof value !== "object" || value === null) return false;
+  const { payees, categories } = value as Partial<NonNullable<ReportResult["expenseFilterOptions"]>>;
+  return [payees, categories].every(list => Array.isArray(list) && list.every(option => option
+    && typeof option.value === "string" && /^[0-9a-f]{64}$/.test(option.value)
+    && typeof option.label === "string" && option.label.trim().length > 0));
+}
+
 function reportSearchParams(targetReport: string, state: FilterState, view?: ReportViewSpec | null): URLSearchParams {
   const params = new URLSearchParams({ report: targetReport });
   params.set("preset", state.preset);
   if (state.preset === "custom") {
     params.set("from", state.from);
     params.set("to", state.to);
+  }
+  if (isDisbursementReport(targetReport)) {
+    if (state.currency !== "all") params.set("currency", state.currency);
+    if (targetReport === "expense-payees") {
+      if (state.expenseRecipient) params.set("expenseRecipient", state.expenseRecipient);
+      if (state.expenseCategory) params.set("expenseCategory", state.expenseCategory);
+    }
+    if (view) writeReportView(params, view);
+    return params;
   }
   if (state.specialty) params.set("specialty", state.specialty);
   if (state.doctorId) params.set("doctorId", String(state.doctorId));
@@ -171,6 +195,10 @@ function filterStateFromParams(params: URLSearchParams, fallback: FilterState): 
   next.compare = oneOf(params.get("compare"), ["none", "prev_period", "prev_year"] as const, next.compare);
   next.method = params.get("method") || null;
   next.receivedBy = params.get("receivedBy") || null;
+  if (params.get("report") === "expense-payees") {
+    next.expenseRecipient = params.get("expenseRecipient");
+    next.expenseCategory = params.get("expenseCategory");
+  }
   return next;
 }
 
@@ -188,6 +216,7 @@ export default function ReportsPage() {
   const [data, setData] = useState<LoadedReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [failedExpenseScope, setFailedExpenseScope] = useState<FilterState | null>(null);
   const [patientDrill, setPatientDrill] = useState<number | null>(null);
   const [view, setView] = useState<ReportViewSpec>(EMPTY_REPORT_VIEW);
 
@@ -236,9 +265,10 @@ export default function ReportsPage() {
     const appliedFilters = { ...state };
     setLoading(true);
     setError(null);
+    if (targetReport === "expense-payees") setFailedExpenseScope(null);
     try {
-      // Drilling explores the period already shown, including after clinic midnight.
-      // Keep the logical preset in the saved snapshot so relative views stay relative.
+      // Drilling and applying expense choices explore the dates already shown,
+      // even across clinic midnight. Saved relative views stay relative.
       const requestFilters: FilterState = resolvedPeriod
         ? { ...appliedFilters, preset: "custom", from: resolvedPeriod.from, to: resolvedPeriod.to }
         : appliedFilters;
@@ -262,12 +292,17 @@ export default function ReportsPage() {
           result.baseCurrency, payload.generatedAt, payload.generatedBy].every((value) => typeof value === "string")) {
         throw new Error("تعذّر إعداد التقرير.");
       }
+      if (targetReport === "expense-payees" && (!validExpenseOptions(result.expenseFilterOptions)
+        || (requestFilters.preset === "custom" && (result.from !== requestFilters.from || result.to !== requestFilters.to)))) {
+        throw new Error("تعذّر التحقق من خيارات المصروفات للفترة المطلوبة.");
+      }
       // Commit the response and its request context together; an older request
       // must never replace a newer report or combine it with draft form values.
       setData({ ...payload, filters: appliedFilters, sectionId } as LoadedReport);
       onSuccess?.();
     } catch (loadError) {
       if (requestId !== loadRequestRef.current) return;
+      if (targetReport === "expense-payees") setFailedExpenseScope(appliedFilters);
       setError(loadError instanceof Error ? loadError.message : "تعذّر إعداد التقرير.");
     } finally {
       if (requestId === loadRequestRef.current) setLoading(false);
@@ -301,6 +336,7 @@ export default function ReportsPage() {
     setData(null);
     setLoading(false);
     setError(null);
+    setFailedExpenseScope(null);
     setPatientDrill(null);
     drillSourceRef.current = null;
     // انتظر معرفة الدور قبل أول طلب: الاستقبال لا يجب أن يبدأ بطلب تقرير مالي
@@ -330,7 +366,9 @@ export default function ReportsPage() {
     const initialReport = reportDef && initialSection.reports.some((item) => item.id === reportDef.id)
       ? reportDef.id
       : initialSection.reports[0].id;
-    const initialState = filterStateFromParams(params, initialFiltersRef.current);
+    const defaultFilters = isDisbursementReport(initialReport)
+      ? { ...initialFiltersRef.current, preset: "today" as const } : initialFiltersRef.current;
+    const initialState = filterStateFromParams(params, defaultFilters);
     const viewFromUrl = parseReportView(params);
     // Statements are an existing drill report, not a section tab. A copied or
     // saved statement URL still needs to hydrate through the same access guard.
@@ -367,13 +405,16 @@ export default function ReportsPage() {
   }
 
   function chooseReport(nextSection: SectionId, nextReport: string) {
-    void load(nextReport, filters, nextSection, () => {
+    const enteringDisbursement = isDisbursementReport(nextReport) && !isDisbursementReport(reportId);
+    const nextFilters: FilterState = enteringDisbursement ? { ...initialFiltersRef.current, preset: "today" } : filters;
+    void load(nextReport, nextFilters, nextSection, () => {
       setSection(nextSection);
       setReportId(nextReport);
       setPatientDrill(null);
       drillSourceRef.current = null;
       setView(EMPTY_REPORT_VIEW);
-      syncReportUrl(nextSection, nextReport, filters, EMPTY_REPORT_VIEW);
+      setFilters(nextFilters);
+      syncReportUrl(nextSection, nextReport, nextFilters, EMPTY_REPORT_VIEW);
     });
   }
 
@@ -403,6 +444,18 @@ export default function ReportsPage() {
   const showDebtMode = reportId === "debt";
   const showCompare = reportId === "monthly";
 
+  const expenseData = data?.result.report === "expense-payees" ? data : null;
+  const expenseScopeMatches = !!expenseData && sameExpenseScope(filters, expenseData.filters);
+  const expenseChoiceScope: ExpenseChoiceScope = {
+    status: loading ? "loading"
+      : failedExpenseScope && sameExpenseScope(filters, failedExpenseScope) ? "unavailable"
+        : expenseScopeMatches ? "ready" : "unapplied",
+    noMatches: expenseData?.result.rows?.length === 0,
+    applied: expenseData ? {
+      from: expenseData.result.from, to: expenseData.result.to, currency: expenseData.filters.currency,
+    } : undefined,
+  };
+
   return (
     <main className="mx-auto max-w-6xl p-4 pb-24">
       <PageHeader
@@ -411,6 +464,16 @@ export default function ReportsPage() {
         links={financeLinks("/reports")}
       >
         <div className="flex flex-wrap gap-1.5">
+          {([
+            { id: "collections", label: "حركة التحصيل اليومية" },
+            { id: "daily-outflow", label: "حركة الخرج اليومية" },
+            { id: "expense-payees", label: "المصروفات حسب المستفيد والبند" },
+          ] as const).filter(item => reportVisibleToRole(sessionRole, item.id, { viewCommissions })).map(item => (
+            <a key={item.id} href={`/reports?section=financial&report=${item.id}&preset=today`}
+              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-navy-800 hover:bg-slate-50">
+              {item.label}
+            </a>
+          ))}
           {sessionRole === "admin" ? (
             <a
               href="/reports/daily-clinic"
@@ -500,17 +563,28 @@ export default function ReportsPage() {
             options={options}
             showDebtMode={showDebtMode}
             showCompare={showCompare}
+            disbursementMode={isDisbursementReport(reportId) ? reportId : undefined}
+            expenseOptions={expenseData?.result.expenseFilterOptions}
+            expenseChoiceScope={expenseChoiceScope}
             onPatientPicked={(patient) => {
               const next = { ...filters, patientId: patient?.id ?? null };
               patchFilters({ patientId: next.patientId });
               void load(reportId, next, section, () => syncReportUrl(section, reportId, next, view));
             }}
             onApply={() => {
+              if (reportId === "expense-payees" && loading) return;
+              // The selections were offered for this exact interval. Changing
+              // just a selection must not jump to another day at clinic midnight.
+              const selectedChanged = expenseData
+                && ((expenseData.filters.expenseRecipient ?? null) !== (filters.expenseRecipient ?? null)
+                  || (expenseData.filters.expenseCategory ?? null) !== (filters.expenseCategory ?? null));
+              const resolveFrom = reportId === "expense-payees" && expenseScopeMatches && selectedChanged
+                ? expenseData?.result : undefined;
               void load(reportId, filters, section, () => {
                 setPatientDrill(null);
                 drillSourceRef.current = null;
                 syncReportUrl(section, reportId, filters, view);
-              });
+              }, resolveFrom);
             }}
           />
         </div>

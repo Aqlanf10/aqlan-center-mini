@@ -93,6 +93,9 @@ export interface ReportFilters {
   compare: CompareMode;
   method: string | null;
   receivedBy: string | null;
+  /** Opaque selectors for the admin expense report; never names in a URL. */
+  expenseRecipient?: string | null;
+  expenseCategory?: string | null;
 }
 
 // ─── شكل النتائج الموحد ──────────────────────────────────────────────────────
@@ -174,6 +177,11 @@ export interface ReportResult {
   actions?: { label: string; href: string }[];
   /** تفاصيل الفلاتر المطبَّقة — تظهر في الطباعة. */
   filtersLabel: string;
+  /** Choices observed in the selected period/currency; only the authorized expense report returns them. */
+  expenseFilterOptions?: {
+    payees: { value: string; label: string }[];
+    categories: { value: string; label: string }[];
+  };
 }
 
 // ─── خيارات الفلاتر ─────────────────────────────────────────────────────────

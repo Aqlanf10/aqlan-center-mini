@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { canAccessUnifiedReport, isKnownUnifiedReport } from "@/lib/report-access";
+import { canAccessUnifiedReport, isDisbursementReport, isKnownUnifiedReport } from "@/lib/report-access";
 import { requireSession } from "@/lib/session";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
-import { ReportInputError, buildReport, dbTodayISO, parseFilters, reportOptions, validateAnnualReportRange } from "@/lib/reports";
+import { ReportInputError, buildReport, dbTodayISO, parseFilters, reportOptions, validateCustomReportRange } from "@/lib/reports";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +21,9 @@ export async function GET(request: Request) {
   const params = new URL(request.url).searchParams;
   const report = params.get("report") ?? "daily";
 
+  const internal = isDisbursementReport(report);
+  const responseHeaders = internal ? { "Cache-Control": "private, no-store, max-age=0", "Vary": "Cookie, Authorization" } : undefined;
+
   /*
    * الاستقبال يدير الصندوق لكنه لا يرى دخل المركز/الربحية/العمولات.
    * الفصل هنا خادميّ: إخفاء زرٍّ وحده لا يمنع طلب API مباشرًا.
@@ -31,12 +34,12 @@ export async function GET(request: Request) {
   }
   if (!canAccessUnifiedReport(session.role, report, session.financeAccess)) {
     return NextResponse.json(
-      { message: session.role === "reception"
+      { message: internal || session.role === "reception"
           ? "هذا التقرير مالي/إداري ومتاح للمدير فقط."
           : session.role === "accountant"
           ? "هذا التقرير تشغيلي/سريري وخارج صلاحيات المحاسب."
           : "مركز التقارير غير متاح لهذا الدور." },
-      { status: 403 },
+      { status: 403, headers: responseHeaders },
     );
   }
 
@@ -50,9 +53,7 @@ export async function GET(request: Request) {
 
   try {
     // التحقق من المدخلات الخام قبل أن يستبدل محلّل الفلاتر تاريخًا غير صالح بقيمة افتراضية.
-    if (report === "annual" && params.get("preset") === "custom") {
-      validateAnnualReportRange(params.get("from"), params.get("to"));
-    }
+    validateCustomReportRange(params);
     // «اليوم» من القاعدة نفسها — مطابقةً للطريقة التي حُسبت بها تواريخ كل حركة.
     const filters = parseFilters(params, await dbTodayISO());
     const result = await buildReport(report, filters);
@@ -62,12 +63,12 @@ export async function GET(request: Request) {
     return NextResponse.json({
       result, generatedAt: new Date().toISOString(), generatedBy: session.username,
       clinicTimeZone: CLINIC_TIME_ZONE,
-    });
+    }, { headers: responseHeaders });
   } catch (error) {
     // رسائل المدخلات عربية مكتوبة للمستخدم؛ غيرها لا تُكشف تفاصيله (CLAUDE.md).
     if (error instanceof ReportInputError) {
-      return NextResponse.json({ message: error.message }, { status: 400 });
+      return NextResponse.json({ message: error.message }, { status: 400, headers: responseHeaders });
     }
-    return NextResponse.json({ message: "تعذّر إعداد التقرير. أعد المحاولة." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر إعداد التقرير. أعد المحاولة." }, { status: 500, headers: responseHeaders });
   }
 }

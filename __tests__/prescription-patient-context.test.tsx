@@ -142,7 +142,16 @@ let readPatient: (id: number) => Promise<ReadResponse>;
 const fetchMock = vi.fn(); const openMock = vi.fn();
 const renderVisit = () => renderScope(visitScope, () => ClinicalVisit({ visitId }));
 const modalProps = () => find(renderVisit(), (node) => node.type === PrescriptionModal).props as unknown as ModalProps;
-const renderModal = (props = modalProps()) => renderScope(modalScope, () => PrescriptionModal(props));
+let formKey: string | null;
+const renderModal = (props = modalProps()) => {
+  const child = PrescriptionModal(props);
+  if (formKey !== child.key) {
+    unmount(modalScope);
+    modalScope = scope();
+    formKey = child.key;
+  }
+  return renderScope(modalScope, () => (child.type as (value: ModalProps) => ReactElement | null)(child.props));
+};
 const readCalls = () => fetchMock.mock.calls.filter(([url]) => /^\/api\/patients\/\d+$/.test(url));
 async function tick() { for (let count = 0; count < 20; count += 1) await Promise.resolve(); }
 async function flush() { for (let count = 0; count < 5; count += 1) { await tick(); renderVisit(); } }
@@ -151,7 +160,7 @@ async function open() { click(find(renderVisit(), (node) => node.type === "butto
 const close = () => { modalProps().onClose(); renderVisit(); renderModal(); };
 function unmount(store: Scope) { store.effects.forEach((effect) => effect.cleanup?.()); store.effects.clear(); }
 beforeEach(() => {
-  visitScope = scope(); modalScope = scope(); vi.clearAllMocks();
+  visitScope = scope(); modalScope = scope(); formKey = null; vi.clearAllMocks();
   state.username = "synthetic-clinician"; state.role = "doctor"; state.permissions = null;
   visitId = 91001; visits = new Map([[91001, visit(91001)], [91002, visit(91002)]]);
   readPatient = async (id) => response(200, patientFile(id));
