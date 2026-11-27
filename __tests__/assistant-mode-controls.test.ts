@@ -85,6 +85,21 @@ describe("synthetic assistant mode matrix", () => {
     expect(JSON.stringify(outbound)).not.toContain("syntheticname");
     expect(outbound.slice(1).every((message: { content: string }) => message.content.includes("[اسم]"))).toBe(true);
   });
+  it("removes explicit mixed registered and unregistered patient names before token masking", async () => {
+    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
+    m.settings.mockResolvedValue({ "ai.clinical_external": "true" });
+    m.names.mockResolvedValue(new Set(["syntheticname"]));
+    const response = await chat(make({ messages: [
+      { role: "assistant", content: "المريض syntheticname syntheticfamily." },
+      { role: "user", content: "المريض syntheticname syntheticfamily يعاني من ألم." },
+    ] }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ sourceType: "external_ai" });
+    expect(m.ai).toHaveBeenCalledOnce();
+    const outbound = m.ai.mock.calls[0][0].messages.slice(1);
+    expect(JSON.stringify(outbound)).not.toMatch(/syntheticname|syntheticfamily/);
+    expect(outbound.every((message: { content: string }) => message.content.includes("[المريض]"))).toBe(true);
+  });
   it("does not send clinical history if the registered-name lookup fails", async () => {
     m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
     m.settings.mockResolvedValue({ "ai.clinical_external": "true" });
