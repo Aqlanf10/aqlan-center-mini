@@ -186,6 +186,21 @@ describe("synthetic assistant mode matrix", () => {
     expect(reply.status).toBe(503);
     expect(m.process).not.toHaveBeenCalled();
   });
+  it.each(["chat", "confirmation"] as const)("fails closed when the authenticated account reload fails in %s", async route => {
+    m.user.mockRejectedValue(new Error("SYNTHETIC_PRIVATE_ACCOUNT_ERROR"));
+    m.verify.mockReturnValue({ userId: 22, tool: "book_appointment", params: { patientId: 303 } });
+    const response = route === "chat"
+      ? await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }))
+      : await confirmation(make({ token: "synthetic-signed-preview" }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.text()).not.toContain("SYNTHETIC_PRIVATE_ACCOUNT_ERROR");
+    expect(m.master).not.toHaveBeenCalled();
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+    expect(m.execute).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
   it("fails closed with a generic 503 when master settings cannot be read", async () => {
     m.master.mockRejectedValue(new Error("SYNTHETIC_PRIVATE_SETTINGS_ERROR"));
     const response = await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }));
