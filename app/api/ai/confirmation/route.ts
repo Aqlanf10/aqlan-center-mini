@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { AI_CHAT_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
-import { findUserByUsername, recordAudit } from "@/lib/db";
+import { findUserByUsername, getPool, recordAudit } from "@/lib/db";
 import { type Role, canUseAiChat } from "@/lib/roles";
 import { verifyToolConfirmation } from "@/lib/ai-confirmation";
 import { executeAiTool } from "@/lib/ai-tools/registry";
@@ -108,6 +108,19 @@ export async function POST(request: Request) {
     isDbConnected,
     confirmationToken: token,
   };
+
+  // Re-read only the current master flag. An outstanding confirmation must
+  // not execute or be consumed if the feature is disabled or unreadable.
+  let masterEnabled = false;
+  try {
+    const { rows } = await getPool().query<{ enabled: boolean }>("SELECT enabled FROM ai_settings WHERE id = 1");
+    masterEnabled = rows[0]?.enabled === true;
+  } catch {
+    // Do not dispatch when the setting is unavailable.
+  }
+  if (!masterEnabled) {
+    return NextResponse.json({ message: "المساعد الذكي متوقف أو تعذّر التحقق من تفعيله." }, { status: 503 });
+  }
 
   const started = Date.now();
   let result;

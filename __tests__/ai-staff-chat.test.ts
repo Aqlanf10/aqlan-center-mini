@@ -371,6 +371,16 @@ describe("(P2-11) Claude للمهام الإدارية فقط — الافترا
     expect((data.warnings || []).some((w: string) => w.includes("للمهام الإدارية فقط"))).toBe(true);
   });
 
+  it("retains the local answer without contacting the provider if name redaction is unavailable", async () => {
+    asLinkedDoctor();
+    mocks.personNameTokens.mockRejectedValueOnce(new Error("synthetic lookup unavailable"));
+    const response = await post({ message: "اكتب إعلانًا عن إغلاق المركز يوم العيد" });
+    expect(response.status).toBe(200);
+    expect(mocks.personNameTokens).toHaveBeenCalledTimes(1);
+    expect(mocks.aiChat).not.toHaveBeenCalled();
+    expect(await response.json()).toMatchObject({ answer: expect.any(String) });
+  });
+
   it("طلبٌ إداري يخرج إلى Claude برسالته الأخيرة وحدها وتعليماتٍ إدارية — لا سجلٌّ سريري سابق", async () => {
     asLinkedDoctor();
     const res = await post({

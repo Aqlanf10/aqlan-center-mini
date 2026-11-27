@@ -35,6 +35,7 @@ let patientId = 0, invoiceId = 0;
 
 beforeAll(async () => {
   await db.ensureSchema();
+  await q("INSERT INTO ai_settings(id, enabled) VALUES (1, TRUE) ON CONFLICT (id) DO UPDATE SET enabled = TRUE");
   const hash = await authLib.hashPassword("synthetic-containment-password");
   const user = async (username: string, role: string, permissions: Record<string, unknown> | null) => {
     const [row] = await q<{ id: number }>("INSERT INTO users(username,display_name,password_hash,role,is_active,permissions) VALUES($1,$2,$3,$4,TRUE,$5) RETURNING id",
@@ -170,6 +171,24 @@ describe("the real assistant routes", () => {
     expect(await claims()).toBe(c0);
     // The chat route's own request-rate counter is the only other row it touches; no money table moves.
     expect(changedTables(s0, await databaseState()).filter((table) => table !== "public.login_limits")).toEqual([]);
+  });
+
+  it("refuses a previously issued confirmation after disabling the assistant", async () => {
+    auth.session = admin;
+    const token = issuedToken(admin);
+    await q("UPDATE ai_settings SET enabled = FALSE WHERE id = 1");
+    try {
+      const s0 = await databaseState();
+      const c0 = await claims();
+      const response = await confirmationRoute.POST(new Request("http://localhost/api/ai/confirmation", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ token }),
+      }));
+      expect(response.status).toBe(503);
+      expect(await claims()).toBe(c0);
+      expect(changedTables(s0, await databaseState())).toEqual([]);
+    } finally {
+      await q("UPDATE ai_settings SET enabled = TRUE WHERE id = 1");
+    }
   });
 
   it("POST /api/ai/confirmation with a previously issued token refuses without consuming it or touching money", async () => {
