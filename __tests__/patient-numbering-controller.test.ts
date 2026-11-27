@@ -93,7 +93,7 @@ describe('unmounted patient numbering save controller', () => {
     expect(f.seen.indexOf('snapshot')).toBeLessThan(f.seen.indexOf('apply'));
   });
   it.each([null, [], 'body', { ...payload, extra: true }, { ...payload, actorId: 99 }, { ...payload, role: 'admin' },
-    { ...payload, prefix: 'AA' }, { ...payload, next: 37 }, { ...payload, next: '1e4' }, { ...payload, next: '9999999999999999999' },
+    { ...payload, prefix: 'AAAAAAA' }, { ...payload, next: 37 }, { ...payload, next: '1e4' }, { ...payload, next: '9999999999999999999' },
     { ...payload, expectedRevision: '' }, { ...payload, requestId: 'short' }, { ...payload, reason: '' }, { ...payload, reason: 'x'.repeat(501) },
     { ...payload, previewToken: '' }, { ...payload, previewToken: 'x'.repeat(8193) }, { ...payload, previewToken: {} }])('rejects malformed or authority-bearing input before a transaction: %j', async raw => {
     const f = fixture(); expect(await executePatientNumberingSave(raw, f.dependencies)).toEqual({ ok: false, reason: 'invalid-input' }); expect(f.transactions()).toBe(0);

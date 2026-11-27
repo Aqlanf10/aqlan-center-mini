@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DbClient } from "./db";
 import type { SessionPayload } from "./auth";
-import { revalidateSessionInTransaction } from "./session";
+import { revalidateSessionInTransaction } from "./session-revalidate";
 import { canAccessPatient } from "./patient-access";
 import { PENDING_LAB_NAME } from "./lab";
 import { validateLabPrescription, type LabPrescriptionInput } from "./lab-prescription-input";

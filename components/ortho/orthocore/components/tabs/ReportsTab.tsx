@@ -1,4 +1,6 @@
-﻿"use client";
+"use client";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
@@ -193,7 +195,7 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
           {
             id: `rep-${Date.now()}`,
             reportType,
-            title: `${reportType} (${new Date().toISOString().slice(0, 10)})`,
+            title: `${reportType} (${clinicDateString(new Date(), CLINIC_ZONE_FALLBACK)})`,
             body: reportText,
             createdAt: new Date().toISOString(),
             createdBy: actorName,
@@ -668,7 +670,7 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
               {patient.assignedDoctor}
             </p>
           </div>
-          <span className="text-xs font-mono tabular-nums text-slate-500">{new Date().toISOString().slice(0, 10)}</span>
+          <span className="text-xs font-mono tabular-nums text-slate-500">{clinicDateString(new Date(), CLINIC_ZONE_FALLBACK)}</span>
         </div>
 
         <pre className="whitespace-pre-wrap font-sans text-sm text-slate-800 leading-relaxed">{reportText}</pre>

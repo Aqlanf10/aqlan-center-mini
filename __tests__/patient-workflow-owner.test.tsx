@@ -25,6 +25,7 @@ vi.mock("@/components/PatientPlans", () => ({ PatientPlans: "mock-plans" }));
 vi.mock("@/components/DentalChart", () => ({ DentalChart: "mock-chart" }));
 vi.mock("@/components/PatientDocuments", () => ({ PatientDocuments: "mock-documents" }));
 vi.mock("@/components/PatientOrtho", () => ({ PatientOrtho: "mock-ortho" }));
+vi.mock("@/components/ortho/AdvancedOrthoWorkspace", () => ({ AdvancedOrthoWorkspace: "mock-ortho" }));
 vi.mock("@/components/PatientEndo", () => ({ PatientEndo: "mock-endo" }));
 vi.mock("@/components/PatientLabOrders", () => ({ PatientLabOrders: "mock-lab" }));
 vi.mock("@/components/PatientReferrals", () => ({ PatientReferrals: "mock-referrals" }));

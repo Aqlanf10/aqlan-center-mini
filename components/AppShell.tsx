@@ -74,20 +74,6 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
   const restricted = isGatedRole(session?.role);
   /* جلسة الهوية الموحّدة لها قشرتها: لا عدّادات ولا اختصارات تطرق مسارات قديمة. */
   const canonical = session?.canonical === true;
-  const bareEarly = BARE_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
-  const orthoNavPerms = useOrthoPermissions({
-    enabled: Boolean(session) && !bareEarly && !restricted && !canonical,
-  });
-  const nav = NAV.filter((item) => {
-    // (P2-1) الكاشير والمحاسب: القائمة هي قائمة السماح نفسها التي يحرسها الباب.
-    if (restricted && !pageVisibleToRole(session?.role, item.href)) return false;
-    if (item.href === "/ortho" && !orthoNavPerms.loading && !orthoNavPerms.moduleVisible) return false;
-    if (item.needs === "settings") return roleCan(session?.role, "settings.view");
-    if (item.needs === "admin") return isAdmin(session?.role);
-    if (item.needs === "money") return canHandleMoney(session?.role);
-    if (item.needs === "doctor") return session?.role === "doctor";
-    return true;
-  });
   const [badges, setBadges] = useState<{ requests: number; lab: number; messages: number; urgentMessages: number }>({
     requests: 0, lab: 0, messages: 0, urgentMessages: 0,
   });
@@ -224,6 +210,20 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
   useEffect(() => {
     if (badges.urgentMessages === 0 && urgentDismissed) setUrgentDismissed(false);
   }, [badges.urgentMessages, urgentDismissed]);
+
+  const orthoNavPerms = useOrthoPermissions({
+    enabled: Boolean(session) && !bare && !restricted && !canonical,
+  });
+  const nav = NAV.filter((item) => {
+    // (P2-1) الكاشير والمحاسب: القائمة هي قائمة السماح نفسها التي يحرسها الباب.
+    if (restricted && !pageVisibleToRole(session?.role, item.href)) return false;
+    if (item.href === "/ortho" && !orthoNavPerms.loading && !orthoNavPerms.moduleVisible) return false;
+    if (item.needs === "settings") return roleCan(session?.role, "settings.view");
+    if (item.needs === "admin") return isAdmin(session?.role);
+    if (item.needs === "money") return canHandleMoney(session?.role);
+    if (item.needs === "doctor") return session?.role === "doctor";
+    return true;
+  });
 
   const showUrgentBanner = badges.urgentMessages > 0 && !urgentDismissed;
 

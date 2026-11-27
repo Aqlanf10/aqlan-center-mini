@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SessionPayload } from "./auth";
 import { ensureSchema, getPool, insertAuditRow, PLAN_ITEM_FINANCIAL_LINEAGE_SQL, CLINIC_TIME_ZONE, type DbClient } from "./db";
-import { revalidateSessionInTransaction } from "./session";
+import { revalidateSessionInTransaction } from "./session-revalidate";
 import { isCanonicalDebtActor, type DebtActorSource } from "./debt-installments-db";
 import { readInvoiceSettlementPosition } from "./invoice-settlement-position";
 import { lockDebtAccountForSchedule } from "./debt-account-position";

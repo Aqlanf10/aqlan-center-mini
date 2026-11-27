@@ -7622,7 +7622,7 @@ export async function updateLabOrderAccounting(
   try {
     await client.query("BEGIN");
     const activeSession = input.session
-      ? await (await import("./session")).revalidateSessionInTransaction(input.session, client)
+      ? await (await import("./session-revalidate")).revalidateSessionInTransaction(input.session, client)
       : null;
     if (input.session && (!activeSession || !(await import("./roles")).canHandleMoney(activeSession.role))) {
       throw new LabFinancialBoundaryError("lab_accounting_forbidden", "انتهت الجلسة أو تغيّرت صلاحية العملية المالية؛ لم تتغير التكلفة.");
@@ -8012,7 +8012,7 @@ export async function setLabOrderStatus(
     // HTTP always supplies the actual session. Legacy trusted internal callers
     // retain their existing actor contract; they cannot use the HTTP boundary.
     const activeSession = context?.session
-      ? await (await import("./session")).revalidateSessionInTransaction(context.session, client)
+      ? await (await import("./session-revalidate")).revalidateSessionInTransaction(context.session, client)
       : null;
     if (context?.session && (!activeSession || !["admin", "doctor", "reception", "assistant"].includes(activeSession.role))) {
       throw new LabFinancialBoundaryError("lab_status_forbidden", "انتهت الجلسة أو لا تملك صلاحية متابعة هذا العمل.");

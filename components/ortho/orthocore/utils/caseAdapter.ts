@@ -1,4 +1,6 @@
 "use client";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 import type { OrthoWorkspaceRecord } from "@/lib/ortho-workspace-types";
 import type { ClinicSettings, MediaRecord, PatientCase, TreatmentSession } from "../types/ortho";
@@ -105,7 +107,7 @@ function mapDocToMediaRecord(doc: LivePatientDocument): MediaRecord {
     opg: "panoramic_opg",
   };
   const viewType = (doc.photoView && viewMap[doc.photoView]) || doc.photoView || "intraoral_frontal";
-  const today = doc.takenOn || doc.uploadedAt?.slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const today = doc.takenOn || doc.uploadedAt?.slice(0, 10) || clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   return {
     id: `doc-${doc.id}`,

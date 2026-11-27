@@ -1,6 +1,6 @@
 import type { DbClient } from "./db";
 import type { SessionPayload } from "./auth";
-import { revalidateSessionInTransaction } from "./session";
+import { revalidateSessionInTransaction } from "./session-revalidate";
 import { canAccessPatient } from "./patient-access";
 /** A clinical create cannot become a grant of another doctor's patient access.
  * Called before inserting either case, so the proposed responsibility is never

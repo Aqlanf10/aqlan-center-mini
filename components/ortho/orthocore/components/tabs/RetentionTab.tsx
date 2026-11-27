@@ -1,4 +1,6 @@
-﻿"use client";
+"use client";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import React, { useState } from 'react';
 import { CalendarCheck, Plus, ShieldCheck } from 'lucide-react';
 import { Language, PatientCase, RetentionRecord } from '../../types/ortho';
@@ -13,7 +15,7 @@ interface RetentionTabProps {
 export const RetentionTab: React.FC<RetentionTabProps> = ({ patient, lang, onChange }) => {
   const ret = patient.retention;
   const [intervalLabel, setIntervalLabel] = useState('متابعة 6 أشهر');
-  const [dueDate, setDueDate] = useState(new Date().toISOString().slice(0, 10));
+  const [dueDate, setDueDate] = useState(clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
   const [repairJaw, setRepairJaw] = useState<'upper' | 'lower' | 'both'>('lower');
   const [repairIssue, setRepairIssue] = useState('');
   const [repairAction, setRepairAction] = useState('');
@@ -44,7 +46,7 @@ export const RetentionTab: React.FC<RetentionTabProps> = ({ patient, lang, onCha
       repairsAndReplacements: [
         {
           id: `rep-${Date.now()}`,
-          date: new Date().toISOString().slice(0, 10),
+          date: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
           jaw: repairJaw,
           issue: repairIssue.trim(),
           actionTaken: repairAction.trim(),
@@ -223,7 +225,7 @@ export const RetentionTab: React.FC<RetentionTabProps> = ({ patient, lang, onCha
                           ? {
                               ...x,
                               status: e.target.value as 'scheduled' | 'completed' | 'missed',
-                              completedDate: e.target.value === 'completed' ? new Date().toISOString().slice(0, 10) : x.completedDate,
+                              completedDate: e.target.value === 'completed' ? clinicDateString(new Date(), CLINIC_ZONE_FALLBACK) : x.completedDate,
                             }
                           : x,
                       );

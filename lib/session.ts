@@ -1,30 +1,14 @@
 import { cookies, headers } from "next/headers";
-import { SESSION_COOKIE, readSessionToken, sessionCredentialVersion, carryLegacySessionEvidence, readSignedSessionEnvelope, hasCanonicalSessionMarker, type SessionPayload } from "./auth";
-import { sessionPermissionVersion } from "./auth";
-import { financeAccessFor } from "./finance-permissions";
+import { SESSION_COOKIE, readSessionToken, readSignedSessionEnvelope, hasCanonicalSessionMarker, type SessionPayload } from "./auth";
 import type { VerifiedDurableSession } from "./staff-durable-session";
-import { findUserByUsername, findLegacyUserByUsernameReadOnlySnapshot, type StaffUser, type DbClient } from "./db";
+import type { DbClient } from "./db";
+import {
+  currentSession,
+  revalidateSessionInTransaction,
+  revalidateLegacySessionReadOnlySnapshot,
+} from "./session-revalidate";
 
-async function currentSession(payload: SessionPayload | null, client?: DbClient): Promise<SessionPayload | null> {
-  if (!payload?.credentialVersion) return null;
-  const user = client ? await findUserByUsername(payload.username, client) : await findUserByUsername(payload.username);
-  return currentSessionForUser(payload, user);
-}
-
-function currentSessionForUser(payload: SessionPayload, user: StaffUser | null): SessionPayload | null {
-  if (payload.expiresAt <= Date.now()) return null;
-  if (!user || !user.isActive || user.id !== payload.userId
-    || payload.credentialVersion !== sessionCredentialVersion(user.passwordHash)) return null;
-  /* (P2-1) تغيير الدور يُبطل الجلسة: الباب (proxy) يحرس الكاشير والمحاسب بالدور
-     الموقَّع في التوكن، فلا يجوز أن يبقى توكنٌ بدورٍ غير دوره في القاعدة — موظفٌ
-     نُقل من «استقبال» إلى «كاشير» يدخل من جديد فيحمل دوره الجديد. */
-  if (payload.role !== user.role) return null;
-  if ((user.role === "cashier" || user.role === "accountant")
-    && payload.permissionVersion !== sessionPermissionVersion(user.role, user.permissions?.financeAccess)) return null;
-  return carryLegacySessionEvidence(payload, { ...payload, role: user.role, partyId: user.partyId,
-    financeAccess: user.role === "cashier" || user.role === "accountant"
-      ? financeAccessFor(user.role, user.permissions?.financeAccess) : undefined });
-}
+export { revalidateSessionInTransaction, revalidateLegacySessionReadOnlySnapshot };
 
 /**
  * الجلسة الموثوقة — مصادقة رقمية صارمة وموقعة بتوقيع HMAC-SHA256.
@@ -90,25 +74,6 @@ export async function requireSessionStrict(): Promise<SessionPayload | null> {
   return requireSession();
 }
 
-/** Revalidate an already authenticated server-side payload under the caller's
- * transaction. The caller must supply the admitted signed session; this does not
- * authenticate arbitrary client JSON. Reuses the canonical account/credential/
- * role/permission checks and held user SHARE lock, without rereading cookies. */
-export async function revalidateSessionInTransaction(
-  payload: SessionPayload, client: DbClient,
-): Promise<SessionPayload | null> {
-  return currentSession(payload, client);
-}
-
-/** SELECT-only revalidation within an owning, lifecycle-fenced READ ONLY
- * snapshot. Never use this read projection as permission to mutate. */
-export async function revalidateLegacySessionReadOnlySnapshot(payload: SessionPayload, client: DbClient): Promise<SessionPayload | null> {
-  if (!payload?.credentialVersion) return null;
-  return currentSessionForUser(payload, await findLegacyUserByUsernameReadOnlySnapshot(payload.username, client));
-}
-
-// Unmounted managed-numbering contract. A durable handle proves signed
-// transport only; it is not a staff or numbering operation admission.
 export type BoundRequestSession = VerifiedDurableSession;
 
 export async function readBoundRequestSession(): Promise<BoundRequestSession | null> {

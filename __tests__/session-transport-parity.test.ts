@@ -17,7 +17,7 @@ vi.mock("../lib/db", () => ({ CLINIC_TIME_ZONE: "Asia/Aden", findUserByUsername:
 vi.mock("../lib/reports", () => ({
   ReportInputError: class extends Error {},
   buildReport: transport.buildReport,
-  dbTodayISO: async () => "2026-11-01", parseFilters: () => ({}), reportOptions: () => ({}), validateAnnualReportRange: () => {},
+  dbTodayISO: async () => "2026-11-01", parseFilters: () => ({}), reportOptions: () => ({}), validateAnnualReportRange: () => {}, validateCustomReportRange: () => {},
 }));
 
 import { createSessionToken, readSessionToken, readSignedSessionEnvelope, SESSION_COOKIE, sessionCredentialVersion, sessionPermissionVersion } from "../lib/auth";

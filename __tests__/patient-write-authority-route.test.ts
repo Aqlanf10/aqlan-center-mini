@@ -109,14 +109,18 @@ describe.each(cases)("$method patient write authority", ({ method, permission, s
     expect(await response.json()).toMatchObject({ id: patient.id, fullName });
     expect(writer).toHaveBeenCalledTimes(1);
     if (method === "POST") {
-      expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ fullName }), false);
+      expect(mocks.create).toHaveBeenCalledWith(
+        expect.objectContaining({ fullName }),
+        false,
+        expect.objectContaining({ actor: session.username, actorRole: "doctor", opening: null }),
+      );
       expect(mocks.update).not.toHaveBeenCalled();
     } else {
       expect(mocks.owns).toHaveBeenCalledExactlyOnceWith(7, patient.id);
       expect(mocks.update).toHaveBeenCalledWith(patient.id, expect.objectContaining({ fullName }));
       expect(mocks.create).not.toHaveBeenCalled();
     }
-    expect(mocks.audit).toHaveBeenCalledTimes(1);
+    expect(mocks.audit).toHaveBeenCalledTimes(method === "POST" ? 0 : 1);
     expect(mocks.opening).not.toHaveBeenCalled();
     expect(mocks.delete).not.toHaveBeenCalled();
   });

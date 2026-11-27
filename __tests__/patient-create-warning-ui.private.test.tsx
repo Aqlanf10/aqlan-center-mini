@@ -23,6 +23,7 @@ vi.mock("react",async original=>{
   };
 });
 vi.mock("next/navigation",()=>({useRouter:()=>({push:vi.fn()})}));
+vi.mock("../components/SessionProvider",()=>({useSession:()=>({username:"synthetic",role:"reception"})}));
 vi.mock("../components/Modal",()=>({Modal:()=>null}));
 vi.mock("../components/SettingsProvider",()=>({useSetting:()=>undefined}));
 vi.mock("../components/PatientContactPanel",()=>({PatientFlagChips:()=>null}));

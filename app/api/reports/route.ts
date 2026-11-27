@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { canAccessUnifiedReport, isDisbursementReport, isKnownUnifiedReport } from "@/lib/report-access";
 import { requireSession } from "@/lib/session";
 import { CLINIC_TIME_ZONE } from "@/lib/db";
+import { clinicDateString } from "@/lib/schedule";
 import { ReportInputError, buildReport, dbTodayISO, parseFilters, reportOptions, validateCustomReportRange } from "@/lib/reports";
 
 export const dynamic = "force-dynamic";
@@ -55,7 +56,8 @@ export async function GET(request: Request) {
     // التحقق من المدخلات الخام قبل أن يستبدل محلّل الفلاتر تاريخًا غير صالح بقيمة افتراضية.
     validateCustomReportRange(params);
     // «اليوم» من القاعدة نفسها — مطابقةً للطريقة التي حُسبت بها تواريخ كل حركة.
-    const filters = parseFilters(params, await dbTodayISO());
+    const today = await dbTodayISO().catch(() => clinicDateString(new Date(), CLINIC_TIME_ZONE));
+    const filters = parseFilters(params, today);
     const result = await buildReport(report, filters);
     /* (P1-2) العقد الذي تقرؤه الصفحة (`LoadedReport`): التقرير داخل `result`. كان
        يُعاد مسطّحًا ({...result}) فتقرأ الصفحة `data.result` غير معرَّف وتنهار لكل

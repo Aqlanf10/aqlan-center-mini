@@ -4,7 +4,7 @@ import {clinicDateString} from "./schedule";
 import {CLINIC_TIME_ZONE} from "./db";
 import { ensureSchema, getPool, getPayment, getSettingsInTransaction, insertAuditRow, writeDebtCollectionReceipt, type DbClient, type Payment } from "./db";
 import { canHandleMoney } from "./roles";
-import { revalidateSessionInTransaction } from "./session";
+import { revalidateSessionInTransaction } from "./session-revalidate";
 import type { SessionPayload } from "./auth";
 import { assertDebtSession, DebtRepaymentError, debtRequestHash, isCanonicalDebtActor, readDebtPosition, type DebtActorSource, type DebtTarget } from "./debt-installments-db";
 import { lockDebtAccountForSchedule, debtAccountDue } from "./debt-account-position";

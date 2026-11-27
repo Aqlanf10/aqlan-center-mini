@@ -1,4 +1,6 @@
 "use client";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 import React, { useState } from "react";
 import {
@@ -388,7 +390,7 @@ export function OrthoQuestionnaireTab({
             onChange={(e) =>
               updateQ({
                 consentForEducationDeidentified: e.target.checked,
-                consentSignedOn: e.target.checked ? new Date().toISOString().slice(0, 10) : null,
+                consentSignedOn: e.target.checked ? clinicDateString(new Date(), CLINIC_ZONE_FALLBACK) : null,
               })
             }
           />

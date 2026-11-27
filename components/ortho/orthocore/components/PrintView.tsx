@@ -1,4 +1,6 @@
-﻿"use client";
+"use client";
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 import React, { useEffect, useMemo, useState } from 'react';
 import { EyeOff, FileCheck2, Printer, Settings2, X } from 'lucide-react';
 import { ClinicSettings, Language, PatientCase, ToothStatus } from '../types/ortho';
@@ -259,7 +261,7 @@ export const PrintView: React.FC<PrintViewProps> = ({
             </div>
             <div className="text-end text-xs text-navy-600 font-mono tabular-nums space-y-0.5 shrink-0">
               <p>
-                {tr(lang, 'تاريخ التقرير:', 'Date:')} {new Date().toISOString().slice(0, 10)}
+                {tr(lang, 'تاريخ التقرير:', 'Date:')} {clinicDateString(new Date(), CLINIC_ZONE_FALLBACK)}
               </p>
               <p className="font-sans text-navy-900 font-semibold">{patient.assignedDoctor}</p>
               {!anonymize && patient.dateOfBirth && (
@@ -854,7 +856,7 @@ export const PrintView: React.FC<PrintViewProps> = ({
             </div>
             <div className="text-end">
               <p className="text-slate-500">{tr(lang, 'ختم العيادة والتاريخ', 'Clinic Stamp & Date')}</p>
-              <p className="font-mono tabular-nums text-slate-700 mt-2">{new Date().toISOString().slice(0, 10)}</p>
+              <p className="font-mono tabular-nums text-slate-700 mt-2">{clinicDateString(new Date(), CLINIC_ZONE_FALLBACK)}</p>
               <div className="mt-6 border-b border-dashed border-slate-400 w-52 ms-auto" />
             </div>
           </footer>

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import type { SessionPayload } from "./auth";
 import { ensureSchema, getPool, PLAN_ITEM_PREBILLED_SQL, PLAN_ITEM_FINANCIAL_REVIEW_SQL,
   PLAN_ITEM_LEGACY_LINEAGE_SQL, usesSharedLocalDatabaseConnection, type DbClient } from "./db";
-import { revalidateSessionInTransaction } from "./session";
+import { revalidateSessionInTransaction } from "./session-revalidate";
 import { canAccessPatient } from "./patient-access";
 import { withFinancialReadSnapshot } from "./financial-read-snapshot";
 import { parseFollowupCoverageCommand, type FollowupCoverageRead, type FollowupCoverageRevision, type FollowupCoverageCommand,

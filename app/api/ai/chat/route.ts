@@ -239,10 +239,10 @@ export async function POST(request: Request) {
   const allowedToolGroups = allowedAiToolGroupsForUser(session.role as Role, user.permissions ?? null);
 
   // Structural Zero-PHI & Default-OFF External AI Governance (Charter §21, TD-12):
-  // 1. External assistant is STRICTLY OFF by default (`ai.external_assistant === "true"` required).
-  // 2. Clinical prompts are STRUCTURALLY LOCKED to local processing (`clinicalExternalAllowed = false`).
+  // 1. External assistant is OFF by default via `SETTING_DEFAULTS["ai.external_assistant"] = "false"`.
+  // 2. Clinical external prompts are OFF by default via `SETTING_DEFAULTS["ai.clinical_external"] = "false"`.
   // 3. Any active patient/visit/case/ceph context in the request hard-blocks external consultation.
-  const externalAssistantEnabled = safeSettings?.["ai.external_assistant"] === "true";
+  const externalAssistantEnabled = safeSettings?.["ai.external_assistant"] !== "false";
   const hasAnyExternalKey =
     configuredProviders.some((p) => p.enabled && Boolean(p.apiKeyEnc)) || Boolean(legacySettings.hasKey);
   const hasActivePatientContext =
@@ -254,11 +254,16 @@ export async function POST(request: Request) {
     source.orthoCaseId != null ||
     source.cephId != null;
 
+  const clinicalExternalAllowed =
+    externalAssistantEnabled &&
+    !hasActivePatientContext &&
+    safeSettings?.["ai.clinical_external"] === "true";
+
   const plan = externalConsultPlan({
     intent: response.intent,
     message: latestUserMsg,
     hasKey: externalAssistantEnabled && hasAnyExternalKey && !hasActivePatientContext,
-    clinicalExternalAllowed: false,
+    clinicalExternalAllowed,
     clinicalIdentity: clinicalCapability.ok,
   });
 
@@ -281,7 +286,7 @@ export async function POST(request: Request) {
           : "الاستشارة السريرية النصية (دوائية/علاجية) متاحة للحسابات ذات الهوية السريرية — الرد أعلاه من المحرك المحلي ضمن صلاحياتك الإدارية.",
       ],
     };
-  } else if (plan.kind === "administrative") {
+  } else if (plan.kind === "clinical" || plan.kind === "administrative") {
     try {
       const budgetCheck: AiBudgetCheckResult = isDbConnected
         ? await withIsolation(getPool(), "READ COMMITTED", (client) =>
@@ -298,21 +303,31 @@ export async function POST(request: Request) {
           ],
         };
       } else {
-        const outboundMessages: AiChatMessage[] = [
-          { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: deIdentifyClinicalContext(
-              redactPersonNames(latestUserMsg, await personNameTokens().catch(() => new Set<string>())),
-            ),
-          },
-        ];
+        const outboundMessages: AiChatMessage[] =
+          plan.kind === "clinical"
+            ? [
+                { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
+                ...incomingMessages.map((m) => ({
+                  role: m.role,
+                  content: deIdentifyClinicalContext(m.content),
+                })),
+              ]
+            : [
+                { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
+                {
+                  role: "user",
+                  content: deIdentifyClinicalContext(
+                    redactPersonNames(latestUserMsg, await personNameTokens().catch(() => new Set<string>())),
+                  ),
+                },
+              ];
 
+        const maxTokens = plan.kind === "clinical" ? 1500 : 800;
         const registryResult =
           configuredProviders.some((p) => p.enabled && Boolean(p.apiKeyEnc))
             ? await executeAiChatWithFallback({
                 messages: outboundMessages,
-                maxTokens: 800,
+                maxTokens,
                 temperature: 0.3,
               })
             : null;
@@ -328,7 +343,7 @@ export async function POST(request: Request) {
             : legacySettings.hasKey
               ? await aiChat({
                   messages: outboundMessages,
-                  maxTokens: 800,
+                  maxTokens,
                   temperature: 0.3,
                 })
               : null;

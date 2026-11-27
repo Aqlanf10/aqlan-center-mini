@@ -1,3 +1,5 @@
+import { clinicDateString } from "@/lib/schedule";
+import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 /**
  * AQLAN Center Mini — Academic Conference Case Presentation Engine (Editable OOXML PPTX)
  *
@@ -225,7 +227,7 @@ export function buildCasePresentationDeck(input: {
   const overlays = input.tracedOverlays ?? {};
   const sessions = input.sessionSummaries ?? [];
   const doctorName = input.doctorName || "الطبيب المختص بالتقويم";
-  const dateStr = new Date().toISOString().slice(0, 10);
+  const dateStr = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
 
   const eduToken = anonymize ? randomBytes(3).toString("hex").toUpperCase() : "";
   const displayPatientLabel = anonymize

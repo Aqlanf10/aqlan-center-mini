@@ -22,6 +22,18 @@ vi.mock("@/lib/legacy-balance-arrangements-db", () => ({
   listLegacyBalanceArrangements: vi.fn().mockResolvedValue([]),
   listLegacyOpeningPositions: vi.fn().mockResolvedValue([]),
 }));
+vi.mock("@/lib/reception-patient-account", () => ({
+  readReceptionPatientAccount: vi.fn().mockResolvedValue({
+    openings: [],
+    legacyOpeningPositions: [],
+    invoices: [],
+    targets: { invoices: [], plans: [] },
+    invoiceWorkspace: null,
+  }),
+}));
+vi.mock("@/lib/receipt-provenance-db", () => ({
+  readReceiptProvenance: vi.fn().mockResolvedValue({}),
+}));
 import { POST as postPayment } from "../app/api/payments/route";
 import { POST as postInstallment } from "../app/api/plans/[id]/route";
 import { GET as getLedger } from "../app/api/patients/[id]/ledger/route";

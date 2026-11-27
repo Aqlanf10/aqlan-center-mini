@@ -2,7 +2,7 @@ import {debtRequestHash,debtRevisionSourceMatches} from "./debt-source-proof";
 export {debtRequestHash} from "./debt-source-proof";
 import { ensureSchema, getPool, insertAuditRow, type DbClient } from "./db";
 import type { SessionPayload } from "./auth";
-import { revalidateSessionInTransaction } from "./session";
+import { revalidateSessionInTransaction } from "./session-revalidate";
 import { requireCurrency, settlePaymentMinor, type Currency } from "./money";
 import { debtInstallmentProgress, validateDebtRepaymentTerms, type DebtRepaymentTerms } from "./debt-installments";
 import { debtAccountDue, lockDebtAccountForSchedule } from "./debt-account-position";

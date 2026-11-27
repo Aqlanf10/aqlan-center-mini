@@ -135,14 +135,6 @@ interface SelectedCollectPatient {
 
 export default function FinancePage() {
   const session = useSession();
-  if (!session?.canonical && session?.role === "reception") {
-    return <ReceptionShift />;
-  }
-  return <AuthorizedFinanceWorkspace />;
-}
-
-function AuthorizedFinanceWorkspace() {
-  const session = useSession();
   const principalKey = `${session?.username ?? ""}:${session?.role ?? ""}`;
   const admin = isAdmin(session?.role);
   /* (P2-1) المحاسب يقرأ الدفاتر والميزان كالمدير — ولا يقبض ولا يصرف. */
@@ -150,13 +142,13 @@ function AuthorizedFinanceWorkspace() {
   const readOnlyMoney = !canHandleMoney(session?.role);
   const access = financeAccessFor(session?.role, session?.permissions?.financeAccess);
   const canCollect = !readOnlyMoney && (session?.role !== "cashier" || access.collectPayments);
-  const canExpense = !readOnlyMoney && (session?.role !== "cashier" || access.createExpenses);
+  const canExpense = !readOnlyMoney && session?.role !== "reception" && (session?.role !== "cashier" || access.createExpenses);
   const canShift = !readOnlyMoney && (session?.role !== "cashier" || access.operateShift);
   const canReconcile = admin;
   const labAuthorityKey = admin && session?.username.trim()
     ? JSON.stringify([session.username, session.role, session.permissions ?? null]) : null;
   const { state: labBalanceState, reload: reloadLabBalances } = useLabBalanceOverview(labAuthorityKey);
-  const canSeeCommissions = session?.role !== "cashier" && (session?.role !== "accountant" || access.viewCommissions);
+  const canSeeCommissions = session?.role !== "cashier" && session?.role !== "reception" && (session?.role !== "accountant" || access.viewCommissions);
   const canSeeReports = financeReader && (session?.role !== "accountant" || access.viewReports);
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");

@@ -28,7 +28,6 @@ import { PatientPlans } from "@/components/PatientPlans";
 import { DentalChart } from "@/components/DentalChart";
 import { PatientDocuments } from "@/components/PatientDocuments";
 import { AdvancedOrthoWorkspace } from "@/components/ortho/AdvancedOrthoWorkspace";
-import { useOrthoPermissions } from "@/components/ortho/useOrthoPermissions";
 import { SPECIALTY_LABEL } from "@/lib/appointment-services";
 import { PatientEndo } from "@/components/PatientEndo";
 import { AssessmentBanner } from "@/components/AssessmentBanner";
@@ -155,17 +154,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
   const base: Currency = CLINIC_BASE_CURRENCY;
 
   const [fileSnapshot, setFile] = useState<PatientFile | null>(null);
-  const orthoPerms = useOrthoPermissions({
-    enabled: !isRestrictedRole(session?.role) && Boolean(Number(id) > 0),
-    patientId: Number.isSafeInteger(Number(id)) && Number(id) > 0 ? Number(id) : null,
-  });
-  const visibleTreatmentSubtabs = useMemo(
-    () =>
-      !orthoPerms.loading && !orthoPerms.moduleVisible
-        ? TREATMENT_SUBTABS.filter((s) => s.id !== "ortho")
-        : TREATMENT_SUBTABS,
-    [orthoPerms.loading, orthoPerms.moduleVisible],
-  );
+  const visibleTreatmentSubtabs = TREATMENT_SUBTABS;
   const [summarySnapshot, setSummary] = useState<WorkflowSummary | null>(null);
   const [workflowState, setWorkflowState] = useState<"loading" | "ready" | "unavailable">("loading");
   const [loading, setLoading] = useState(true);
@@ -1289,7 +1278,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
             </section>
           )}
 
-          {treatmentSubTab === "ortho" && (orthoPerms.loading || orthoPerms.moduleVisible) && (
+          {treatmentSubTab === "ortho" && (
             <section aria-label="كابينة تقويم الأسنان والسيفالومتري">
               <AssessmentBanner cases={summary?.assessmentCases ?? []} specialty="orthodontics"
                 hint="بعد تقييم الطبيب، افتح حالة التقويم بالنطاق المطابق. ربط السجل السريري لا يثبت التغطية المالية؛ راجع حالة الفاتورة وبند العلاج قبل التوقيع." />

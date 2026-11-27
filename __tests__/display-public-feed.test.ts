@@ -3,6 +3,9 @@ import { GET } from "../app/api/display/route";
 
 // Exercise the real public projection, with synthetic data and no database.
 // The retired display.show_ortho option must never restore an aggregate.
+vi.mock("@/lib/staff-entry-mode", () => ({
+  currentStaffEntryMode: async () => "legacy",
+}));
 vi.mock("@/lib/db", () => ({
   CLINIC_TIME_ZONE: "Asia/Aden",
   activeAnnouncementsForScreen: async () => [],
@@ -23,11 +26,9 @@ it("serves masked call guidance but no operational counters or specialty totals"
   expect(response.status).toBe(200);
   const feed = await response.json();
   expect(Object.keys(feed).sort()).toEqual([
-    "announcements", "called", "chairs", "delayNotice", "now", "queue", "tagline", "voice", "welcomeText",
+    "announcements", "called", "delayNotice", "now", "speech", "tagline", "voice", "welcomeText",
   ]);
   expect(feed.called).toEqual([{
     at: "2026-01-01T09:10:00Z", chair: 1, name: "نداء ت.", speechName: "نداء",
   }]);
-  expect(feed.queue).toHaveLength(1);
-  expect(feed.queue[0].name).toBe("نداء ت.");
 });
