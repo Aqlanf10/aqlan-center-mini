@@ -291,7 +291,7 @@ export async function POST(request: Request) {
       // A failed name lookup must prevent egress; the catch below keeps the local reply.
       const nameTokens = await personNameTokens();
       const sanitizeOutbound = (content: string) =>
-        deIdentifyClinicalContext(redactPersonNames(content, nameTokens));
+        redactPersonNames(deIdentifyClinicalContext(content), nameTokens);
       const outboundMessages: AiChatMessage[] = plan.kind === "clinical"
         ? [
           { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
