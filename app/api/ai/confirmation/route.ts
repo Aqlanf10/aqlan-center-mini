@@ -170,5 +170,5 @@ export async function POST(request: Request) {
     ok: result.success,
     reply: result.textSummary,
     ...result,
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
 }
