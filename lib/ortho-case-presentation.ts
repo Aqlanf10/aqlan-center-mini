@@ -29,6 +29,8 @@
  * Zero external npm dependencies. Verified directly against Microsoft PowerPoint Desktop.
  */
 
+import { deflateRawSync } from "node:zlib";
+import { randomBytes } from "node:crypto";
 import type { OrthoWorkspaceRecord } from "./ortho-workspace-types";
 import { computeBoltonAnalysis } from "./ortho-scientific-analyses";
 
@@ -225,10 +227,11 @@ export function buildCasePresentationDeck(input: {
   const doctorName = input.doctorName || "الطبيب المختص بالتقويم";
   const dateStr = new Date().toISOString().slice(0, 10);
 
+  const eduToken = anonymize ? randomBytes(3).toString("hex").toUpperCase() : "";
   const displayPatientLabel = anonymize
     ? lang === "en"
-      ? `De-identified Educational Case (#EDU-${record.patientId})`
-      : `حالة تقويم تعليمية مُخفاة الهوية (مرجع داخلي #EDU-${record.patientId})`
+      ? `De-identified Educational Case (EDU-${eduToken})`
+      : `حالة تقويم تعليمية مُخفاة الهوية (EDU-${eduToken})`
     : `${input.patientName}${input.patientCode ? ` · ${input.patientCode}` : ""}${input.patientAgeGender ? ` · ${input.patientAgeGender}` : ""}`;
 
   const footerBase =
@@ -1274,7 +1277,9 @@ export function buildCasePresentationDeck(input: {
 /* ─────────────────────────── Pure-TS Editable OpenXML (.pptx) Builder ─────────────────────────── */
 
 function xmlEscape(text: string): string {
-  return text
+  return String(text ?? "")
+    // Strip illegal XML 1.0 control characters so pasted clinical text never corrupts OOXML
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\uFFFE\uFFFF]/g, "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -1311,8 +1316,15 @@ function buildStoredZip(files: ZipEntryInput[]): Uint8Array {
   const encoder = new TextEncoder();
   const entries = files.map((f) => {
     const nameBytes = encoder.encode(f.name);
-    const dataBytes = typeof f.content === "string" ? encoder.encode(f.content) : f.content;
-    return { nameBytes, dataBytes, crc: crc32(dataBytes) };
+    const rawBytes = typeof f.content === "string" ? encoder.encode(f.content) : f.content;
+    const crc = crc32(rawBytes);
+    // Compress XML/rels parts with standard DEFLATE (method 8) for 100% compatibility with
+    // PowerPoint Desktop, PowerPoint for the Web (Edge Office Viewer), Google Slides, and OPC validators.
+    // Binary PNG/JPEG media are already compressed and may also be deflated or stored cleanly.
+    const isAlreadyCompressedMedia = /\.(png|jpg|jpeg)$/i.test(f.name);
+    const compressedBytes = isAlreadyCompressedMedia ? rawBytes : new Uint8Array(deflateRawSync(rawBytes, { level: 6 }));
+    const method = isAlreadyCompressedMedia ? 0 : 8;
+    return { nameBytes, rawBytes, compressedBytes, method, crc };
   });
 
   let offset = 0;
@@ -1320,35 +1332,37 @@ function buildStoredZip(files: ZipEntryInput[]): Uint8Array {
   const centralParts: Uint8Array[] = [];
 
   for (const e of entries) {
+    const isAsciiName = e.nameBytes.every((b) => b < 0x80);
+    const zipFlags = isAsciiName ? 0x0000 : 0x0800;
     const localHeader = new Uint8Array(30 + e.nameBytes.length);
     const lv = new DataView(localHeader.buffer);
     lv.setUint32(0, 0x04034b50, true);
     lv.setUint16(4, 20, true);
-    lv.setUint16(6, 0, true);
-    lv.setUint16(8, 0, true);
+    lv.setUint16(6, zipFlags, true);
+    lv.setUint16(8, e.method, true);
     lv.setUint16(10, 0x0000, true);
     lv.setUint16(12, 0x5941, true);
     lv.setUint32(14, e.crc, true);
-    lv.setUint32(18, e.dataBytes.length, true);
-    lv.setUint32(22, e.dataBytes.length, true);
+    lv.setUint32(18, e.compressedBytes.length, true);
+    lv.setUint32(22, e.rawBytes.length, true);
     lv.setUint16(26, e.nameBytes.length, true);
     lv.setUint16(28, 0, true);
     localHeader.set(e.nameBytes, 30);
 
-    localParts.push(localHeader, e.dataBytes);
+    localParts.push(localHeader, e.compressedBytes);
 
     const centralHeader = new Uint8Array(46 + e.nameBytes.length);
     const cv = new DataView(centralHeader.buffer);
     cv.setUint32(0, 0x02014b50, true);
     cv.setUint16(4, 20, true);
     cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0, true);
-    cv.setUint16(10, 0, true);
+    cv.setUint16(8, zipFlags, true);
+    cv.setUint16(10, e.method, true);
     cv.setUint16(12, 0x0000, true);
     cv.setUint16(14, 0x5941, true);
     cv.setUint32(16, e.crc, true);
-    cv.setUint32(20, e.dataBytes.length, true);
-    cv.setUint32(24, e.dataBytes.length, true);
+    cv.setUint32(20, e.compressedBytes.length, true);
+    cv.setUint32(24, e.rawBytes.length, true);
     cv.setUint16(28, e.nameBytes.length, true);
     cv.setUint16(30, 0, true);
     cv.setUint16(32, 0, true);
@@ -1359,7 +1373,7 @@ function buildStoredZip(files: ZipEntryInput[]): Uint8Array {
     centralHeader.set(e.nameBytes, 46);
     centralParts.push(centralHeader);
 
-    offset += localHeader.length + e.dataBytes.length;
+    offset += localHeader.length + e.compressedBytes.length;
   }
 
   const centralSize = centralParts.reduce((s, p) => s + p.length, 0);
@@ -1690,15 +1704,15 @@ export function generateEditablePptxBytes(deck: PresentationDeck): Uint8Array {
   const slideRels = slides
     .map(
       (_, i) =>
-        `<Relationship Id="rId${i + 5}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i + 1}.xml"/>`,
+        `<Relationship Id="rId${i + 6}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i + 1}.xml"/>`,
     )
     .join("");
 
   const slideIdLst = slides
-    .map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 5}"/>`)
+    .map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 6}"/>`)
     .join("");
 
-  const isoNow = new Date().toISOString();
+  const isoNow = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   const safeTitle = xmlEscape(`عرض حالة تقويم — ${deck.displayPatientLabel}`);
   const safeCreator = xmlEscape(deck.clinicName);
 
@@ -1729,7 +1743,7 @@ export function generateEditablePptxBytes(deck: PresentationDeck): Uint8Array {
       content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
   <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
 </Relationships>`,
     },
@@ -1782,6 +1796,7 @@ export function generateEditablePptxBytes(deck: PresentationDeck): Uint8Array {
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/presProps" Target="presProps.xml"/>
   <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/viewProps" Target="viewProps.xml"/>
   <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/tableStyles" Target="tableStyles.xml"/>
+  <Relationship Id="rId5" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>
   ${slideRels}
 </Relationships>`,
     },
