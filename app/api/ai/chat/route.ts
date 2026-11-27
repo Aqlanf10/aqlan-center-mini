@@ -382,5 +382,5 @@ async function replyWithAudit(
     reply: response.answer, // للحفاظ على التوافق الرجعي
     ...response,
     latencyMs: Date.now() - started,
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
 }
