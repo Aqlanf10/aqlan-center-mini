@@ -74,16 +74,12 @@
   "financeAccess",
   "role === \"doctor\""
  ],
- "/api/finance/lab-accounting": [
-  "canViewMoney("
- ],
  "/api/finance/lab-reconciliation": [
   "financeAccess",
   "isAdmin(",
   "role === \"accountant\""
  ],
  "/api/finance/reconciliation": [
-  "canViewMoney(",
   "isAdmin("
  ],
  "/api/finance/report": [

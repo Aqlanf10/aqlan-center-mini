@@ -92,6 +92,7 @@ export default async function PatientDossierPage({
 }) {
   const session = await requireSession();
   if (!session) notFound();
+  if (session.role !== "admin" && session.role !== "doctor") notFound();
 
   const { id: rawId } = await params;
   const id = Number(rawId);
