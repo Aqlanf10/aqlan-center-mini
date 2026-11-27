@@ -205,8 +205,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     const stored = await putFile(bytes, check.extension);
 
     // منع تكرار صور الشدّة عند إعادة المحاولة بعد انقطاع الإنترنت (Idempotent Session Photo Upload):
-    // إذا وُجد مستند نشط لنفس المريض والشدّة بنفس البصمة sha256 ونفس الوجه، يُعاد الموجود بلا تكرار.
-    if (adjustmentId != null && typeof getPool === "function") {
+    // إذا وُجد مستند نشط لنفس المريض والشدّة بنفس البصمة sha256 ونفس الوجه المصوَّر، يُعاد الموجود بلا تكرار.
+    if (adjustmentId != null && photoView != null && typeof getPool === "function") {
       try {
         const dup = await getPool().query<{
           id: number; title: string; photo_stage: string | null; photo_view: string | null;
@@ -220,11 +220,11 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
             WHERE patient_id = $1
               AND adjustment_id = $2
               AND sha256 = $3
-              AND COALESCE(photo_view, '') = $4
+              AND photo_view = $4
               AND removed_at IS NULL
             ORDER BY id ASC
             LIMIT 1`,
-          [patientId, adjustmentId, stored.sha256, photoView ?? ""],
+          [patientId, adjustmentId, stored.sha256, photoView],
         );
         if (dup.rows[0]) {
           const existing = dup.rows[0];
