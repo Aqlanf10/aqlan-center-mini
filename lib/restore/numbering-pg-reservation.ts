@@ -56,6 +56,10 @@ export function createIndependentPgReservationBackend(
         const result = await work({
           async readFresh(prefix) {
             if (!active || inFlight || advanceAttempted || typeof prefix !== "string" || !/^[A-Z]$/.test(prefix)) throw new Error("Invalid watermark read");
+            // A new accepted read supersedes the previous witness even if
+            // the driver subsequently loses its response. Never let a caller
+            // catch that failure and advance using an older witness.
+            read = null;
             inFlight = true;
             try {
               const rows = (await client.query<{ reserved_through: string }>(
