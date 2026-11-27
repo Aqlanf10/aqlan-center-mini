@@ -151,6 +151,27 @@ describe("independent numbering reservation: real PostgreSQL, synthetic only", (
       .toEqual({ ok: true, reserved: "7031", prefix: "P" });
   });
 
+  it("reserves the last supported number once and refuses exhaustion without rewinding", async () => {
+    const binding = await seed("synthetic_lineage_exhaustion", "999999999999999998");
+    expect(await reserveRestoredNumber(archive, binding, backend))
+      .toEqual({ ok: true, reserved: "999999999999999999", prefix: "P" });
+    expect(await reserveRestoredNumber(archive, binding, other))
+      .toEqual({ ok: false, reason: "numbering-exhausted" });
+    expect(await read(binding.lineage)).toBe("999999999999999999");
+  });
+
+  it("does not advance a different lineage with the same prefix", async () => {
+    const first = await seed("synthetic_lineage_isolation_a", "7029");
+    const second = await seed("synthetic_lineage_isolation_b", "7029");
+    expect(await reserveRestoredNumber(archive, first, backend))
+      .toEqual({ ok: true, reserved: "7030", prefix: "P" });
+    expect(await read(second.lineage)).toBe("7029");
+    expect(await reserveRestoredNumber(archive, second, other))
+      .toEqual({ ok: true, reserved: "7030", prefix: "P" });
+    expect(await read(first.lineage)).toBe("7030");
+    expect(await read(second.lineage)).toBe("7030");
+  });
+
   it("fails closed if the authority row is absent or behind the archive", async () => {
     const absent = { lineage: "synthetic_lineage_missing", generation };
     expect((await reserveRestoredNumber(archive,absent,backend)).ok).toBe(false);
