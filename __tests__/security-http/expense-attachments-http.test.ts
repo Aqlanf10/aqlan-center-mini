@@ -103,6 +103,30 @@ describe("P3-6 — expense voucher attachments", () => {
     expect((await db.query("SELECT id FROM expense_attachments WHERE expense_id = $1", [foreign.id])).rowCount).toBe(1);
   });
 
+  it("reception cannot observe or alter voucher print history, even for its own voucher", async () => {
+    const register = (cookie: string, id: number) => fetch(`${baseUrl}/api/print-log`, {
+      method: "POST",
+      headers: { Cookie: cookie, Origin: baseUrl, "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json" },
+      body: JSON.stringify({ docType: "voucher", docId: id }),
+    });
+    const before = await register(h.sessions.admin.cookie, expenseId);
+    expect(before.status).toBe(200);
+    const baseline = await before.json() as { previous: number };
+    expect(Number.isInteger(baseline.previous)).toBe(true);
+
+    for (const id of [expenseId, 999_999]) {
+      const denied = await register(h.sessions.reception.cookie, id);
+      expect(denied.status).toBe(403);
+      const payload = await denied.json();
+      expect(payload).not.toHaveProperty("previous");
+      expect(payload).not.toHaveProperty("reprint");
+    }
+
+    const after = await register(h.sessions.admin.cookie, expenseId);
+    expect(after.status).toBe(200);
+    expect(await after.json()).toMatchObject({ previous: baseline.previous + 1, reprint: true });
+  });
+
   it("a doctor can neither attach nor view", async () => {
     expect((await upload(h.sessions.doctorA.cookie, expenseId, VALID_PNG)).status).toBe(403);
     const list = await fetch(`${baseUrl}/api/expenses/${expenseId}/attachments`, { headers: { Cookie: h.sessions.doctorA.cookie } });
