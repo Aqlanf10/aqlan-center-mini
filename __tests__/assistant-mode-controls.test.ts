@@ -288,6 +288,24 @@ describe("synthetic assistant mode matrix", () => {
     expect((await confirmation(make({ token: "synthetic-signed-preview" }))).status).toBe(200);
     expect(m.execute.mock.calls[0][2].doctorPartyId).toBeNull();
   });
+  it.each(["internal", "external"] as const)("prohibits storing successful %s assistant replies", async mode => {
+    if (mode === "internal") m.settings.mockResolvedValue({ "ai.external_assistant": "false" });
+    const response = await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      sourceType: mode === "internal" ? "internal_engine" : "external_ai",
+    });
+  });
+  it.each([true, false])("prohibits storing confirmed tool results (success=%s)", async success => {
+    m.verify.mockReturnValue({ userId: 22, tool: "book_appointment", params: { patientId: 303 } });
+    m.execute.mockResolvedValue({ success, textSummary: "synthetic tool result" });
+    const response = await confirmation(make({ token: "synthetic-signed-preview" }));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({ ok: success, reply: "synthetic tool result" });
+    expect(m.execute).toHaveBeenCalledOnce();
+  });
   it("allows the authorized local confirmation without a cloud key when both switches are on", async () => {
     m.master.mockResolvedValue({ enabled: true, hasKey: false });
     m.verify.mockReturnValue({ userId: 22, tool: "book_appointment", params: { patientId: 303 } });
