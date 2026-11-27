@@ -20,8 +20,10 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 export async function GET(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
-  /* صلاحيات الوكيل المساعد: المصروفات من «المالية المخفية» — تُفتح للطبيب
-     بتصريح المدير الصريح فقط، وللإدارة والاستقبال كما كانت. */
+  if (session.role === "reception") {
+    return NextResponse.json({ message: "المصروفات غير متاحة للاستقبال." }, { status: 403 });
+  }
+  /* المصروفات للطبيب بتصريح صريح فقط؛ الاستقبال للتحصيل من المرضى. */
   if (session.role === "doctor") {
     const user = await findUserByUsername(session.username).catch(() => null);
     if (!canDoctorViewExpenses(user?.permissions, session.role)) {
@@ -47,6 +49,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const session = await requireSession();
   if (!session) return denied();
+  if (session.role === "reception") {
+    return NextResponse.json({ message: "المصروفات غير متاحة للاستقبال." }, { status: 403 });
+  }
   if (!canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) {
     return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }

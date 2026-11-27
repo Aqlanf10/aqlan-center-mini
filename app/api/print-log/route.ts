@@ -35,6 +35,11 @@ export async function POST(request: Request) {
 
   /* الوصفات وثائق سريرية: طباعتها وإعادة طباعتها للطبيب والمدير — والسندات
      المالية للإدارة والاستقبال. فحص النوع قبل فحص الدور. */
+  // Reception may print patient receipts, not clinic disbursements.
+  // Deny before touching the print counter or append-only audit.
+  if (docType === "voucher" && session.role === "reception") {
+    return NextResponse.json({ message: "المصروفات غير متاحة للاستقبال." }, { status: 403 });
+  }
   if (docType === "prescription") {
     if (!isAdmin(session.role) && session.role !== "doctor") {
       return NextResponse.json({ message: "طباعة الوصفات للطبيب والمدير." }, { status: 403 });

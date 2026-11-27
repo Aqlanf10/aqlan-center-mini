@@ -22,24 +22,27 @@ beforeEach(() => {
   deps.read.mockResolvedValue(Buffer.from("fixture"));
 });
 
-describe("expense attachments inherit voucher ownership", () => {
+describe("expense attachments deny reception regardless of voucher ownership", () => {
   it("does not list, read storage or accept uploads on a voucher from other staff", async () => {
     deps.expense.mockResolvedValue({ createdBy: "other-fixture" });
     const [indexed, bytes, write] = await Promise.all([list(request, context), getBytes(request, context), upload(request, context)]);
-    expect([indexed.status, bytes.status, write.status]).toEqual([404, 404, 404]);
+    expect([indexed.status, bytes.status, write.status]).toEqual([403, 403, 403]);
     expect(deps.list).not.toHaveBeenCalled();
     expect(deps.read).not.toHaveBeenCalled();
     expect(deps.storage).not.toHaveBeenCalled();
-    expect(deps.expense).toHaveBeenCalledWith(72);
+    expect(deps.expense).not.toHaveBeenCalled();
+    expect(deps.attachment).not.toHaveBeenCalled();
   });
 
-  it("preserves receipt attachment access on the receptionist's own voucher", async () => {
+  it("denies even the receptionist's own historical voucher before data access", async () => {
     deps.expense.mockResolvedValue({ createdBy: "desk-fixture" });
-    const indexed = await list(request, context);
-    expect(await indexed.json()).toEqual({ attachments: [{ id: 31 }] });
-    const bytes = await getBytes(request, context);
-    expect(bytes.status).toBe(200);
-    expect(bytes.headers.get("Cache-Control")).toBe("private, no-store");
+    const responses = await Promise.all([list(request, context), getBytes(request, context), upload(request, context)]);
+    expect(responses.map(response => response.status)).toEqual([403, 403, 403]);
+    expect(deps.expense).not.toHaveBeenCalled();
+    expect(deps.attachment).not.toHaveBeenCalled();
+    expect(deps.list).not.toHaveBeenCalled();
+    expect(deps.read).not.toHaveBeenCalled();
+    expect(deps.storage).not.toHaveBeenCalled();
   });
 
   it("retains admin review but denies a clinical role before fetching data", async () => {

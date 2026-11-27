@@ -1,8 +1,7 @@
 import { canReadExpenseVoucher } from "@/lib/expense-voucher-access";
 import { NextResponse } from "next/server";
-import { getExpense, getExpenseAttachment } from "@/lib/db";
+import { getExpenseAttachment } from "@/lib/db";
 import { readFileByKey } from "@/lib/files";
-import { canViewMoney } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +15,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (!canViewMoney(session.role)) {
-    return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
+  if (!canReadExpenseVoucher(session)) {
+    return NextResponse.json({ message: "لا تملك صلاحية الوصول إلى سندات الصرف." }, { status: 403 });
   }
   const { id: rawId } = await context.params;
   const id = Number(rawId);
@@ -27,12 +26,6 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   try {
     const found = await getExpenseAttachment(id);
     if (!found) return NextResponse.json({ message: "المرفق غير موجود." }, { status: 404 });
-    if (session.role === "reception") {
-      const expense = await getExpense(found.attachment.expenseId);
-      if (!expense || !canReadExpenseVoucher(session, expense)) {
-        return NextResponse.json({ message: "المرفق غير موجود." }, { status: 404 });
-      }
-    }
     const bytes = await readFileByKey(found.storageKey);
     if (!bytes) {
       return NextResponse.json(

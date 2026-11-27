@@ -72,7 +72,7 @@ describe("فاتورة مختبر بالدولار تُسدَّد بالريال
 
   it("المعاينة تعرض السعر والمكافئ والمتبقي ولا تكتب شيئًا", async () => {
     const before = await db.query(`SELECT COUNT(*)::int AS n FROM expenses`);
-    const response = await post("/api/expenses/quote", h.sessions.reception, {
+    const response = await post("/api/expenses/quote", h.sessions.admin, {
       category: "lab", partyId: labId, payableId: billId, amount: "26500", currency: "YER",
     });
     expect(response.status).toBe(200);
@@ -86,7 +86,7 @@ describe("فاتورة مختبر بالدولار تُسدَّد بالريال
 
   it("تأكيدٌ بافتراضات معاينةٍ لم تعد صحيحة ⇒ 409 stale_quote ولا يُكتب شيء", async () => {
     const before = await db.query(`SELECT COUNT(*)::int AS n FROM expenses`);
-    const response = await post("/api/expenses", h.sessions.reception, {
+    const response = await post("/api/expenses", h.sessions.admin, {
       category: "lab", partyId: labId, payableId: billId, amount: "26500", currency: "YER",
       expected: { paymentExchangeRate: 1, payableExchangeRate: 999, payableSettledMinor: 5_000, payableRemainingBeforeMinor: 10_000 },
     });
@@ -97,7 +97,7 @@ describe("فاتورة مختبر بالدولار تُسدَّد بالريال
   });
 
   it("التسجيل يحفظ اللقطة كاملة ويُدقَّق بعملة الفاتورة والمخصوم", async () => {
-    const response = await post("/api/expenses", h.sessions.reception, {
+    const response = await post("/api/expenses", h.sessions.admin, {
       category: "lab", partyId: labId, payableId: billId, amount: "26500", currency: "YER",
     });
     expect(response.status).toBe(201);
@@ -112,13 +112,27 @@ describe("فاتورة مختبر بالدولار تُسدَّد بالريال
   });
 
   it("٩٩٩٬٩٩٩ على المتبقي ⇒ 409 برسالة عربية ورمزٍ للواجهة", async () => {
-    const response = await post("/api/expenses", h.sessions.reception, {
+    const response = await post("/api/expenses", h.sessions.admin, {
       category: "lab", partyId: labId, payableId: billId, amount: "999999", currency: "YER",
     });
     expect(response.status).toBe(409);
     const payload = await response.json();
     expect(payload.code).toBe("exceeds_payable");
     expect(payload.message).toContain("المتبقي");
+  });
+
+  it("الاستقبال لا يقرأ المصروفات ولا يعاين أو يسجل سند صرف حتى دون تعديل سعر", async () => {
+    const before = await db.query(`SELECT COUNT(*)::int AS n FROM expenses`);
+    const body = { category: "lab", partyId: labId, payableId: billId, amount: "100", currency: "YER" };
+    const list = await fetch(`${baseUrl}/api/expenses`, { headers: { Cookie: h.sessions.reception.cookie } });
+    expect(list.status).toBe(403);
+    expect(await list.json()).not.toHaveProperty("expenses");
+    for (const path of ["/api/expenses/quote", "/api/expenses"]) {
+      const response = await post(path, h.sessions.reception, body);
+      expect(response.status).toBe(403);
+      expect(await response.json()).not.toHaveProperty("quote");
+    }
+    expect((await db.query(`SELECT COUNT(*)::int AS n FROM expenses`)).rows[0].n).toBe(before.rows[0].n);
   });
 
   it("الاستقبال لا يعدّل السعر ولا يعلّم دفعةً مقدمة", async () => {
@@ -164,7 +178,7 @@ describe("فاتورة مختبر بالدولار تُسدَّد بالريال
 
 describe("رصيد المورد — امنع دائمًا فوق المستحق", () => {
   it("سند عادي فوق الرصيد ⇒ 409، والمدير بدفعةٍ مقدمة وسبب ⇒ 201 مدقَّقة", async () => {
-    const over = await post("/api/expenses", h.sessions.reception, {
+    const over = await post("/api/expenses", h.sessions.admin, {
       category: "supplier", partyId: supplierId, amount: "5000", currency: "YER",
     });
     expect(over.status).toBe(409);

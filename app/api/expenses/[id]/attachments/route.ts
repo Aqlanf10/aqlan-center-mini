@@ -2,7 +2,7 @@ import { canReadExpenseVoucher } from "@/lib/expense-voucher-access";
 import { NextResponse } from "next/server";
 import { getExpense, getSettings, listExpenseAttachments, recordAudit, recordExpenseAttachment } from "@/lib/db";
 import { putFile, storageStatus } from "@/lib/files";
-import { canHandleMoney, canViewMoney } from "@/lib/roles";
+import { canHandleMoney } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, validateUpload } from "@/lib/storage";
 import { requireSession } from "@/lib/session";
 import { bodyErrorResponse, readBoundedFormData } from "@/lib/http-body";
@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 const denied = () =>
   NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
 const forbidden = () =>
-  NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
+  NextResponse.json({ message: "لا تملك صلاحية الوصول إلى سندات الصرف." }, { status: 403 });
 
 const expenseIdFrom = async (context: { params: Promise<{ id: string }> }) => {
   const { id } = await context.params;
@@ -33,16 +33,10 @@ const expenseIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canViewMoney(session.role)) return forbidden();
+  if (!canReadExpenseVoucher(session)) return forbidden();
   const expenseId = await expenseIdFrom(context);
   if (!expenseId) return NextResponse.json({ message: "رقم السند غير صالح." }, { status: 400 });
   try {
-    if (session.role === "reception") {
-      const expense = await getExpense(expenseId);
-      if (!expense || !canReadExpenseVoucher(session, expense)) {
-        return NextResponse.json({ message: "سند الصرف غير موجود." }, { status: 404 });
-      }
-    }
     return NextResponse.json({ attachments: await listExpenseAttachments(expenseId) },
       { headers: { "Cache-Control": "private, no-store" } });
   } catch {
@@ -53,7 +47,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  if (!canHandleMoney(session.role)) return forbidden();
+  if (!canReadExpenseVoucher(session) || !canHandleMoney(session.role) || (session.role === "cashier" && !session.financeAccess?.createExpenses)) return forbidden();
   const expenseId = await expenseIdFrom(context);
   if (!expenseId) return NextResponse.json({ message: "رقم السند غير صالح." }, { status: 400 });
 
