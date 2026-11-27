@@ -111,7 +111,8 @@ export async function POST(request: Request) {
     databaseUrl.includes("ci-placeholder");
   const isDbConnected = !isCiPlaceholder && Boolean(databaseUrl || process.env.USE_LOCAL_DB === "true");
 
-  const doctorPartyId = user.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+  // The freshly loaded account is authoritative; an unlinked doctor must not inherit a stale session party.
+  const doctorPartyId = user.partyId ?? null;
 
   /* دفاع في العمق (مراجعة P0): الرمز الخام الموقّع يُمرّر كما هو إلى المنفّذ
      المركزي الذي يتحقق بنفسه من التوقيع والعمر والأداة والمستخدم — لا حمولة
