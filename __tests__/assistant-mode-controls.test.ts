@@ -28,7 +28,7 @@ const make = (body: object) => new Request("http://localhost", { method: "POST",
 beforeEach(() => {
   vi.resetAllMocks();
   m.session.mockResolvedValue({ userId: 22, username: "synthetic-admin", role: "admin" });
-  m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, permissions: { canUseAiChat: true } });
+  m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", role: "admin", isActive: true, permissions: { canUseAiChat: true } });
   m.settings.mockResolvedValue({});
   m.master.mockResolvedValue({ enabled: true, hasKey: true });
   m.names.mockResolvedValue(new Set<string>());
@@ -80,7 +80,7 @@ describe("synthetic assistant mode matrix", () => {
     vi.stubEnv("USE_LOCAL_DB", "true");
     vi.stubEnv("DATABASE_URL", "postgresql://synthetic.invalid/test");
     try {
-      m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
+      m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", role: "admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
       m.settings.mockResolvedValue({ "ai.clinical_external": "true" });
       m.access.mockResolvedValue(false);
       const response = await chat(make({ conversationPatientId: 303, message: kind === "clinical" ? "ألم الأسنان" : EXTERNAL_ADMIN_TEMPLATES[0] }));
@@ -118,7 +118,7 @@ describe("synthetic assistant mode matrix", () => {
     expect(m.ai).not.toHaveBeenCalled();
   });
   it("masks registered names in clinical history before an explicitly enabled cloud consultation", async () => {
-    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
+    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", role: "admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
     m.settings.mockResolvedValue({ "ai.clinical_external": "true" });
     m.names.mockResolvedValue(new Set(["syntheticname"]));
     const response = await chat(make({ messages: [
@@ -135,7 +135,7 @@ describe("synthetic assistant mode matrix", () => {
     expect(outbound.slice(1).every((message: { content: string }) => message.content.includes("[اسم]"))).toBe(true);
   });
   it("removes explicit mixed registered and unregistered patient names before token masking", async () => {
-    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
+    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", role: "admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
     m.settings.mockResolvedValue({ "ai.clinical_external": "true" });
     m.names.mockResolvedValue(new Set(["syntheticname"]));
     const response = await chat(make({ messages: [
@@ -150,7 +150,7 @@ describe("synthetic assistant mode matrix", () => {
     expect(outbound.every((message: { content: string }) => message.content.includes("[المريض]"))).toBe(true);
   });
   it("does not send clinical history if the registered-name lookup fails", async () => {
-    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
+    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", role: "admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
     m.settings.mockResolvedValue({ "ai.clinical_external": "true" });
     m.names.mockRejectedValue(new Error("synthetic redaction lookup unavailable"));
     const response = await chat(make({ message: "ألم الأسنان عند syntheticname" }));
@@ -195,6 +195,25 @@ describe("synthetic assistant mode matrix", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(await response.text()).not.toContain("SYNTHETIC_PRIVATE_ACCOUNT_ERROR");
+    expect(m.master).not.toHaveBeenCalled();
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+    expect(m.execute).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
+  it.each([
+    { route: "chat", id: 22, role: "reception" },
+    { route: "confirmation", id: 22, role: "reception" },
+    { route: "chat", id: 23, role: "admin" },
+    { route: "confirmation", id: 23, role: "admin" },
+  ])("rejects changed account identity or role before dispatch: %j", async ({ route, id, role }) => {
+    m.user.mockResolvedValue({ id, username: "synthetic-admin", role, isActive: true, permissions: { canUseAiChat: true } });
+    m.verify.mockReturnValue({ userId: id, tool: "book_appointment", params: { patientId: 303 } });
+    const response = route === "chat"
+      ? await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }))
+      : await confirmation(make({ token: "synthetic-signed-preview" }));
+    expect(response.status).toBe(403);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(m.master).not.toHaveBeenCalled();
     expect(m.process).not.toHaveBeenCalled();
     expect(m.ai).not.toHaveBeenCalled();

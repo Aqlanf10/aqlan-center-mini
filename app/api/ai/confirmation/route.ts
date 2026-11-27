@@ -73,6 +73,11 @@ export async function POST(request: Request) {
   if (!user || !user.isActive) {
     return NextResponse.json({ message: "حساب المستخدم غير نشط أو غير موجود." }, { status: 403 });
   }
+  // The account can change between requireSession and this second read. Never
+  // combine a different account or role with the already admitted session.
+  if (user.id !== session.userId || user.role !== session.role) {
+    return NextResponse.json({ message: "تغيّرت بيانات الحساب. سجّل الدخول من جديد." }, { status: 403, headers: { "Cache-Control": "no-store" } });
+  }
   if (payload.userId !== user.id) {
     return NextResponse.json(
       { message: "رمز التأكيد صادر لمستخدم آخر — لا يُنفَّذ نيابةً عنه." },
