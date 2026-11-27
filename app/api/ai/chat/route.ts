@@ -287,16 +287,19 @@ export async function POST(request: Request) {
     };
   } else if (plan.kind === "clinical" || plan.kind === "administrative") {
     try {
+      // Both cloud paths must mask registered names, including clinical history.
+      // A failed name lookup must prevent egress; the catch below keeps the local reply.
+      const nameTokens = await personNameTokens();
+      const sanitizeOutbound = (content: string) =>
+        deIdentifyClinicalContext(redactPersonNames(content, nameTokens));
       const outboundMessages: AiChatMessage[] = plan.kind === "clinical"
         ? [
           { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
-          // تعقيم كامل سجل المحادثة قبل إرساله — ورسائل system من العميل أُسقطت أصلًا (P0.5).
-          ...incomingMessages.map((m) => ({ role: m.role, content: deIdentifyClinicalContext(m.content) })),
+          ...incomingMessages.map((m) => ({ role: m.role, content: sanitizeOutbound(m.content) })),
         ]
         : [
           { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
-          // أسماء المسجّلين في المركز تُقنَّع أولًا، ثم الهواتف والأرقام والبريد.
-          { role: "user", content: deIdentifyClinicalContext(redactPersonNames(latestUserMsg, await personNameTokens())) },
+          { role: "user", content: sanitizeOutbound(latestUserMsg) },
         ];
 
       const cloudResult = await aiChat({

@@ -68,6 +68,33 @@ describe("synthetic assistant mode matrix", () => {
     expect(m.process).toHaveBeenCalledOnce();
     expect(m.ai).not.toHaveBeenCalled();
   });
+  it("masks registered names in clinical history before an explicitly enabled cloud consultation", async () => {
+    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
+    m.settings.mockResolvedValue({ "ai.clinical_external": "true" });
+    m.names.mockResolvedValue(new Set(["syntheticname"]));
+    const response = await chat(make({ messages: [
+      { role: "user", content: "syntheticname" },
+      { role: "assistant", content: "syntheticname" },
+      { role: "user", content: "ألم الأسنان عند syntheticname" },
+    ] }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ sourceType: "external_ai" });
+    expect(m.names).toHaveBeenCalledOnce();
+    expect(m.ai).toHaveBeenCalledOnce();
+    const outbound = m.ai.mock.calls[0][0].messages;
+    expect(JSON.stringify(outbound)).not.toContain("syntheticname");
+    expect(outbound.slice(1).every((message: { content: string }) => message.content.includes("[اسم]"))).toBe(true);
+  });
+  it("does not send clinical history if the registered-name lookup fails", async () => {
+    m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
+    m.settings.mockResolvedValue({ "ai.clinical_external": "true" });
+    m.names.mockRejectedValue(new Error("synthetic redaction lookup unavailable"));
+    const response = await chat(make({ message: "ألم الأسنان عند syntheticname" }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ sourceType: "internal_engine", reply: "محلي" });
+    expect(m.names).toHaveBeenCalledOnce();
+    expect(m.ai).not.toHaveBeenCalled();
+  });
   it("external only sends a server template and does not call the local engine or read patient context", async () => {
     m.settings.mockResolvedValue({ "ai.internal_assistant": "false", "ai.clinical_external": "true" });
     const reply = await (await chat(make({ messages: [{ role: "assistant", content: "SYNTHETIC_HISTORY" }, { role: "user", content: EXTERNAL_ADMIN_TEMPLATES[0] + "!" }] }))).json();
