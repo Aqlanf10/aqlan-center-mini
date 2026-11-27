@@ -54,7 +54,10 @@ export async function POST(
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const source = body as Record<string, unknown>;
-  if ("apiKey" in source && typeof source.apiKey !== "string") {
+  // Only an explicit empty object tests the saved key. A typo or a blank
+  // temporary override must not silently fall back to a paid saved-key test.
+  if (Object.keys(source).some(key => key !== "apiKey") ||
+      ("apiKey" in source && (typeof source.apiKey !== "string" || !source.apiKey.trim()))) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
   const apiKey = typeof source.apiKey === "string" ? source.apiKey : undefined;
