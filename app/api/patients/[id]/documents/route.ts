@@ -158,11 +158,23 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: new DocumentAssociationError().message }, { status: 400 });
   }
   const rawStage = form.get("photoStage");
-  const photoStage = typeof rawStage === "string"
-    && ["initial", "progress", "debond", "retention"].includes(rawStage) ? rawStage : null;
+  const stageAliases: Record<string, "initial" | "progress" | "debond" | "retention"> = {
+    initial: "initial",
+    start: "initial",
+    T0: "initial",
+    progress: "progress",
+    T1: "progress",
+    debond: "debond",
+    final: "debond",
+    T2: "debond",
+    retention: "retention",
+    T3: "retention",
+  };
+  const photoStage = typeof rawStage === "string" && Object.prototype.hasOwnProperty.call(stageAliases, rawStage)
+    ? stageAliases[rawStage] : null;
   const rawView = form.get("photoView");
-  const photoView = typeof rawView === "string" && /^[a-z_]{3,30}$/.test(rawView)
-    ? rawView.slice(0, 30) : null;
+  const photoView = typeof rawView === "string" && /^[a-z0-9_]{2,40}$/.test(rawView)
+    ? rawView.slice(0, 40) : null;
 
   const isOrthoUpload = Boolean(orthoCaseId != null || adjustmentId != null || photoStage != null);
   if (blindOrthoUploadGate && !isOrthoUpload) {

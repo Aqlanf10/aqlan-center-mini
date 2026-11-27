@@ -141,6 +141,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!Object.prototype.hasOwnProperty.call(PHASE_LABEL, source.phase)) {
         return NextResponse.json({ message: "مرحلة غير معروفة." }, { status: 400 });
       }
+      if (session.role !== "admin" && session.role !== "doctor") {
+        return orthoForbiddenResponse("تغيير مرحلة علاج التقويم مقتصر على الإدارة والطبيب المعالج.");
+      }
+      const phaseGate = await evaluateOrthoPermission(
+        session,
+        { permission: "records.edit", section: "plan" },
+        { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
+      );
+      if (!phaseGate.allowed) {
+        return orthoForbiddenResponse("غير مصرّح لك بتغيير مرحلة هذه الحالة التقويمية.");
+      }
       const changed = await setOrthoPhase(caseId, source.phase as keyof typeof PHASE_LABEL);
       if (!changed) return NextResponse.json({ message: "الحالة مغلقة أو غير موجودة." }, { status: 409 });
       return NextResponse.json({ ok: true });
@@ -149,6 +160,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (typeof source.retainer === "string") {
       if (!Object.prototype.hasOwnProperty.call(RETAINER_LABEL, source.retainer)) {
         return NextResponse.json({ message: "نوع مثبّت غير معروف." }, { status: 400 });
+      }
+      if (session.role !== "admin" && session.role !== "doctor") {
+        return orthoForbiddenResponse("تسجيل تسليم المثبّت مقتصر على الإدارة والطبيب المعالج.");
+      }
+      const retainerGate = await evaluateOrthoPermission(
+        session,
+        { permission: "records.edit", section: "retention" },
+        { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
+      );
+      if (!retainerGate.allowed) {
+        return orthoForbiddenResponse("غير مصرّح لك بتسجيل تسليم المثبّت لهذه الحالة.");
       }
       const explicitOn = typeof source.retainerOn === "string" && DATE_PATTERN.test(source.retainerOn)
         ? source.retainerOn : null;
@@ -163,6 +185,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     if (source.status === "completed" || source.status === "discontinued") {
+      if (session.role !== "admin" && session.role !== "doctor") {
+        return orthoForbiddenResponse("إغلاق أو إيقاف حالة التقويم مقتصر على الإدارة والطبيب المعالج.");
+      }
+      const closeGate = await evaluateOrthoPermission(
+        session,
+        { anyOfPermissions: ["plan.approve", "sessions.approve"] },
+        { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
+      );
+      if (!closeGate.allowed) {
+        return orthoForbiddenResponse("غير مصرّح لك بإغلاق أو إيقاف هذه الحالة التقويمية.");
+      }
       const closed = await closeOrthoCase({
         id: caseId,
         status: source.status,

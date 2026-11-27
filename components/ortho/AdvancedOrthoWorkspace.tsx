@@ -109,8 +109,8 @@ export function AdvancedOrthoWorkspace({
   const latestRecordRef = useRef<OrthoWorkspaceRecord>(record);
 
   useEffect(() => {
-    setActiveOrthoCorePatientId(patientId);
-  }, [patientId]);
+    setActiveOrthoCorePatientId(patientId, liveCase?.id ?? null);
+  }, [patientId, liveCase?.id]);
 
   const loadWorkspaceAndLiveContext = useCallback(async () => {
     if (perms.loading) return;

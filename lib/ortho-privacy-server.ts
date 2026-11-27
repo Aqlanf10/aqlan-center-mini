@@ -73,10 +73,7 @@ async function resolveFallbackOwnerUserId(client?: Pick<DbClient, "query">): Pro
 export async function loadOrthoPrivacyPolicy(client?: DbClient): Promise<OrthoPrivacyPolicyDocument> {
   const handles = getLiveDbHandles();
   if (!client && !handles) {
-    const fallback = buildDefaultOrthoPrivacyPolicy(null);
-    fallback.roleDefaults.reception.permissions["photos.view"] = true;
-    fallback.roleDefaults.reception.fields.previousPhotos = true;
-    return fallback;
+    return buildDefaultOrthoPrivacyPolicy(null);
   }
   if (handles) await handles.ensureSchema();
   const runner = client ?? handles!.getPool();
@@ -90,7 +87,7 @@ export async function loadOrthoPrivacyPolicy(client?: DbClient): Promise<OrthoPr
   }
   const parsed = parseOrthoPrivacyPolicy(rows[0].value, fallbackOwner);
   if (!parsed.ok) {
-    return buildDefaultOrthoPrivacyPolicy(fallbackOwner);
+    throw new Error("CORRUPT_ORTHO_PRIVACY_POLICY");
   }
   return parsed.value;
 }

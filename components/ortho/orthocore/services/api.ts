@@ -28,9 +28,11 @@ export interface AiPatientAudioResult {
 }
 
 let activeNumericPatientId: number | null = null;
+let activeNumericOrthoCaseId: number | null = null;
 
-export function setActiveOrthoCorePatientId(patientId: number) {
+export function setActiveOrthoCorePatientId(patientId: number, orthoCaseId: number | null = null) {
   activeNumericPatientId = patientId;
+  activeNumericOrthoCaseId = orthoCaseId;
 }
 
 function getPatientIdOrThrow(): number {
@@ -49,7 +51,15 @@ async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
 export const api = {
   async uploadFile(
     file: File,
-    opts?: { title?: string; kind?: string; photoStage?: string; photoView?: string; note?: string },
+    opts?: {
+      title?: string;
+      kind?: string;
+      takenOn?: string;
+      photoStage?: string;
+      photoView?: string;
+      orthoCaseId?: number | null;
+      note?: string;
+    },
   ): Promise<{ url: string; fileName: string; mimeType: string; sizeBytes: number; docId?: number }> {
     const patientId = getPatientIdOrThrow();
     const form = new FormData();
@@ -60,10 +70,26 @@ export const api = {
       (lower.endsWith(".dcm") || lower.includes("ceph") || lower.includes("opg")
         ? "xray"
         : "photo");
+    const stageMap: Record<string, string> = {
+      T0: "initial",
+      T1: "progress",
+      T2: "debond",
+      T3: "retention",
+      initial: "initial",
+      progress: "progress",
+      debond: "debond",
+      retention: "retention",
+    };
+    const effectiveTakenOn =
+      opts?.takenOn && /^\d{4}-\d{2}-\d{2}$/.test(opts.takenOn)
+        ? opts.takenOn
+        : clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
     form.set("kind", inferredKind);
     form.set("title", opts?.title || file.name);
-    form.set("takenOn", clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
-    if (opts?.photoStage) form.set("photoStage", opts.photoStage);
+    form.set("takenOn", effectiveTakenOn);
+    const effectiveCaseId = opts?.orthoCaseId !== undefined ? opts.orthoCaseId : activeNumericOrthoCaseId;
+    if (effectiveCaseId && effectiveCaseId > 0) form.set("orthoCaseId", String(effectiveCaseId));
+    if (opts?.photoStage) form.set("photoStage", stageMap[opts.photoStage] ?? opts.photoStage);
     if (opts?.photoView) form.set("photoView", opts.photoView);
     if (opts?.note) form.set("note", opts.note);
 

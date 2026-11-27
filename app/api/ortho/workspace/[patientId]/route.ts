@@ -13,6 +13,7 @@ import {
 } from "@/lib/ortho-workspace-store";
 import type { OrthoWorkspaceRecord } from "@/lib/ortho-workspace-types";
 import { recordAudit } from "@/lib/db";
+import { canAccessPatient } from "@/lib/patient-access";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,9 @@ export async function GET(
   const patientId = parsePatientId(rawId);
   if (!patientId) {
     return NextResponse.json({ message: "معرّف المريض غير صالح." }, { status: 400, headers: NO_STORE_HEADERS });
+  }
+  if (!(await canAccessPatient(session, patientId))) {
+    return orthoForbiddenResponse("غير مصرّح لك بالوصول إلى ملف هذا المريض.");
   }
 
   const evalRes = await evaluateOrthoPermission(
@@ -86,6 +90,9 @@ export async function PUT(
   if (!patientId) {
     return NextResponse.json({ message: "معرّف المريض غير صالح." }, { status: 400, headers: NO_STORE_HEADERS });
   }
+  if (!(await canAccessPatient(session, patientId))) {
+    return orthoForbiddenResponse("غير مصرّح لك بتعديل ملف هذا المريض.");
+  }
 
   let parsedBody: { workspace?: Partial<OrthoWorkspaceRecord>; expectedRevision?: number };
   try {
@@ -106,7 +113,7 @@ export async function PUT(
 
   const evalRes = await evaluateOrthoPermission(
     session,
-    { anyOfPermissions: ["records.edit", "records.create", "records.blind_create"] },
+    { anyOfPermissions: ["records.edit", "records.blind_create"] },
     { patientId },
   );
   if (!evalRes.allowed || !evalRes.access) {
