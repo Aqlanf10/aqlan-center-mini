@@ -59,6 +59,38 @@ describe("synthetic assistant mode matrix", () => {
     expect(reply).toMatchObject({ sourceType: "external_ai", reply: "مسودة عامة." });
     expect(JSON.stringify(m.ai.mock.calls)).not.toContain("SYNTHETIC_HISTORY");
   });
+  it.each(["administrative", "clinical"])("keeps a rejected patient-linked %s request local", async kind => {
+    vi.stubEnv("USE_LOCAL_DB", "true");
+    vi.stubEnv("DATABASE_URL", "postgresql://synthetic.invalid/test");
+    try {
+      m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, partyId: 17, permissions: { canUseAiChat: true } });
+      m.settings.mockResolvedValue({ "ai.clinical_external": "true" });
+      m.access.mockResolvedValue(false);
+      const response = await chat(make({ conversationPatientId: 303, message: kind === "clinical" ? "ألم الأسنان" : EXTERNAL_ADMIN_TEMPLATES[0] }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ sourceType: "internal_engine", reply: "محلي" });
+      expect(m.access).toHaveBeenCalledOnce();
+      expect(m.process.mock.calls[0][1].conversationPatientId).toBeNull();
+      expect(m.ai).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it("keeps authorized patient-linked administrative requests local", async () => {
+    vi.stubEnv("USE_LOCAL_DB", "true");
+    vi.stubEnv("DATABASE_URL", "postgresql://synthetic.invalid/test");
+    try {
+      m.access.mockResolvedValue(true);
+      const response = await chat(make({ conversationPatientId: 303, message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ sourceType: "internal_engine", reply: "محلي" });
+      expect(m.access).toHaveBeenCalledOnce();
+      expect(m.process.mock.calls[0][1].conversationPatientId).toBe(303);
+      expect(m.ai).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
   it("keeps the local administrative answer when name redaction lookup fails", async () => {
     m.names.mockRejectedValue(new Error("synthetic redaction lookup unavailable"));
     const response = await chat(make({ message: "اكتب رسالة شكر إلى أحمد علي" }));
