@@ -1,10 +1,10 @@
 import type { SessionPayload } from "./auth";
 import { canViewMoney } from "./roles";
 
-/** Reception keeps access to its own vouchers, not other staff's vouchers. */
+/** Reception collects patient payments, but cannot read any expense voucher. */
 export function canReadExpenseVoucher(
   session: Pick<SessionPayload, "username" | "role">,
-  expense: { createdBy: string | null },
+  _expense?: { createdBy: string | null },
 ): boolean {
-  return canViewMoney(session.role) && (session.role !== "reception" || expense.createdBy === session.username);
+  return session.role !== "reception" && canViewMoney(session.role);
 }
