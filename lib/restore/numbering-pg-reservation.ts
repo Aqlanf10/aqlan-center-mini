@@ -52,6 +52,7 @@ export function createIndependentPgReservationBackend(
         }
         let read: IndependentNumberingWatermark | null = null;
         let advanceAttempted = false;
+        let advanceUnconfirmed = false;
         let inFlight = false;
         const result = await work({
           async readFresh(prefix) {
@@ -80,6 +81,7 @@ export function createIndependentPgReservationBackend(
             // Consume the attempt before yielding to the SQL driver. A second
             // asynchronous caller cannot advance the same transaction again.
             advanceAttempted = true;
+            advanceUnconfirmed = true;
             inFlight = true;
             try {
               const update = await client.query(
@@ -88,11 +90,15 @@ export function createIndependentPgReservationBackend(
                 [lineage, read.prefix, next.toString(), read.reservedThrough.toString()]);
               const advanced = update.rowCount === 1;
               if (update.rowCount !== 0 && !advanced) throw new Error("Invalid watermark cardinality");
+              advanceUnconfirmed = false;
               return advanced;
             } finally { inFlight = false; }
           },
         });
         if (inFlight) throw new Error("Unawaited authority operation");
+        // A caught driver error or invalid update result does not authorize
+        // committing a mutation whose outcome the callback could not verify.
+        if (advanceUnconfirmed) throw new Error("Authority advance not confirmed");
         active = false;
         commitAttempted = true;
         const committed = await client.query("COMMIT");
