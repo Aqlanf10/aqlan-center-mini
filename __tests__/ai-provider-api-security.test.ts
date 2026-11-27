@@ -232,7 +232,9 @@ describe("عمليات المدير المشروعة وعدم تسريب الم�
     expect(mocks.testProviderConnection).toHaveBeenCalledTimes(1);
   });
 
-  it.each([null, [], "saved", 123, { apiKey: null }, { apiKey: 42 }].map(body => [body]))(
+  it.each([null, [], "saved", 123, { apiKey: null }, { apiKey: 42 },
+    { apiKey: "" }, { apiKey: " \\t\\n" }, { apikey: "synthetic" },
+    { apiKey: "synthetic", unexpected: true }].map(body => [body]))(
     "does not test saved credentials on invalid request body %j",
     async (body) => {
       const request = new Request("http://localhost/api/settings/ai/providers/openai/test", {
