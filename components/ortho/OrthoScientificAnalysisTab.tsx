@@ -84,11 +84,12 @@ export function OrthoScientificAnalysisTab({
 
   const approveSnapshot = (snap: Omit<ApprovedAnalysisSnapshot, "id" | "approvedBy" | "approvedAt">) => {
     if (!canApprove) return;
+    const approvedAtIso = new Date().toISOString();
     const item: ApprovedAnalysisSnapshot = {
       ...snap,
-      id: `an-${snap.type}-${Date.now()}`,
+      id: `an-${snap.type}-${record.approvedAnalyses.length + 1}-${approvedAtIso}`,
       approvedBy: actorName,
-      approvedAt: new Date().toISOString(),
+      approvedAt: approvedAtIso,
     };
     const filtered = record.approvedAnalyses.filter((a) => a.type !== snap.type || a.titleAr !== snap.titleAr);
     onChange({ ...record, approvedAnalyses: [item, ...filtered] });

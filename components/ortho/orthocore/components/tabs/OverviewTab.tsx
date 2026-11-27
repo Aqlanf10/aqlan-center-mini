@@ -24,8 +24,9 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({ patient, lang, role, o
     onChange({ ...patient, [key]: val });
   };
 
+  const [mountTimeMs] = React.useState(() => new Date().getTime());
   const ageYears = patient.dateOfBirth
-    ? Math.max(0, Math.floor((Date.now() - new Date(patient.dateOfBirth).getTime()) / (365.25 * 24 * 3600 * 1000)))
+    ? Math.max(0, Math.floor((mountTimeMs - new Date(patient.dateOfBirth).getTime()) / (365.25 * 24 * 3600 * 1000)))
     : null;
   const isMinor = ageYears !== null && ageYears < 18;
 

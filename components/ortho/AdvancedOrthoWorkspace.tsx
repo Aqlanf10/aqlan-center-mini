@@ -163,40 +163,37 @@ export function AdvancedOrthoWorkspace({
     void loadWorkspaceAndLiveContext();
   }, [loadWorkspaceAndLiveContext]);
 
-  const persistWorkspace = useCallback(
-    async (next: OrthoWorkspaceRecord) => {
-      setSavingState("saving");
-      setSaveError(null);
-      try {
-        const res = await fetch(`/api/ortho/workspace/${patientId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            workspace: next,
-            expectedRevision: next.revision,
-          }),
-        });
-        const data = (await res.json().catch(() => null)) as {
-          workspace?: OrthoWorkspaceRecord;
-          message?: string;
-        } | null;
-        if (!res.ok) {
-          setSavingState("error");
-          setSaveError(data?.message ?? "تعذّر حفظ بيانات وحدة التقويم.");
-          return;
-        }
-        if (data?.workspace) {
-          setRecord(data.workspace);
-          latestRecordRef.current = data.workspace;
-        }
-        setSavingState("saved");
-      } catch {
+  const persistWorkspace = async (next: OrthoWorkspaceRecord) => {
+    setSavingState("saving");
+    setSaveError(null);
+    try {
+      const res = await fetch(`/api/ortho/workspace/${patientId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspace: next,
+          expectedRevision: next.revision,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        workspace?: OrthoWorkspaceRecord;
+        message?: string;
+      } | null;
+      if (!res.ok) {
         setSavingState("error");
-        setSaveError("تعذّر الاتصال بالخادم لحفظ ملف التقويم.");
+        setSaveError(data?.message ?? "تعذّر حفظ بيانات وحدة التقويم.");
+        return;
       }
-    },
-    [patientId],
-  );
+      if (data?.workspace) {
+        setRecord(data.workspace);
+        latestRecordRef.current = data.workspace;
+      }
+      setSavingState("saved");
+    } catch {
+      setSavingState("error");
+      setSaveError("تعذّر الاتصال بالخادم لحفظ ملف التقويم.");
+    }
+  };
 
   useEffect(() => {
     return () => {

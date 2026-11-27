@@ -175,10 +175,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       { anyOfPermissions: ["photos.capture", "photos.upload"] },
       { patientId, orthoCaseId },
     );
-    if (!orthoGate.allowed) {
+    if (!orthoGate.allowed && (orthoGate.subject !== null || !canLegacyUpload)) {
       return orthoForbiddenResponse("غير مصرّح لك بالتقاط أو رفع صور وحدة التقويم لهذه الحالة.");
     }
-    orthoUploadAccess = orthoGate.access;
+    if (orthoGate.access) orthoUploadAccess = orthoGate.access;
   }
 
   try {

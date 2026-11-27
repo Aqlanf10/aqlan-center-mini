@@ -139,19 +139,13 @@ export const CephTracingStudio: React.FC<CephTracingStudioProps> = ({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [isPanning, setIsPanning] = useState(false);
   const panStartRef = useRef<{ clientX: number; clientY: number; origX: number; origY: number } | null>(null);
 
   const pixelsPerMm = selectedMedia?.calibration.isCalibrated ? selectedMedia.calibration.pixelsPerMm : null;
 
-  const liveMetrics = useMemo(
-    () => computeCephalometricMetrics(landmarks, 1000, 1000, pixelsPerMm, system),
-    [landmarks, pixelsPerMm, system],
-  );
-
-  const allComputedMetrics = useMemo(
-    () => computeCephalometricMetrics(landmarks, 1000, 1000, pixelsPerMm, 'all'),
-    [landmarks, pixelsPerMm],
-  );
+  const liveMetrics = computeCephalometricMetrics(landmarks, 1000, 1000, pixelsPerMm, system);
+  const allComputedMetrics = computeCephalometricMetrics(landmarks, 1000, 1000, pixelsPerMm, 'all');
 
   const superImposeRef = useMemo(() => {
     if (!showSuperimpose || cephHistory.length === 0) return null;
@@ -193,6 +187,7 @@ export const CephTracingStudio: React.FC<CephTracingStudioProps> = ({
   const handleStagePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (panMode || e.button === 1) {
       panStartRef.current = { clientX: e.clientX, clientY: e.clientY, origX: pan.x, origY: pan.y };
+      setIsPanning(true);
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
       return;
     }
@@ -276,6 +271,7 @@ export const CephTracingStudio: React.FC<CephTracingStudioProps> = ({
 
   const handleStagePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     panStartRef.current = null;
+    setIsPanning(false);
     setDraggingKey(null);
     if ((e.currentTarget as HTMLElement).hasPointerCapture?.(e.pointerId)) {
       (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
@@ -286,7 +282,7 @@ export const CephTracingStudio: React.FC<CephTracingStudioProps> = ({
     const version = cephHistory.length + 1;
     const sysLabel = SYSTEMS.find((s) => s.id === system)?.en || 'Comprehensive';
     const newAnalysis: MeasurementAnalysis = {
-      id: `ana-ceph-${Date.now()}`,
+      id: `ana-ceph-${crypto.randomUUID()}`,
       version,
       stage,
       analysisType: 'cephalometric',
@@ -1021,7 +1017,7 @@ export const CephTracingStudio: React.FC<CephTracingStudioProps> = ({
                 </div>
 
                 {/* Floating Cursor Magnifier Loupe (LTR absolute coordinate box for exact X-ray zoom) */}
-                {loupeEnabled && cursorLoupe && !panMode && !panStartRef.current && (() => {
+                {loupeEnabled && cursorLoupe && !panMode && !isPanning && (() => {
                   const loupeHalf = loupeSize / 2;
                   const lensW = cursorLoupe.stageW * loupePower;
                   const lensH = cursorLoupe.stageH * loupePower;

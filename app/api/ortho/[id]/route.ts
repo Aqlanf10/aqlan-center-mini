@@ -108,14 +108,6 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   if (!(await canAccessPatient(session, found.patientId))) {
     return forbidden("غير مصرّح لك بتعديل هذه الحالة.");
   }
-  const editGate = await evaluateOrthoPermission(
-    session,
-    { anyOfPermissions: ["records.edit", "plan.approve", "sessions.approve"] },
-    { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
-  );
-  if (!editGate.allowed) {
-    return orthoForbiddenResponse("غير مصرّح لك بتعديل حالة التقويم هذه.");
-  }
 
   let body: unknown;
   try { body = await readJsonBody(request, JSON_BODY_LIMIT_BYTES); } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
