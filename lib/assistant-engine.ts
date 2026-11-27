@@ -15,6 +15,7 @@ import { generateDentalExpertReply } from "./dental-ai-engine";
 import { extractPatientIdentifier } from "./assistant-knowledge";
 import type { PeriodPreset, CurrencyFilter } from "./reports-types";
 import { addDays } from "./schedule";
+import { parseExplicitBookingTime } from "./assistant-booking-time";
 
 /**
  * فحص محاولات حقن الأوامر والتلاعب بالصلاحيات (Prompt Injection)
@@ -433,15 +434,11 @@ async function processAssistantQueryImpl(
     const digits = trimmed.replace(/[٠-٩۰-۹]/g, ch => String(ch.charCodeAt(0) % 16));
     const fileNumber = digits.match(/\b[A-Z]{1,8}-\d{1,12}\b/i)?.[0];
     const pName = fileNumber ?? (extractPatientNameWithHistory(digits, conversationHistory, context) || context.currentPatientName || undefined);
-    const timeText = digits.replace(/\b\d{4}-\d{2}-\d{2}\b/g, "").match(
-      /(?:الساعة\s*|الساعة:\s*)\d{1,2}(?::\d{2})?(?![\d:])(?:\s*(?:صباحًا|صباحاً|صباحا|صباح|عصرًا|عصراً|عصرا|مساءً|مساء|[مص])(?=\s|[.،؟!]|$))?|\b\d{1,2}:\d{2}\b/u,
-    )?.[0];
     const knownDate = /(?:\b\d{4}-\d{2}-\d{2}\b|اليوم|بكرة|غدا|غداً|غدًا|بعد غد)/u.test(digits);
-    const clock = timeText?.match(/^(?:الساعة[:\s]+)?(\d{1,2}:\d{2})$/u)?.[1];
-    const pTime = clock ? clock.padStart(5, "0") : timeText ? extractActionTime(timeText.replace(/ً/g, "")) : "";
-    if (!pName || !knownDate || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(pTime)) {
+    const pTime = parseExplicitBookingTime(digits);
+    if (!pName || !knownDate || !pTime) {
       return {
-        answer: "للحجز، اكتب اسم المريض أو رقم ملفه، والتاريخ والساعة. أعرض لك التفاصيل لتراجعها قبل التأكيد.",
+        answer: "للحجز، اكتب اسم المريض أو رقم ملفه والتاريخ والوقت بصيغة 24 ساعة (مثل 04:00 أو 16:00). أعرض لك التفاصيل قبل التأكيد.",
         intent: "booking_details_needed",
         toolsUsed: [],
         sourceType: "internal_engine",
