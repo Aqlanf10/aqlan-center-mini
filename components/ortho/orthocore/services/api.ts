@@ -3,13 +3,11 @@ import { clinicDateString } from "@/lib/schedule";
 import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
 
 /**
- * AQLAN Center Mini — Secure OrthoCore API Adapter (TD-07 Hardened)
+ * AQLAN Center Mini — Secure OrthoCore API Adapter
  *
- * - Eliminates module-mutable `let activeNumericPatientId` completely so opening multiple
- *   patient tabs concurrently can NEVER cross-route uploads to another patient!
- * - Every upload and derived-image save requires an explicit `patientId` (plus optional
- *   `orthoCaseId` and `parentDocumentId` for non-destructive derived lineage).
- * - Enforces the Structural Zero-PHI guard against sending patient clinical images/records externally.
+ * Replaces OrthoCore's standalone SQLite / unauthenticated `/uploads` API with
+ * AQLAN Center Mini's authenticated PostgreSQL + Documents APIs and enforces
+ * the strict Zero-PHI guard against sending any patient images/records to Gemini.
  */
 
 export interface AiMediaReview {
@@ -29,12 +27,19 @@ export interface AiPatientAudioResult {
   voice: string;
 }
 
-export function extractNumericPatientId(rawId: string | number): number {
-  const n = typeof rawId === "number" ? rawId : Number(String(rawId).replace(/\D/g, ""));
-  if (!Number.isSafeInteger(n) || n <= 0) {
-    throw new Error("معرّف ملف المريض غير صالح لرفع المستند.");
+let activeNumericPatientId: number | null = null;
+let activeNumericOrthoCaseId: number | null = null;
+
+export function setActiveOrthoCorePatientId(patientId: number, orthoCaseId: number | null = null) {
+  activeNumericPatientId = patientId;
+  activeNumericOrthoCaseId = orthoCaseId;
+}
+
+function getPatientIdOrThrow(): number {
+  if (!activeNumericPatientId || activeNumericPatientId <= 0) {
+    throw new Error("معرّف ملف المريض غير محدد لرفع المستند.");
   }
-  return n;
+  return activeNumericPatientId;
 }
 
 async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
@@ -45,20 +50,18 @@ async function dataUrlToFile(dataUrl: string, filename: string): Promise<File> {
 
 export const api = {
   async uploadFile(
-    patientIdOrCaseId: string | number,
     file: File,
     opts?: {
       title?: string;
       kind?: string;
+      takenOn?: string;
       photoStage?: string;
       photoView?: string;
-      note?: string;
       orthoCaseId?: number | null;
-      adjustmentId?: number | null;
-      parentDocumentId?: number | null;
+      note?: string;
     },
   ): Promise<{ url: string; fileName: string; mimeType: string; sizeBytes: number; docId?: number }> {
-    const patientId = extractNumericPatientId(patientIdOrCaseId);
+    const patientId = getPatientIdOrThrow();
     const form = new FormData();
     form.set("file", file);
     const lower = file.name.toLowerCase();
@@ -67,15 +70,28 @@ export const api = {
       (lower.endsWith(".dcm") || lower.includes("ceph") || lower.includes("opg")
         ? "xray"
         : "photo");
+    const stageMap: Record<string, string> = {
+      T0: "initial",
+      T1: "progress",
+      T2: "debond",
+      T3: "retention",
+      initial: "initial",
+      progress: "progress",
+      debond: "debond",
+      retention: "retention",
+    };
+    const effectiveTakenOn =
+      opts?.takenOn && /^\d{4}-\d{2}-\d{2}$/.test(opts.takenOn)
+        ? opts.takenOn
+        : clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
     form.set("kind", inferredKind);
     form.set("title", opts?.title || file.name);
-    form.set("takenOn", clinicDateString(new Date(), CLINIC_ZONE_FALLBACK));
-    if (opts?.photoStage) form.set("photoStage", opts.photoStage);
+    form.set("takenOn", effectiveTakenOn);
+    const effectiveCaseId = opts?.orthoCaseId !== undefined ? opts.orthoCaseId : activeNumericOrthoCaseId;
+    if (effectiveCaseId && effectiveCaseId > 0) form.set("orthoCaseId", String(effectiveCaseId));
+    if (opts?.photoStage) form.set("photoStage", stageMap[opts.photoStage] ?? opts.photoStage);
     if (opts?.photoView) form.set("photoView", opts.photoView);
     if (opts?.note) form.set("note", opts.note);
-    if (opts?.orthoCaseId && opts.orthoCaseId > 0) form.set("orthoCaseId", String(opts.orthoCaseId));
-    if (opts?.adjustmentId && opts.adjustmentId > 0) form.set("adjustmentId", String(opts.adjustmentId));
-    if (opts?.parentDocumentId && opts.parentDocumentId > 0) form.set("parentDocumentId", String(opts.parentDocumentId));
 
     const res = await fetch(`/api/patients/${patientId}/documents`, {
       method: "POST",
@@ -95,21 +111,15 @@ export const api = {
   },
 
   async saveDerivedImage(
-    patientIdOrCaseId: string | number,
     dataUrl: string,
     baseName: string,
-    opts?: { orthoCaseId?: number | null; parentDocumentId?: number | null },
   ): Promise<{ url: string; fileName: string; mimeType: string; sizeBytes: number; docId?: number }> {
     const safeName = `${baseName.replace(/[^\w\u0600-\u06FF-]+/g, "_")}_derived.jpg`;
     const file = await dataUrlToFile(dataUrl, safeName);
-    return this.uploadFile(patientIdOrCaseId, file, {
+    return this.uploadFile(file, {
       title: `${baseName} (نسخة مشتقة)`,
       kind: "photo",
-      orthoCaseId: opts?.orthoCaseId ?? null,
-      parentDocumentId: opts?.parentDocumentId ?? null,
-      note: opts?.parentDocumentId
-        ? `[نسخة مشتقة من #${opts.parentDocumentId}] تم الحفظ دون تعديل الأصل التشريحي.`
-        : "[نسخة مشتقة] تم الحفظ دون تعديل الأصل التشريحي.",
+      note: "[نسخة مشتقة] تم الحفظ دون تعديل الأصل التشريحي.",
     });
   },
 
@@ -120,7 +130,7 @@ export const api = {
     lang?: string;
   }): Promise<{ review: AiMediaReview }> {
     throw new Error(
-      "سياسة خصوصية المركز تمنع إرسال صور أو أشعة المرضى إلى خدمات الذكاء الاصطناعي الخارجية (Structural Zero-PHI). استخدم «عقلان — المساعد الذكي» بالوضع المحلي لتدقيق اكتمال السجل.",
+      "سياسة خصوصية المركز تمنع إرسال صور أو أشعة المرضى إلى خدمات الذكاء الاصطناعي الخارجية (Gemini). استخدم «عقلان — المساعد الذكي» بالوضع المحلي لتدقيق اكتمال السجل.",
     );
   },
 
@@ -134,7 +144,7 @@ export const api = {
     [key: string]: unknown;
   }): Promise<AiPatientAudioResult> {
     throw new Error(
-      "توليد الصوت الخارجي لبيانات المرضى معطّل لحماية خصوصية المرضى (Structural Zero-PHI).",
+      "توليد الصوت الخارجي لبيانات المرضى معطّل افتراضيًا لحماية خصوصية المرضى (Zero-PHI Policy).",
     );
   },
 };

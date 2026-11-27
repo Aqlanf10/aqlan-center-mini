@@ -109,11 +109,6 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
       const added: MediaRecord[] = [];
       for (let i = 0; i < files.length; i++) {
         const f = files[i];
-        const stageMap: Record<string, string> = { T0: 'initial', T1: 'progress', T2: 'debond', T3: 'retention' };
-        const uploaded = await api.uploadFile(patient.id, f, {
-          photoStage: stageMap[uploadStage] || 'initial',
-          photoView: uploadView,
-        });
         const lower = f.name.toLowerCase();
         const detectedKind: MediaKind = lower.endsWith('.dcm')
           ? 'dicom'
@@ -124,9 +119,18 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
           : uploadKind;
 
         const labelObj = VIEW_TYPE_LABELS[uploadView];
+        const displayTitle = `${labelObj ? (lang === 'ar' ? labelObj.ar : labelObj.en) : f.name} (${uploadStage})`;
+        const uploaded = await api.uploadFile(f, {
+          title: displayTitle,
+          kind: detectedKind === 'radiograph' || detectedKind === 'dicom' ? 'xray' : detectedKind === 'document' ? 'other' : 'photo',
+          takenOn: captureDate,
+          photoStage: uploadStage,
+          photoView: uploadView,
+          note: sourceNote,
+        });
         added.push({
-          id: `med-${Date.now()}-${i}`,
-          title: `${labelObj ? (lang === 'ar' ? labelObj.ar : labelObj.en) : f.name} (${uploadStage})`,
+          id: uploaded.docId ? `doc-${uploaded.docId}` : `med-${Date.now()}-${i}`,
+          title: displayTitle,
           mediaKind: detectedKind,
           stage: uploadStage,
           viewType: uploadView,
@@ -499,7 +503,6 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
       {/* Specialized Modals */}
       <PhotoEditorModal
         open={Boolean(editorMedia)}
-        patientId={patient.id}
         media={editorMedia}
         allMedia={patient.media}
         lang={lang}

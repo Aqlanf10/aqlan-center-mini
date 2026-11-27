@@ -83,8 +83,23 @@ export async function GET() {
   try {
     const shift = await getOpenShift();
     if (session.role === "reception") {
+      const receptionOpen = shift
+        ? {
+            id: shift.id,
+            status: shift.status,
+            openedBy: shift.openedBy,
+            openedAt: shift.openedAt,
+            openingReviews: (await listOpeningReviews({ shiftId: shift.id })).map((review) =>
+              projectOpeningReview(review, false),
+            ),
+          }
+        : null;
       return NextResponse.json(
-        { open: shift ? { id: shift.id } : null },
+        {
+          clinicTimeZone: CLINIC_TIME_ZONE,
+          open: receptionOpen,
+          recent: await listShiftsForViewer({ authorized: false }, 15),
+        },
         { headers: { "Cache-Control": "private, no-store" } },
       );
     }
@@ -152,7 +167,13 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(
       session.role === "reception"
-        ? { id: shift.id }
+        ? {
+            id: shift.id,
+            status: shift.status,
+            openingReviews: (shift.openingReviews ?? []).map((review) =>
+              projectOpeningReview(review, false),
+            ),
+          }
         : { ...shift, openingReviews: (shift.openingReviews ?? []).map(review => projectOpeningReview(review, isAdmin(session.role))) },
       { status: 201 },
     );

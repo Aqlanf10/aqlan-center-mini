@@ -21,7 +21,6 @@ import { api } from '../services/api';
 
 interface PhotoEditorModalProps {
   open: boolean;
-  patientId: string | number;
   media: MediaRecord | null;
   allMedia: MediaRecord[];
   lang: Language;
@@ -33,7 +32,6 @@ type ToolType = 'select' | 'arrow' | 'line' | 'point' | 'text';
 
 export const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({
   open,
-  patientId,
   media,
   allMedia,
   lang,
@@ -230,9 +228,7 @@ export const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({
     setSaving(true);
     try {
       const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.92);
-      const parentDocMatch = /\/api\/documents\/(\d+)/.exec(media.originalUrl);
-      const parentDocumentId = parentDocMatch ? Number(parentDocMatch[1]) : null;
-      const res = await api.saveDerivedImage(patientId, dataUrl, media.title, { parentDocumentId });
+      const res = await api.saveDerivedImage(dataUrl, media.title);
       const derivedRecord: MediaRecord = {
         ...media,
         id: `med-derived-${Date.now()}`,
@@ -291,9 +287,7 @@ export const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({
       }
 
       const dataUrl = board.toDataURL('image/jpeg', 0.92);
-      const parentDocMatch = /\/api\/documents\/(\d+)/.exec(media.originalUrl);
-      const parentDocumentId = parentDocMatch ? Number(parentDocMatch[1]) : null;
-      const res = await api.saveDerivedImage(patientId, dataUrl, 'clinical_board', { parentDocumentId });
+      const res = await api.saveDerivedImage(dataUrl, 'clinical_board');
       onSaveDerived({
         ...media,
         id: `med-board-${Date.now()}`,

@@ -107,7 +107,23 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const source = (body ?? {}) as Record<string, unknown>;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json(
+      { message: "طلب غير صالح." },
+      { status: 400, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
+  const source = body as Record<string, unknown>;
+  if (
+    "confirmation" in source &&
+    source.confirmation !== undefined &&
+    (source.confirmation === null || typeof source.confirmation !== "object" || Array.isArray(source.confirmation))
+  ) {
+    return NextResponse.json(
+      { message: "بيانات التأكيد غير صالحة." },
+      { status: 400, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
 
   // استخراج سجل المحادثة — رسائل العميل **بياناتٌ لا هوية** (P0.5):
   // role=system من العميل يُهمَد بالكامل (البرومبت النظامي الموثوق يملكه الخادم
@@ -137,19 +153,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اكتب رسالتك أو استفسارك أولاً." }, { status: 400 });
   }
 
-  // Decoupled from legacy ai_settings singleton: local assistant works even without an ai_settings row,
-  // unless the owner explicitly disabled AI service in ai_settings.
+  const isDbConnected = isDatabaseOnline();
+
+  // Fail-closed: master AI settings must be read cleanly; if disabled or unreadable, refuse with 503.
   const [legacySettings, configuredProviders, safeSettings] = await Promise.all([
-    getAiSettings().catch(() => ({ enabled: true, hasKey: false })),
-    listAiProviders().catch(() => []),
+    getAiSettings().catch(() => null),
+    isDbConnected ? listAiProviders().catch(() => null) : Promise.resolve([]),
     getSettingsSafe().catch(() => null),
   ]);
+  if (!legacySettings) {
+    return NextResponse.json(
+      { message: "تعذّر التحقق من إعدادات خدمة الذكاء الاصطناعي حالياً." },
+      { status: 503, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
   if (legacySettings.enabled === false) {
     return NextResponse.json(
       {
         message: "خدمة الذكاء الاصطناعي غير مفعّلة في المركز حالياً. يمكن للمدير تفعيلها من شاشة الإعدادات > الذكاء الاصطناعي.",
       },
-      { status: 503 },
+      { status: 503, headers: { "Cache-Control": "private, no-store" } },
     );
   }
 
@@ -172,7 +195,6 @@ export async function POST(request: Request) {
   const started = Date.now();
   const doctorPartyId = user.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
   const todayISO = await dbTodayISO().catch(() => new Date().toISOString().slice(0, 10));
-  const isDbConnected = isDatabaseOnline();
 
   // سياق المريض الجلسي إن أُرسل من العميل: لا يُصدَّق قبل فحص ملكيته (P0.5) —
   // conversationPatientId مُسَمّم لا يفتح ملف مريض زميل.
@@ -238,13 +260,19 @@ export async function POST(request: Request) {
   });
   const allowedToolGroups = allowedAiToolGroupsForUser(session.role as Role, user.permissions ?? null);
 
-  // Structural Zero-PHI & Default-OFF External AI Governance (Charter §21, TD-12):
-  // 1. External assistant is OFF by default via `SETTING_DEFAULTS["ai.external_assistant"] = "false"`.
-  // 2. Clinical external prompts are OFF by default via `SETTING_DEFAULTS["ai.clinical_external"] = "false"`.
-  // 3. Any active patient/visit/case/ceph context in the request hard-blocks external consultation.
-  const externalAssistantEnabled = safeSettings?.["ai.external_assistant"] !== "false";
+  // Structural Zero-PHI, Fail-Closed Policy & Strictly Local Clinical Text (Charter §21, TD-12):
+  // 1. External assistant stays OFF unless policy/settings load cleanly AND `ai.external_assistant === "true"`.
+  // 2. All clinical text stays strictly local (`clinicalExternalAllowed = false`).
+  // 3. Any active patient/visit/case/ceph context or redaction failure keeps dispatch 100% local.
+  const policyLoaded =
+    safeSettings !== null &&
+    typeof safeSettings === "object" &&
+    Array.isArray(configuredProviders);
+  const externalAssistantEnabled =
+    policyLoaded && safeSettings["ai.external_assistant"] === "true";
   const hasAnyExternalKey =
-    configuredProviders.some((p) => p.enabled && Boolean(p.apiKeyEnc)) || Boolean(legacySettings.hasKey);
+    externalAssistantEnabled &&
+    (configuredProviders.some((p) => p.enabled && Boolean(p.apiKeyEnc)) || Boolean(legacySettings.hasKey));
   const hasActivePatientContext =
     conversationPatientId !== null ||
     droppedPatientContext ||
@@ -254,15 +282,12 @@ export async function POST(request: Request) {
     source.orthoCaseId != null ||
     source.cephId != null;
 
-  const clinicalExternalAllowed =
-    externalAssistantEnabled &&
-    !hasActivePatientContext &&
-    safeSettings?.["ai.clinical_external"] === "true";
+  const clinicalExternalAllowed = false;
 
   const plan = externalConsultPlan({
     intent: response.intent,
     message: latestUserMsg,
-    hasKey: externalAssistantEnabled && hasAnyExternalKey && !hasActivePatientContext,
+    hasKey: hasAnyExternalKey && !hasActivePatientContext,
     clinicalExternalAllowed,
     clinicalIdentity: clinicalCapability.ok,
   });
@@ -286,12 +311,15 @@ export async function POST(request: Request) {
           : "الاستشارة السريرية النصية (دوائية/علاجية) متاحة للحسابات ذات الهوية السريرية — الرد أعلاه من المحرك المحلي ضمن صلاحياتك الإدارية.",
       ],
     };
-  } else if (plan.kind === "clinical" || plan.kind === "administrative") {
+  } else if (plan.kind === "administrative" && !hasActivePatientContext) {
     try {
       const budgetCheck: AiBudgetCheckResult = isDbConnected
         ? await withIsolation(getPool(), "READ COMMITTED", (client) =>
             checkAiExternalBudget(client, "global", 1),
-          ).catch((): AiBudgetCheckResult => ({ allowed: true }))
+          ).catch((): AiBudgetCheckResult => ({
+            allowed: false,
+            reasonAr: "تعذّر التحقق من ميزانية المساعد الخارجي؛ استمر الرد عبر المحرك المحلي.",
+          }))
         : { allowed: true };
 
       if (!budgetCheck.allowed) {
@@ -303,28 +331,22 @@ export async function POST(request: Request) {
           ],
         };
       } else {
-        const outboundMessages: AiChatMessage[] =
-          plan.kind === "clinical"
-            ? [
-                { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
-                ...incomingMessages.map((m) => ({
-                  role: m.role,
-                  content: deIdentifyClinicalContext(m.content),
-                })),
-              ]
-            : [
-                { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
-                {
-                  role: "user",
-                  content: deIdentifyClinicalContext(
-                    redactPersonNames(latestUserMsg, await personNameTokens().catch(() => new Set<string>())),
-                  ),
-                },
-              ];
+        // Fail-closed redaction: if personNameTokens() throws or fails, catch aborts external dispatch cleanly.
+        const nameTokens = await personNameTokens();
+        if (!(nameTokens instanceof Set)) {
+          throw new Error("PERSON_NAME_TOKENS_UNAVAILABLE");
+        }
+        const outboundMessages: AiChatMessage[] = [
+          { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: deIdentifyClinicalContext(redactPersonNames(latestUserMsg, nameTokens)),
+          },
+        ];
 
-        const maxTokens = plan.kind === "clinical" ? 1500 : 800;
+        const maxTokens = 800;
         const registryResult =
-          configuredProviders.some((p) => p.enabled && Boolean(p.apiKeyEnc))
+          (configuredProviders ?? []).some((p) => p.enabled && Boolean(p.apiKeyEnc))
             ? await executeAiChatWithFallback({
                 messages: outboundMessages,
                 maxTokens,
@@ -360,7 +382,7 @@ export async function POST(request: Request) {
         }
       }
     } catch {
-      // الاستمرار على رد المحرك المحلي عند فشل المزوّد
+      // الاستمرار على رد المحرك المحلي عند تعذّر التحقق من قوائم الحجب أو فشل المزوّد
     }
   }
 

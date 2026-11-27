@@ -177,11 +177,22 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: new DocumentAssociationError().message }, { status: 400 });
   }
   const rawStage = form.get("photoStage");
-  const photoStage = typeof rawStage === "string"
-    && ["initial", "progress", "debond", "retention"].includes(rawStage) ? rawStage : null;
+  const stageNormalizeMap: Record<string, string> = {
+    initial: "initial",
+    progress: "progress",
+    debond: "debond",
+    retention: "retention",
+    T0: "initial",
+    T1: "progress",
+    T2: "debond",
+    T3: "retention",
+  };
+  const photoStage = typeof rawStage === "string" && stageNormalizeMap[rawStage.trim()]
+    ? stageNormalizeMap[rawStage.trim()]
+    : null;
   const rawView = form.get("photoView");
-  const photoView = typeof rawView === "string" && /^[a-z_]{3,30}$/.test(rawView)
-    ? rawView.slice(0, 30) : null;
+  const photoView = typeof rawView === "string" && /^[a-z0-9_]{2,40}$/.test(rawView.trim())
+    ? rawView.trim().slice(0, 40) : null;
 
   try {
     await validateDocumentAssociations({ patientId, visitId, orthoCaseId, adjustmentId });

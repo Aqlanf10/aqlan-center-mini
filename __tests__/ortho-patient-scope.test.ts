@@ -122,11 +122,30 @@ describe("actual ortho route, proxy and canonical patient guard", () => {
     expect(patientCases).toHaveBeenCalledWith(101, expect.any(String));
   });
 
-  it.each(["admin", "reception"] as const)("preserves full authorized %s data without a doctor lookup", async (role) => {
-    const req = request(role);
+  it("preserves full authorized admin data without a doctor lookup", async () => {
+    const req = request("admin");
     expect((await proxy(req)).headers.get("x-middleware-next")).toBe("1");
     expect((await (await list(req)).json()).cases).toEqual(cases.map((row) => ({ ...row, photosVisible: true })));
     expect(await (await detail(req, context(22))).json()).toEqual({ ...cases[1], photosVisible: true });
+    expect(userByName).not.toHaveBeenCalled(); expect(owns).not.toHaveBeenCalled();
+  });
+
+  it("keeps reception clinical follow-up read while withholding ortho photos by default (deny-by-default)", async () => {
+    const req = request("reception");
+    expect((await proxy(req)).headers.get("x-middleware-next")).toBe("1");
+    const expectedList = cases.map((row) => ({
+      ...row,
+      photosVisible: false,
+      adjustments: row.adjustments.map((entry) => ({ ...entry, photos: [] })),
+    }));
+    const listBody = await (await list(req)).json();
+    expect(listBody.cases).toEqual(expectedList);
+    expect(JSON.stringify(listBody)).not.toContain("Synthetic private image note");
+    expect(await (await detail(req, context(22))).json()).toEqual({
+      ...cases[1],
+      photosVisible: false,
+      adjustments: cases[1].adjustments.map((entry) => ({ ...entry, photos: [] })),
+    });
     expect(userByName).not.toHaveBeenCalled(); expect(owns).not.toHaveBeenCalled();
   });
 

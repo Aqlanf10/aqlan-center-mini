@@ -19,6 +19,8 @@ vi.mock("@/lib/db", async (importOriginal) => {
   return {
     ...actual,
     getOpenShift: vi.fn(async () => mocks.openShift),
+    listOpeningReviews: vi.fn(async () => []),
+    listShiftsForViewer: vi.fn(async () => [{ id: 41, status: "closed", sealed: true, counted: null }]),
     listExpensesBetween: vi.fn(async () => [{ id: 1, amountMinor: 10000 }]),
     getDocumentForDownload: vi.fn(async () => ({
       document: { id: 9, patientId: 2, title: "intraoral.jpg", mimeType: "image/jpeg", removedAt: null },
@@ -107,12 +109,25 @@ describe("Reception privacy, shift Z-report boundary, and complete expense block
     expect(canAccessUnifiedReport("reception", "patient-statement")).toBe(true);
   });
 
-  it("projects GET /api/shifts for Reception as { open: { id } } only without totals, expenses, or drawer balance", async () => {
+  it("projects GET /api/shifts for Reception with open status & sealed shift history while omitting clinic totals, expenses, opening cash, and drawer balance", async () => {
     const resShift = await getShifts();
     expect(resShift.status).toBe(200);
     const body = await resShift.json();
-    expect(body).toEqual({ open: { id: 42 } });
+    expect(body).toEqual({
+      clinicTimeZone: expect.any(String),
+      open: {
+        id: 42,
+        status: "open",
+        openedBy: "reception_demo",
+        openedAt: "2026-11-27T06:00:00Z",
+        openingReviews: [],
+      },
+      recent: [{ id: 41, status: "closed", sealed: true, counted: null }],
+    });
+    expect(body.open.opening).toBeUndefined();
     expect(body.totals).toBeUndefined();
+    expect(body.expenseTotals).toBeUndefined();
+    expect(body.payments).toBeUndefined();
     expect(body.expenses).toBeUndefined();
     expect(body.drawer).toBeUndefined();
   });

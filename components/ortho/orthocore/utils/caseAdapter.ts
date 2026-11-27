@@ -85,11 +85,11 @@ function mapDocToMediaRecord(doc: LivePatientDocument): MediaRecord {
           : "photo";
 
   const stage: MediaRecord["stage"] =
-    doc.photoStage === "start" || doc.photoStage === "initial"
+    doc.photoStage === "start" || doc.photoStage === "initial" || doc.photoStage === "T0"
       ? "T0"
-      : doc.photoStage === "final" || doc.photoStage === "debond"
+      : doc.photoStage === "final" || doc.photoStage === "debond" || doc.photoStage === "T2"
         ? "T2"
-        : doc.photoStage === "retention"
+        : doc.photoStage === "retention" || doc.photoStage === "T3"
           ? "T3"
           : "T1";
 
@@ -426,8 +426,16 @@ export function buildOrthoCorePatientCase(input: {
     }
     for (const doc of liveDocs) {
       const mapped = mapDocToMediaRecord(doc);
-      if (!byUrl.has(mapped.originalUrl)) {
+      const prev = byUrl.get(mapped.originalUrl);
+      if (!prev) {
         byUrl.set(mapped.originalUrl, mapped);
+      } else {
+        byUrl.set(mapped.originalUrl, {
+          ...prev,
+          stage: doc.photoStage ? mapped.stage : prev.stage,
+          viewType: doc.photoView ? mapped.viewType : prev.viewType,
+          captureDate: doc.takenOn || prev.captureDate,
+        });
       }
     }
     merged.media = Array.from(byUrl.values());

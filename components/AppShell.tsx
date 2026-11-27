@@ -16,7 +16,6 @@ import { AiStaffChatModal } from "./AiStaffChatModal";
 import { playNewMessageChime, playUrgentChime } from "./Chat";
 import { roleCan } from "@/lib/settings-permissions";
 import { isGatedRole, pageVisibleToRole } from "@/lib/role-routes";
-import { useOrthoPermissions } from "./ortho/useOrthoPermissions";
 
 const EXPERIMENTAL_BANNER_ENABLED =
   process.env.NEXT_PUBLIC_EXPERIMENTAL_BANNER === "true";
@@ -211,13 +210,9 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
     if (badges.urgentMessages === 0 && urgentDismissed) setUrgentDismissed(false);
   }, [badges.urgentMessages, urgentDismissed]);
 
-  const orthoNavPerms = useOrthoPermissions({
-    enabled: Boolean(session) && !bare && !restricted && !canonical,
-  });
   const nav = NAV.filter((item) => {
     // (P2-1) الكاشير والمحاسب: القائمة هي قائمة السماح نفسها التي يحرسها الباب.
     if (restricted && !pageVisibleToRole(session?.role, item.href)) return false;
-    if (item.href === "/ortho" && !orthoNavPerms.loading && !orthoNavPerms.moduleVisible) return false;
     if (item.needs === "settings") return roleCan(session?.role, "settings.view");
     if (item.needs === "admin") return isAdmin(session?.role);
     if (item.needs === "money") return canHandleMoney(session?.role);

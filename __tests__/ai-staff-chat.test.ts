@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   recordAudit: vi.fn(),
   /* (P2-11) هذه الاختبارات تصف مسار الاستشارة السريرية حين يفعّلها المالك صراحةً —
      والافتراضي معطَّل (Claude للمهام الإدارية فقط، انظر ai-scope.test). */
-  getSettingsSafe: vi.fn(async () => ({ "ai.clinical_external": "true" })),
+  getSettingsSafe: vi.fn<() => Promise<Record<string, string>>>(async () => ({ "ai.clinical_external": "true" })),
   personNameTokens: vi.fn(async () => new Set(["احمد", "علي"])),
   getAiSettings: vi.fn(),
   aiChat: vi.fn(),
@@ -203,7 +203,11 @@ describe("مسار استدعاء المساعد الذكي (POST /api/ai/chat)"
     expect(res.status).toBe(503);
   });
 
-  it("يقبل استفسار الطبيب المصرح له ويحقن الدستور الطبي وحارس الخصوصية", async () => {
+  it("يبقي استفسار الطبيب السريري محليًا بالكامل ولا يرسله لأي مزود خارجي مع تسجيل التدقيق", async () => {
+    mocks.getSettingsSafe.mockResolvedValue({
+      "ai.external_assistant": "true",
+      "ai.clinical_external": "true",
+    });
     const req = new Request("http://localhost/api/ai/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -216,22 +220,9 @@ describe("مسار استدعاء المساعد الذكي (POST /api/ai/chat)"
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.ok).toBe(true);
-    expect(data.reply).toContain("أوجمنتين");
-
-    // تحقق من الرسائل المرسلة لـ aiChat
-    expect(mocks.aiChat).toHaveBeenCalledTimes(1);
-    const callArg = mocks.aiChat.mock.calls[0][0];
-    const msgs = callArg.messages;
-
-    // حقن برومبت المساعد الدستوري (المادة 214)
-    expect(msgs[0].role).toBe("system");
-    expect(msgs[0].content).toBe(DENTAL_ASSISTANT_SYSTEM_PROMPT);
-    expect(msgs[0].content).toContain("المادة 214");
-
-    // تعقيم هاتف المريض قبل الخروج (حارس الخصوصية)
-    expect(msgs[1].role).toBe("user");
-    expect(msgs[1].content).not.toContain("0777123456");
-    expect(msgs[1].content).toContain("•••");
+    expect(mocks.aiChat).not.toHaveBeenCalled();
+    expect(data.sourceType).not.toBe("external_ai");
+    expect(DENTAL_ASSISTANT_SYSTEM_PROMPT).toContain("المادة 214");
 
     // تسجيل التدقيق
     expect(mocks.recordAudit).toHaveBeenCalledWith(
@@ -314,7 +305,11 @@ describe("\u062d\u0627\u0631\u0633 \u0627\u0644\u0642\u0635\u062f \u0627\u0644\u
     expect((data.warnings || []).some((w: string) => w.includes("هوية سريرية"))).toBe(true);
   });
 
-  it("\u0627\u0644\u0637\u0628\u064a\u0628 \u0627\u0644\u0645\u0631\u0628\u0648\u0637 \u0628\u062c\u0647\u0629 \u0637\u0628\u064a\u0628 \u064a\u0635\u0644 \u0644\u0644\u0627\u0633\u062a\u0634\u0627\u0631\u0629 \u0627\u0644\u0633\u0631\u064a\u0631\u064a\u0629 \u0627\u0644\u062e\u0627\u0631\u062c\u064a\u0629 \u0643\u0627\u0644\u0639\u0627\u062f\u0629", async () => {
+  it("الطبيب المربوط بجهة طبيب يبقى سؤاله السريري محليًا ولا يخرج لمزود خارجي حتى مع تفعيل الإعدادات", async () => {
+    mocks.getSettingsSafe.mockResolvedValue({
+      "ai.external_assistant": "true",
+      "ai.clinical_external": "true",
+    });
     mocks.requireSession.mockResolvedValue({
       userId: 5,
       username: "dr.sara",
@@ -332,24 +327,27 @@ describe("\u062d\u0627\u0631\u0633 \u0627\u0644\u0642\u0635\u062f \u0627\u0644\u
     const req = new Request("http://localhost/api/ai/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: "\u0645\u0627 \u0627\u0644\u0645\u0636\u0627\u062f \u0627\u0644\u062d\u064a\u0648\u064a \u0627\u0644\u0645\u0646\u0627\u0633\u0628 \u0644\u0644\u062e\u0631\u0627\u062c\u061f" }),
+      body: JSON.stringify({ message: "ما المضاد الحيوي المناسب للخراج؟" }),
     });
     const res = await chatRoute(req);
     expect(res.status).toBe(200);
-    expect(mocks.aiChat).toHaveBeenCalled();
+    expect(mocks.aiChat).not.toHaveBeenCalled();
     const data = await res.json();
-    expect(data.reply).toContain("\u0623\u0648\u062c\u0645\u0646\u062a\u064a\u0646");
+    expect(data.sourceType).not.toBe("external_ai");
   });
 });
 
-describe("(P2-11) Claude للمهام الإدارية فقط — الافتراضي", () => {
+describe("(P2-11) المساعد الخارجي للمهام الإدارية فقط عند التفعيل الصريح", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    // الافتراضي: الإرسال السريري معطَّل.
-    mocks.getSettingsSafe.mockResolvedValue({ "ai.clinical_external": "false" });
+    // التفعيل الصريح للمساعد الإداري مع إبقاء السريري محليًا دائمًا.
+    mocks.getSettingsSafe.mockResolvedValue({
+      "ai.external_assistant": "true",
+      "ai.clinical_external": "false",
+    });
     mocks.personNameTokens.mockResolvedValue(new Set(["احمد", "علي"]));
-    mocks.getAiSettings.mockResolvedValue({ enabled: true, hasKey: true, model: "claude-haiku-4-5-20251001" });
-    mocks.aiChat.mockResolvedValue({ ok: true, content: "إعلانٌ مهذب عن إغلاق يوم العيد.", model: "claude-haiku-4-5-20251001", latencyMs: 50 });
+    mocks.getAiSettings.mockResolvedValue({ enabled: true, hasKey: true, model: "synthetic-admin-v1" });
+    mocks.aiChat.mockResolvedValue({ ok: true, content: "إعلانٌ مهذب عن إغلاق يوم العيد.", model: "synthetic-admin-v1", latencyMs: 50 });
   });
 
   const asLinkedDoctor = () => {

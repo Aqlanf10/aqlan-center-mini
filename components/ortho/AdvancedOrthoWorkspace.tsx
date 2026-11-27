@@ -21,6 +21,7 @@ import { STAGE_LABELS, tr } from "./orthocore/i18n/translations";
 import { getCaseCompleteness } from "./orthocore/utils/orthoMath";
 import { syncAutoProblems } from "./orthocore/utils/problemExtractor";
 import { getPatientCurrentWires, inferOrthoPhase, ORTHO_PHASES } from "./orthocore/data/orthoCatalog";
+import { setActiveOrthoCorePatientId } from "./orthocore/services/api";
 import {
   applyOrthoCoreCaseToWorkspace,
   buildClinicSettingsForOrthoCore,
@@ -107,37 +108,39 @@ export function AdvancedOrthoWorkspace({
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestRecordRef = useRef<OrthoWorkspaceRecord>(record);
 
+  useEffect(() => {
+    setActiveOrthoCorePatientId(patientId, liveCase?.id ?? null);
+  }, [patientId, liveCase?.id]);
+
   const loadWorkspaceAndLiveContext = useCallback(async () => {
     if (perms.loading) return;
-    if (!perms.moduleVisible || (!perms.can("records.read") && !perms.can("records.blind_create"))) {
+    if (!perms.moduleVisible || !perms.can("records.read")) {
       setLoadingWorkspace(false);
       return;
     }
     setLoadingWorkspace(true);
     try {
       const canSeePhotos = perms.can("photos.view") && perms.canField("previousPhotos");
-      const [orthoRes, docsRes] = await Promise.all([
-        perms.can("records.read") ? fetch(`/api/ortho?patientId=${patientId}`, { cache: "no-store" }) : Promise.resolve(null),
+      const [wsRes, orthoRes, docsRes] = await Promise.all([
+        fetch(`/api/ortho/workspace/${patientId}`, { cache: "no-store" }),
+        fetch(`/api/ortho?patientId=${patientId}`, { cache: "no-store" }),
         canSeePhotos
           ? fetch(`/api/patients/${patientId}/documents`, { cache: "no-store" })
           : Promise.resolve(null),
       ]);
 
-      let activeCase: LiveOrthoCaseSummary | null = null;
-      if (orthoRes && orthoRes.ok) {
-        const orthoData = (await orthoRes.json()) as { cases?: LiveOrthoCaseSummary[] };
-        activeCase = orthoData.cases?.find((c) => c.status === "active") ?? orthoData.cases?.[0] ?? null;
-        setLiveCase(activeCase);
-      }
-
-      const caseQuery = activeCase?.id ? `?orthoCaseId=${activeCase.id}` : "";
-      const wsRes = await fetch(`/api/ortho/workspace/${patientId}${caseQuery}`, { cache: "no-store" });
       if (wsRes.ok) {
         const wsData = (await wsRes.json()) as { workspace?: OrthoWorkspaceRecord };
         if (wsData.workspace) {
           setRecord(wsData.workspace);
           latestRecordRef.current = wsData.workspace;
         }
+      }
+
+      if (orthoRes.ok) {
+        const orthoData = (await orthoRes.json()) as { cases?: LiveOrthoCaseSummary[] };
+        const active = orthoData.cases?.find((c) => c.status === "active") ?? orthoData.cases?.[0] ?? null;
+        setLiveCase(active);
       }
 
       if (docsRes && docsRes.ok) {
@@ -168,15 +171,12 @@ export function AdvancedOrthoWorkspace({
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orthoCaseId: liveCase?.id ?? next.orthoCaseId ?? null,
           workspace: next,
           expectedRevision: next.revision,
         }),
       });
       const data = (await res.json().catch(() => null)) as {
         workspace?: OrthoWorkspaceRecord;
-        revision?: number;
-        blindReceipt?: boolean;
         message?: string;
       } | null;
       if (!res.ok) {
@@ -187,10 +187,6 @@ export function AdvancedOrthoWorkspace({
       if (data?.workspace) {
         setRecord(data.workspace);
         latestRecordRef.current = data.workspace;
-      } else if (typeof data?.revision === "number") {
-        const bumped = { ...next, revision: data.revision };
-        setRecord(bumped);
-        latestRecordRef.current = bumped;
       }
       setSavingState("saved");
     } catch {

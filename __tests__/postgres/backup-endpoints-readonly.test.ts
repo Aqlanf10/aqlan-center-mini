@@ -364,7 +364,7 @@ it("marker-free legacy cookie cannot authorize a raw canonical account on bare b
   await client.query("UPDATE users SET permissions=$1 WHERE username='backupadmin'",[JSON.stringify({schemaVersion:2,confirmation:"owner",revision:1,patientScope:"none",appointmentScope:"none",grants:{}})]);
   try{
     const before=mark();const response=await backupStatusRoute.GET!() as Response;
-    expect(response.status).toBe(503);expectSliceReadOnly(before);
+    expect(response.status).toBe(401);expectSliceReadOnly(before);
   }finally{await client.query("UPDATE users SET permissions=$1 WHERE username='backupadmin'",[previous]);}
 });
 

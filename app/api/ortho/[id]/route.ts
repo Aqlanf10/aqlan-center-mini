@@ -11,6 +11,7 @@ import { PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { evaluateOrthoPermission, NO_STORE_HEADERS, orthoForbiddenResponse } from "@/lib/ortho-privacy-server";
 
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { canonicalPatientReadFailure, NO_STORE } from "@/lib/canonical-patient-http";
@@ -142,6 +143,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
       if (!Object.prototype.hasOwnProperty.call(PHASE_LABEL, source.phase)) {
         return NextResponse.json({ message: "مرحلة غير معروفة." }, { status: 400 });
       }
+      if (session.role !== "admin" && session.role !== "doctor") {
+        return orthoForbiddenResponse("تغيير مرحلة علاج التقويم مقتصر على الإدارة والطبيب المعالج.");
+      }
+      const phaseGate = await evaluateOrthoPermission(
+        session,
+        { permission: "records.edit", section: "plan" },
+        { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
+      );
+      if (!phaseGate.allowed) {
+        return orthoForbiddenResponse("غير مصرّح لك بتغيير مرحلة هذه الحالة التقويمية.");
+      }
       const changed = await setOrthoPhase(caseId, source.phase as keyof typeof PHASE_LABEL);
       if (!changed) return NextResponse.json({ message: "الحالة مغلقة أو غير موجودة." }, { status: 409 });
       return NextResponse.json({ ok: true });
@@ -150,6 +162,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     if (typeof source.retainer === "string") {
       if (!Object.prototype.hasOwnProperty.call(RETAINER_LABEL, source.retainer)) {
         return NextResponse.json({ message: "نوع مثبّت غير معروف." }, { status: 400 });
+      }
+      if (session.role !== "admin" && session.role !== "doctor") {
+        return orthoForbiddenResponse("تسجيل تسليم المثبّت مقتصر على الإدارة والطبيب المعالج.");
+      }
+      const retainerGate = await evaluateOrthoPermission(
+        session,
+        { permission: "records.edit", section: "retention" },
+        { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
+      );
+      if (!retainerGate.allowed) {
+        return orthoForbiddenResponse("غير مصرّح لك بتسجيل تسليم المثبّت لهذه الحالة.");
       }
       const explicitOn = typeof source.retainerOn === "string" && DATE_PATTERN.test(source.retainerOn)
         ? source.retainerOn : null;
@@ -164,6 +187,17 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
     }
 
     if (source.status === "completed" || source.status === "discontinued") {
+      if (session.role !== "admin" && session.role !== "doctor") {
+        return orthoForbiddenResponse("إغلاق أو إيقاف حالة التقويم مقتصر على الإدارة والطبيب المعالج.");
+      }
+      const closeGate = await evaluateOrthoPermission(
+        session,
+        { anyOfPermissions: ["plan.approve", "sessions.approve"] },
+        { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
+      );
+      if (!closeGate.allowed) {
+        return orthoForbiddenResponse("غير مصرّح لك بإغلاق أو إيقاف هذه الحالة التقويمية.");
+      }
       const closed = await closeOrthoCase({
         id: caseId,
         status: source.status,
@@ -195,14 +229,30 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const found = await getOrthoCase(caseId, today);
-  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404 });
+  if (!found) return NextResponse.json({ message: "الحالة غير موجودة." }, { status: 404, headers: NO_STORE_HEADERS });
   if (!(await canAccessPatient(session, found.patientId))) {
     return forbidden("غير مصرّح لك بالاطلاع على هذه الحالة.");
   }
-  const photosVisible = await canAccessPatient(session, found.patientId, "canViewXrays");
-  return NextResponse.json({
-    ...found,
-    photosVisible,
-    adjustments: found.adjustments.map((entry) => ({ ...entry, photos: photosVisible ? entry.photos : [] })),
-  });
+  const readGate = await evaluateOrthoPermission(
+    session,
+    { permission: "records.read" },
+    { patientId: found.patientId, orthoCaseId: caseId, doctorPartyId: found.responsibleDoctorId ?? null },
+  );
+  if (!readGate.allowed) {
+    return orthoForbiddenResponse("غير مصرّح لك بعرض تفاصيل هذه الحالة التقويمية.");
+  }
+  const legacyXray = await canAccessPatient(session, found.patientId, "canViewXrays");
+  const photosVisible = Boolean(
+    legacyXray &&
+    readGate.access?.permissions["photos.view"] &&
+    readGate.access?.fields.previousPhotos,
+  );
+  return NextResponse.json(
+    {
+      ...found,
+      photosVisible,
+      adjustments: found.adjustments.map((entry) => ({ ...entry, photos: photosVisible ? entry.photos : [] })),
+    },
+    { headers: NO_STORE_HEADERS },
+  );
 }
