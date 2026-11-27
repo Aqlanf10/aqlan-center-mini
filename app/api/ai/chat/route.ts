@@ -217,7 +217,8 @@ export async function POST(request: Request) {
     }
     return replyWithAudit(simpleReply(external.content.trim(), "administrative_template", external.model, "external_ai"), started, user, session);
   }
-  const doctorPartyId = user.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+  // The freshly loaded account is authoritative; an unlinked doctor must not inherit a stale session party.
+  const doctorPartyId = user.partyId ?? null;
   const todayISO = await dbTodayISO().catch(() => new Date().toISOString().slice(0, 10));
   const isDbConnected = isDatabaseOnline();
 
@@ -227,7 +228,7 @@ export async function POST(request: Request) {
   let droppedPatientContext = false;
   if (typeof source.conversationPatientId === "number" && source.conversationPatientId > 0) {
     const allowed = isDbConnected
-      ? await canAccessPatient(session, source.conversationPatientId).catch(() => false)
+      ? await canAccessPatient({ ...session, partyId: doctorPartyId }, source.conversationPatientId).catch(() => false)
       : false; /* لا يُعتمد سياق مريض بلا تحقق من قاعدة البيانات */
     if (allowed) {
       conversationPatientId = source.conversationPatientId;
