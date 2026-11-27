@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
-  session: vi.fn(), settings: vi.fn(), user: vi.fn(), ai: vi.fn(), audit: vi.fn(),
+  session: vi.fn(), settings: vi.fn(), master: vi.fn(), user: vi.fn(), ai: vi.fn(), audit: vi.fn(),
   names: vi.fn(), process: vi.fn(), verify: vi.fn(), execute: vi.fn(), search: vi.fn(), access: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: m.session }));
@@ -11,7 +11,7 @@ vi.mock("@/lib/db", () => ({
 }));
 vi.mock("@/lib/assistant-mode-settings", () => ({ readAssistantControlSettings: m.settings }));
 vi.mock("@/lib/security-rate-limit", () => ({ consumeSecurityLimit: async () => ({ allowed: true }) }));
-vi.mock("@/lib/ai", () => ({ getAiSettings: async () => ({ enabled: true, hasKey: true }), aiChat: m.ai }));
+vi.mock("@/lib/ai", () => ({ getAiSettings: m.master, aiChat: m.ai }));
 vi.mock("@/lib/reports", () => ({ dbTodayISO: async () => "2026-11-27" }));
 vi.mock("@/lib/assistant-engine", () => ({ detectPromptInjection: () => false, processAssistantQuery: m.process }));
 vi.mock("@/lib/ai-confirmation", () => ({ verifyToolConfirmation: m.verify }));
@@ -30,6 +30,7 @@ beforeEach(() => {
   m.session.mockResolvedValue({ userId: 22, username: "synthetic-admin", role: "admin" });
   m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", isActive: true, permissions: { canUseAiChat: true } });
   m.settings.mockResolvedValue({});
+  m.master.mockResolvedValue({ enabled: true, hasKey: true });
   m.names.mockResolvedValue(new Set<string>());
   m.ai.mockResolvedValue({ ok: true, content: "مسودة عامة.", model: "synthetic-cloud" });
   m.process.mockResolvedValue({ answer: "محلي", intent: "general_clinical", toolsUsed: [], sourceType: "internal_engine", model: "synthetic-local" });
@@ -100,6 +101,22 @@ describe("synthetic assistant mode matrix", () => {
     expect((await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }))).status).toBe(503);
     expect(m.ai).not.toHaveBeenCalled();
     expect(m.process).not.toHaveBeenCalled();
+  });
+  it.each(["disabled", "unreadable"])("blocks a previously signed appointment when the master switch is %s", async mode => {
+    if (mode === "disabled") m.master.mockResolvedValue({ enabled: false, hasKey: true });
+    else m.master.mockRejectedValue(new Error("synthetic master settings unavailable"));
+    m.verify.mockReturnValue({ userId: 22, tool: "book_appointment", params: { patientId: 303 } });
+    expect((await confirmation(make({ token: "synthetic-signed-preview" }))).status).toBe(503);
+    expect(m.master).toHaveBeenCalledOnce();
+    expect(m.execute).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
+  it("allows the authorized local confirmation without a cloud key when both switches are on", async () => {
+    m.master.mockResolvedValue({ enabled: true, hasKey: false });
+    m.verify.mockReturnValue({ userId: 22, tool: "book_appointment", params: { patientId: 303 } });
+    m.execute.mockResolvedValue({ success: true, textSummary: "synthetic success" });
+    expect((await confirmation(make({ token: "synthetic-signed-preview" }))).status).toBe(200);
+    expect(m.execute).toHaveBeenCalledOnce();
   });
   it("stops an existing appointment confirmation when the internal assistant is switched off", async () => {
     m.settings.mockResolvedValue({ "ai.internal_assistant": "false" });
