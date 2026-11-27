@@ -6,7 +6,7 @@ import { reserveRestoredNumber } from "../lib/restore/numbering-reservation";
 const binding = { lineage: "synthetic_lineage_001", generation: "synthetic_generation_002" };
 const archive = { prefix: "P", allocatedThrough: 7027n, historicalThrough: 7027n,
   pendingNext: null, historyComplete: true, revision: "synthetic-r1" };
-function fixture(options: { generation?: string; watermark?: unknown; beginLost?: boolean; beginUnexpected?: boolean; rollbackLost?: boolean; rollbackUnexpected?: boolean; commitLost?: boolean; commitRollback?: boolean; missing?: boolean; conflict?: boolean } = {}) {
+function fixture(options: { generation?: string; watermark?: unknown; beginLost?: boolean; beginUnexpected?: boolean; durabilityLost?: boolean; durabilityUnexpected?: boolean; rollbackLost?: boolean; rollbackUnexpected?: boolean; commitLost?: boolean; commitRollback?: boolean; missing?: boolean; conflict?: boolean } = {}) {
   const calls: Array<{ sql: string; args?: unknown[] }> = [];
   const release = vi.fn();
   const query = vi.fn(async (sql: string, args?: unknown[]) => {
@@ -14,6 +14,10 @@ function fixture(options: { generation?: string; watermark?: unknown; beginLost?
     if (sql === "BEGIN") {
       if (options.beginLost) throw new Error("synthetic lost BEGIN response");
       return { command: options.beginUnexpected ? "SELECT" : "BEGIN" };
+    }
+    if (sql === "SET LOCAL synchronous_commit = on") {
+      if (options.durabilityLost) throw new Error("synthetic lost SET response");
+      return { command: options.durabilityUnexpected ? "SELECT" : "SET" };
     }
     if (sql === "ROLLBACK") {
       if (options.rollbackLost) throw new Error("synthetic lost ROLLBACK response");
@@ -87,6 +91,15 @@ describe("independent PG reservation SQL protocol (mock, no database)", () => {
     expect(f.calls.some(c => c.sql.includes("SELECT generation"))).toBe(false);
     expect(f.calls.some(c => c.sql === "COMMIT")).toBe(false);
     expect(f.release).toHaveBeenCalledWith(true);
+  });
+  it.each([{ durabilityLost: true }, { durabilityUnexpected: true }])("fails closed before admission if durability is not confirmed: %j", async options => {
+    const f = fixture(options);
+    expect(await reserveRestoredNumber(archive, binding, f.backend))
+      .toEqual({ ok: false, reason: "watermark-reservation-unconfirmed" });
+    expect(f.calls.some(c => c.sql.includes("SELECT generation"))).toBe(false);
+    expect(f.calls.some(c => c.sql.startsWith("UPDATE") || c.sql === "COMMIT")).toBe(false);
+    expect(f.calls.at(-1)?.sql).toBe("ROLLBACK");
+    expect(f.release).toHaveBeenCalledWith(false);
   });
   it.each([{ rollbackLost: true }, { rollbackUnexpected: true }])("discards the connection if ROLLBACK is not confirmed: %j", async options => {
     const f = fixture({ ...options, generation: "synthetic_generation_001" });
