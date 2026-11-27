@@ -6,7 +6,7 @@ import { reserveRestoredNumber } from "../lib/restore/numbering-reservation";
 const binding = { lineage: "synthetic_lineage_001", generation: "synthetic_generation_002" };
 const archive = { prefix: "P", allocatedThrough: 7027n, historicalThrough: 7027n,
   pendingNext: null, historyComplete: true, revision: "synthetic-r1" };
-function fixture(options: { generation?: string; watermark?: unknown; beginLost?: boolean; beginUnexpected?: boolean; durabilityLost?: boolean; durabilityUnexpected?: boolean; rollbackLost?: boolean; rollbackUnexpected?: boolean; commitLost?: boolean; commitRollback?: boolean; missing?: boolean; conflict?: boolean; secondPrefixReadLost?: boolean; updateLost?: boolean } = {}) {
+function fixture(options: { generation?: string; watermark?: unknown; beginLost?: boolean; beginUnexpected?: boolean; durabilityLost?: boolean; durabilityUnexpected?: boolean; rollbackLost?: boolean; rollbackUnexpected?: boolean; commitLost?: boolean; commitRollback?: boolean; missing?: boolean; conflict?: boolean; secondPrefixReadLost?: boolean; updateLost?: boolean; updateCommand?: string; updateRowCount?: number | null } = {}) {
   const calls: Array<{ sql: string; args?: unknown[] }> = [];
   const release = vi.fn();
   const query = vi.fn(async (sql: string, args?: unknown[]) => {
@@ -30,7 +30,7 @@ function fixture(options: { generation?: string; watermark?: unknown; beginLost?
     }
     if (sql.startsWith("UPDATE")) {
       if (options.updateLost) throw new Error("synthetic lost UPDATE response");
-      return { rowCount: options.conflict ? 0 : 1 };
+      return { command: options.updateCommand ?? "UPDATE", rowCount: options.updateRowCount === undefined ? (options.conflict ? 0 : 1) : options.updateRowCount };
     }
     if (sql === "COMMIT") {
       if (options.commitLost) throw new Error("synthetic lost response");
@@ -79,6 +79,18 @@ describe("independent PG reservation SQL protocol (mock, no database)", () => {
     expect(f.calls.at(-1)?.sql).toBe("ROLLBACK");
     expect(f.release).toHaveBeenCalledWith(false);
   });
+  it.each([{ updateCommand: "SELECT" }, { updateRowCount: 2 }, { updateRowCount: null }])(
+    "rejects ambiguous UPDATE acknowledgement even if caught: %j", async options => {
+      const f = fixture(options);
+      await expect(f.backend.transaction(binding, async tx => {
+        const witness = await tx.readFresh("P");
+        if (!witness) throw new Error("missing synthetic witness");
+        await expect(tx.advance(witness, 7030n)).rejects.toThrow();
+        return "must not escape";
+      })).rejects.toThrow("Authority advance not confirmed");
+      expect(f.calls.some(c => c.sql === "COMMIT")).toBe(false);
+      expect(f.calls.at(-1)?.sql).toBe("ROLLBACK");
+    });
   it("does not retry an unsuccessful CAS in the same transaction", async () => {
     const f = fixture({ conflict: true });
     await f.backend.transaction(binding, async tx => {
