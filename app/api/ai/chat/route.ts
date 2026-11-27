@@ -212,7 +212,7 @@ export async function POST(request: Request) {
   if (typeof source.conversationPatientId === "number" && source.conversationPatientId > 0) {
     const allowed = isDbConnected
       ? await canAccessPatient(session, source.conversationPatientId).catch(() => false)
-      : true; /* بلا قاعدة بيانات لا ملفات تُفتح أصلًا */
+      : false; /* لا يُعتمد سياق مريض بلا تحقق من قاعدة البيانات */
     if (allowed) {
       conversationPatientId = source.conversationPatientId;
     } else {
@@ -285,7 +285,9 @@ export async function POST(request: Request) {
           : "الاستشارة السريرية النصية (دوائية/علاجية) متاحة للحسابات ذات الهوية السريرية — الرد أعلاه من المحرك المحلي ضمن صلاحياتك الإدارية.",
       ],
     };
-  } else if (plan.kind === "clinical" || plan.kind === "administrative") {
+  } else if (!droppedPatientContext && (plan.kind === "clinical" ||
+    (plan.kind === "administrative" && conversationPatientId === null))) {
+    // Never export a rejected/unverified patient context, or patient-linked administrative text.
     try {
       // Both cloud paths must mask registered names, including clinical history.
       // A failed name lookup must prevent egress; the catch below keeps the local reply.
