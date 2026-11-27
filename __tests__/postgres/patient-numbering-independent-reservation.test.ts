@@ -118,6 +118,40 @@ describe("independent numbering reservation: real PostgreSQL, synthetic only", (
     expect(await read(binding.lineage)).toBe("7031");
   });
 
+  it("rolls back a real UPDATE whose acknowledgement is lost even if the callback catches it", async () => {
+    const binding = await seed("synthetic_lineage_update_loss", "7029");
+    const lostResponsePool = {
+      async connect() {
+        const client = await pool.connect();
+        return {
+          async query(sql: string, args?: unknown[]) {
+            const result = await client.query(sql, args);
+            if (sql.startsWith("UPDATE")) {
+              expect(result.command).toBe("UPDATE");
+              expect(result.rowCount).toBe(1);
+              throw new Error("synthetic lost update acknowledgement");
+            }
+            return result;
+          },
+          release(discard?: boolean) { client.release(discard); },
+        };
+      },
+    } as unknown as Pick<Pool, "connect">;
+    const lost = createIndependentPgReservationBackend(lostResponsePool, schema);
+    await expect(lost.transaction(binding, async tx => {
+      const witness = await tx.readFresh("P");
+      if (!witness) throw new Error("missing witness");
+      await expect(tx.advance(witness, 7030n)).rejects.toThrow("synthetic lost update acknowledgement");
+      return "must not escape";
+    })).rejects.toThrow("Authority advance not confirmed");
+    // The UPDATE reached PostgreSQL, but the adapter must roll it back rather
+    // than expose a reservation. A separate pool sees only the committed floor.
+    expect(await read(binding.lineage)).toBe("7029");
+    expect(await reserveRestoredNumber(archive, binding, other))
+      .toEqual({ ok: true, reserved: "7030", prefix: "P" });
+    expect(await read(binding.lineage)).toBe("7030");
+  });
+
   it("rejects the retired generation and preserves the watermark on replacement", async () => {
     const binding = await seed("synthetic_lineage_generation", "7029");
     expect((await reserveRestoredNumber(archive,binding,backend)).ok).toBe(true);
