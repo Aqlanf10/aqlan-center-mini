@@ -32,11 +32,11 @@ export function validateSurvivingNumberedFiles(
   const aliasOwners = new Map(state.retiredAliases.map(row => [row.number[0] + "-" + BigInt(row.number.slice(2)), row.patientId]));
   for (const row of files) {
     const parsed = typeof row.number === "string" ? parseCanonicalPatientNumber(row.number) : null;
-    if (!parsed || typeof row.patientId !== "string" || !/^[1-9][0-9]{0,18}$/.test(row.patientId)) {
+    if (!parsed || !consumed.has(parsed.prefix) || typeof row.patientId !== "string" || !/^[1-9][0-9]{0,18}$/.test(row.patientId)) {
       return { ok: false, reason: "ambiguous-patient-identifier" };
     }
-    const high = consumed.get(parsed.prefix);
-    if (high === undefined || parsed.number > high) {
+    const high = consumed.get(parsed.prefix)!;
+    if (parsed.number > high) {
       return { ok: false, reason: "patient-number-beyond-proven-counter" };
     }
     const aliasOwner = aliasOwners.get(parsed.prefix + "-" + parsed.number);

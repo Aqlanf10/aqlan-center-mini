@@ -3,8 +3,8 @@
 ## 1. ملخص حالة التسليم
 
 - **المستودع الأساسي**: `https://github.com/Aqlanf10/aqlan-center-mini`
-- **فرع التكامل الشامل المرفوع للمراجعة**: `feat/master-governance-ortho-integration` (الكود عند `ac073ab6` + التزام تحديث وثائق التسليم أعلاه).
-- **فرع التقويم المستقل المحدّث**: `feat/aqlan-advanced-ortho-workspace` (`8316c1d6` — يتضمن إصلاح معيار ECMA-376 الكامل لملفات `PPTX`).
+- **فرع التكامل الشامل المرفوع للمراجعة**: `feat/master-governance-ortho-integration` (شامل إغلاق ملاحظات `ESLint 10` واختبارات تكامل PostgreSQL 18 على GitHub Actions CI).
+- **فرع التقويم المستقل المحدّث**: `feat/aqlan-advanced-ortho-workspace` (شامل معيار ECMA-376 الكامل لملفات `PPTX` وتوافق `ESLint` واختبارات التكامل على CI).
 - **حالة الإنتاج وStaging**:
   - **لم يتم الدمج في `main`**.
   - **لم يتم النشر على Production أو لمس بيانات أو أسرار العيادة الفعلية**.

@@ -88,18 +88,6 @@ export const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({
     setState(prev);
   };
 
-  // Render preview canvas
-  useEffect(() => {
-    if (!open || !media || collageMode) return;
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = media.originalUrl;
-    img.onload = () => {
-      imgRef.current = img;
-      drawCanvas(img);
-    };
-  }, [open, media, state, zoom, cropRatio, collageMode]);
-
   const drawCanvas = (img: HTMLImageElement) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -186,6 +174,18 @@ export const PhotoEditorModal: React.FC<PhotoEditorModalProps> = ({
       ctx.restore();
     }
   };
+
+  // Render preview canvas
+  useEffect(() => {
+    if (!open || !media || collageMode) return;
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = media.originalUrl;
+    img.onload = () => {
+      imgRef.current = img;
+      drawCanvas(img);
+    };
+  }, [open, media, state, zoom, cropRatio, collageMode]);
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (tool === 'select' || !canvasRef.current) return;

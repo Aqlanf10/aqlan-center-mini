@@ -7,7 +7,13 @@ import { openBackupTimestampFixture } from "./_backup-timestamp-fixture";
 const context = vi.hoisted(() => ({ username: "syn-expense-key-admin", role: "admin" }));
 vi.mock("server-only", () => ({}));
 vi.mock("next/headers", () => ({ cookies: async () => ({ get: () => undefined }), headers: async () => new Headers() }));
-vi.mock("@/lib/session", () => ({ requireSession: async () => ({ username: context.username, role: context.role }) }));
+vi.mock("@/lib/session", () => ({
+  requireSession: async () => ({
+    username: context.username,
+    role: context.role,
+    ...(context.role === "cashier" ? { financeAccess: { createExpenses: true } } : {}),
+  }),
+}));
 assertRealPostgresUrl(); stubPostgresEnv();
 const owned = await openBackupTimestampFixture(process.env);
 process.env.DATABASE_URL = owned.source.options.connectionString!;
@@ -105,7 +111,7 @@ describe("the same key with a different request", () => {
     const payload = body();
     expect((await send(payload, "syn-expense-other-actor-1")).status).toBe(201);
     const before = await footprint();
-    context.username = "syn-expense-key-reception"; context.role = "reception";
+    context.username = "syn-expense-key-cashier"; context.role = "cashier";
     try {
       const response = await send(payload, "syn-expense-other-actor-1");
       expect(response.status).toBe(409);

@@ -38,6 +38,7 @@ beforeAll(async () => {
   fx = await openCanonicalInventoryDatabase(db, ACCOUNTS, "owner");
   mine = (await fx.pool.query<{ id: number }>("INSERT INTO patients(patient_number,full_name,phone,primary_doctor_id) VALUES('SYN-M-1','SYN Moves 1','0500000000',$1) RETURNING id", [fx.parties.doctor!])).rows[0].id;
   await setting("ops.require_clearance_before_call", "false");
+  await setting("clinic.chairs", "10");
 }, 180_000);
 afterAll(async () => { await fx?.close(); });
 

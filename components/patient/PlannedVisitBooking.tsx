@@ -34,6 +34,7 @@ export function PlannedVisitBooking({
   const [scheduleBusy, setScheduleBusy] = useState(false);
   const [rebookReason, setRebookReason] = useState("");
   const [rebookUncertain, setRebookUncertain] = useState(false);
+  const [rebookVisitId, setRebookVisitId] = useState<number | null>(null);
   const [scheduleError, setScheduleError] = useState<{ field?: "date" | "time" | "reason"; text: string } | null>(null);
   const scheduleInFlight = useRef(false);
   const rebookAttempt = useRef<{ plannedVisitId: number; body: string; uncertain: boolean } | null>(null);
@@ -41,13 +42,11 @@ export function PlannedVisitBooking({
   const timeField = useRef<HTMLInputElement>(null);
   const reasonField = useRef<HTMLTextAreaElement>(null);
   const lifetime = useRef({ patientId, active: true });
-  if (lifetime.current.patientId !== patientId) {
-    lifetime.current.active = false;
-    lifetime.current = { patientId, active: true };
-  }
   useEffect(() => {
-    const owner = lifetime.current;
-    owner.active = true;
+    const owner = { patientId, active: true };
+    lifetime.current.active = false;
+    lifetime.current = owner;
+    setRebookVisitId(null);
     return () => {
       owner.active = false;
     };
@@ -102,6 +101,7 @@ export function PlannedVisitBooking({
           requestId: crypto.randomUUID(),
         }),
       };
+      setRebookVisitId(visit.id);
     }
     const attempt = rebookAttempt.current!;
     const owner = lifetime.current;
@@ -128,6 +128,7 @@ export function PlannedVisitBooking({
       }
       if (response.ok && Number.isSafeInteger(payload?.appointmentId) && payload.appointmentId > 0) {
         rebookAttempt.current = null;
+        setRebookVisitId(null);
         setRebookUncertain(false);
         setScheduleFor(null);
         setMessage("تمت إعادة حجز الجلسة. بقي الموعد السابق وحالته محفوظين في السجل.");
@@ -136,6 +137,7 @@ export function PlannedVisitBooking({
       }
       if (!response.ok && response.status < 500 && !attempt.uncertain) {
         rebookAttempt.current = null;
+        setRebookVisitId(null);
         setScheduleError({ text: payload?.message ?? "لم تُقبل إعادة الحجز. راجع الموعد والصلاحية ثم حاول مجددًا." });
         return;
       }
@@ -222,7 +224,7 @@ export function PlannedVisitBooking({
           <ul className="space-y-2">
             {summary.plannedVisits.map((visit) => {
               const terminalAppointment = visit.appointmentStatus === "no_show" || visit.appointmentStatus === "cancelled";
-              const isRebooking = terminalAppointment || rebookAttempt.current?.plannedVisitId === visit.id;
+              const isRebooking = terminalAppointment || rebookVisitId === visit.id;
               const errorId = `planned-visit-${visit.id}-error`;
               const historyId = `planned-visit-${visit.id}-history`;
               return (

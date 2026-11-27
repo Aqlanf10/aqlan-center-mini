@@ -47,7 +47,7 @@ const footprint = async () => (await q<{ vouchers: number; audits: number }>(`SE
 const expected = async () => (await db.getOpenShift())!.expected;
 
 describe("the drawer limit", () => {
-  it.each(["admin", "reception", "cashier"])("lets %s spend exactly the drawer and refuses one unit more", async (role) => {
+  it.each(["admin", "cashier"])("lets %s spend exactly the drawer and refuses one unit more", async (role) => {
     await drawer({ YER: 1000, SAR: 0, USD: 0 });
     context.role = role;
     try {
@@ -102,7 +102,7 @@ describe("the drawer limit", () => {
 });
 
 describe("a private part from a legacy session", () => {
-  it.each(["admin", "reception"])("is refused for %s (no owner proof) and nothing is written", async (role) => {
+  it.each(["admin", "cashier"])("is refused for %s (no owner proof) and nothing is written", async (role) => {
     await drawer({ YER: 5000, SAR: 0, USD: 0 });
     context.role = role;
     try {

@@ -710,7 +710,8 @@ export default function OrthoPrivacySettingsPage() {
                 <h3 className="text-xs font-bold text-slate-700">القواعد النشطة والمؤقتة ({draft.rules.length})</h3>
                 <div className="space-y-2">
                   {draft.rules.map((r) => {
-                    const expired = Boolean(r.expiresAt && Date.parse(r.expiresAt) <= Date.now());
+                    const nowIso = new Date().toISOString();
+                    const expired = Boolean(r.expiresAt && r.expiresAt <= nowIso);
                     return (
                       <div
                         key={r.id}

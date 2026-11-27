@@ -45,7 +45,7 @@ beforeAll(async () => {
   await ensureSchema();
   // Native server stays UTC to exercise the real clinic-zone predicate.
   await q(postgresUrl ? "SET TIME ZONE 'UTC'" : "SET TIME ZONE 'Asia/Aden'");
-  const shift = Number((await q("INSERT INTO cashier_shifts(opened_by) VALUES ('synthetic legacy fixture') RETURNING id")).rows[0].id);
+  const shift = Number((await q("INSERT INTO cashier_shifts(opened_by, opening_yer) VALUES ('synthetic legacy fixture', 10000) RETURNING id")).rows[0].id);
   partyId = Number((await q("INSERT INTO parties(kind,name) VALUES ('supplier','مؤجر اصطناعي بعد تحديث الاسم') RETURNING id")).rows[0].id);
   const unrelatedParty = Number((await q("INSERT INTO parties(kind,name) VALUES ('supplier',$1) RETURNING id", [recordedName])).rows[0].id);
   const rentSeed = (await q("SELECT name, is_system FROM expense_categories WHERE key='rent'")).rows[0];
@@ -53,7 +53,7 @@ beforeAll(async () => {
   rentName = String(rentSeed.name);
   await q("INSERT INTO expense_categories(key,name) VALUES('syn_unrelated','بند مستقل اصطناعي')");
   const response = await createVoucher(new Request("https://synthetic.invalid/api/expenses", {
-    method: "POST", headers: { "content-type": "application/json" },
+    method: "POST", headers: { "content-type": "application/json", "Idempotency-Key": "syn-report-payee-legacy-01" },
     body: JSON.stringify({ category: "rent", payee: " " + recordedName + " ", partyId: String(partyId), amount: "1000", currency: "YER",
       prepayment: true, prepaymentReason: "دفعة مقدمة اختبارية لا تتصل بالعيادة" }),
   }));
@@ -137,9 +137,12 @@ describe("expense-payee report follows recorded voucher identity, not the memo",
   });
 });
 
+let voucherSeq = 0;
 async function sendVoucher(body: Record<string, unknown>) {
   return createVoucher(new Request("https://synthetic.invalid/api/expenses", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    method: "POST",
+    headers: { "content-type": "application/json", "Idempotency-Key": `syn-report-payee-legacy-send-${++voucherSeq}` },
+    body: JSON.stringify(body),
   }));
 }
 

@@ -205,12 +205,19 @@ jobs:
             if (Math.floor(Number(r.rows[0].server_version_num)/10000) !== 18) throw new Error('PostgreSQL 18 required');
           } finally { await c.end(); }
           NODE
+      - name: Install PostgreSQL 18 client tools for numbering dump/restore witness
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-common ca-certificates curl
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
       - name: PostgreSQL integration tests
         env:
           # Explicit fixture reset opt-in for this disposable service database only.
           # Standalone category-history proof and ordinary invocations refuse nonempty schemas.
           CATEGORY_HISTORY_CI_DISPOSABLE_FIXTURE: "1"
           MANUAL_CASH_CI_DISPOSABLE_FIXTURE: "1"
+          NUMBERING_PG_BIN: /usr/lib/postgresql/18/bin
         # P1.22: إلزامي لا اختياري — إثبات التزامن المالي (الإقرارات، الدفعات،
         # الردود، WAC) وتدريب الاستعادة على قاعدة حقيقية معزولة.
         run: npm run test:postgres

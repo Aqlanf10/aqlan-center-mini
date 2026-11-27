@@ -3982,8 +3982,7 @@ export async function commitPatientImport(input: {
 > {
   await ensureSchema();
   const source = await currentAuditSource();
-  return withIsolation(getPool(), "READ COMMITTED", async (client) => {
-    // Reclassify against the committed files after waiting for registration.
+  return withTransaction(getPool(), async (client) => {
     await client.query(PATIENT_IMPORT_EXCLUSIVE_LOCK_SQL);
     const previous = await client.query<{ created_at: Date; actor: string }>(
       `SELECT created_at, actor FROM audit_log
@@ -24899,35 +24898,34 @@ export async function recordDocument(input: {
   return withTransaction(getPool(), async (client) => recordDocumentOn(client, input));
 }
 
-type RecordDocumentInput = Parameters<typeof recordDocument>[0];
+type RecordDocumentInput = Parameters<typeof recordDocument>[0] & { deduplicateSha256?: boolean };
 
 /** The body of `recordDocument` on the caller's transaction (M2 slice 75): the
  * associations re-validated under their locks, then the row. */
 export async function recordDocumentOn(client: DbClient, input: RecordDocumentInput): Promise<PatientDocument> {
   await validateDocumentAssociations(input, client);
   const normalizedNote = input.note?.trim() || null;
-  // (TD-07) Atomic deduplication for orthodontic/session media retries:
-  // lock per-patient document namespace so concurrent or retried identical uploads
-  // for the same (patient_id, ortho_case_id, adjustment_id, sha256, stage, view, note)
-  // return the existing non-removed row without creating duplicate records.
-  if (input.orthoCaseId != null || input.adjustmentId != null) {
+  // (TD-07) Opt-in atomic deduplication for orthodontic camera/session retries:
+  if (input.deduplicateSha256 === true && (input.orthoCaseId != null || input.adjustmentId != null)) {
     await client.query("SELECT pg_advisory_xact_lock(91407, $1::int)", [input.patientId]);
     const existing = await client.query<DocumentRow>(
       `SELECT ${DOCUMENT_COLUMNS}
        FROM patient_documents
        WHERE patient_id = $1
          AND sha256 = $2
-         AND COALESCE(ortho_case_id, 0) = COALESCE($3::int, 0)
-         AND COALESCE(adjustment_id, 0) = COALESCE($4::int, 0)
-         AND COALESCE(photo_stage, '') = COALESCE($5::text, '')
-         AND COALESCE(photo_view, '') = COALESCE($6::text, '')
-         AND COALESCE(note, '') = COALESCE($7::text, '')
+         AND COALESCE(visit_id, 0) = COALESCE($3::int, 0)
+         AND COALESCE(ortho_case_id, 0) = COALESCE($4::int, 0)
+         AND COALESCE(adjustment_id, 0) = COALESCE($5::int, 0)
+         AND COALESCE(photo_stage, '') = COALESCE($6::text, '')
+         AND COALESCE(photo_view, '') = COALESCE($7::text, '')
+         AND COALESCE(note, '') = COALESCE($8::text, '')
          AND removed_at IS NULL
        ORDER BY id ASC
        LIMIT 1`,
       [
         input.patientId,
         input.sha256,
+        input.visitId ?? null,
         input.orthoCaseId ?? null,
         input.adjustmentId ?? null,
         input.photoStage ?? null,

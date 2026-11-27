@@ -71,7 +71,9 @@ it('rolls back every restored data row on a late SQL failure, keeping append-onl
   const parsed = parseTarBytes(gunzipSync(archive));
   const sql = Buffer.from(parsed.entries.get('database.sql')!.data).toString('utf8');
   expect(sql).toContain('COMMIT;');
-  const faultySql = Buffer.from(sql.replace(/COMMIT;\s*$/, 'SELECT 1 / 0;\nCOMMIT;\n'));
+  const faultySql = Buffer.from(
+    sql.replace(/(?:-- aqlan-patient-number-sequence-v1[^\n]*\n)?COMMIT;\s*$/, 'SELECT 1 / 0;\n$&'),
+  );
   const manifest = JSON.parse(Buffer.from(parsed.entries.get('manifest.json')!.data).toString('utf8'));
   manifest.databaseSha256 = createHash('sha256').update(faultySql).digest('hex');
   manifest.databaseBytes = faultySql.length;
