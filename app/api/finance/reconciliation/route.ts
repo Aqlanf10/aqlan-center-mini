@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CLINIC_TIME_ZONE, getOpenShift, listShifts, listShiftPayments, listShiftExpenses, shiftDrawerBreakdown } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { canViewMoney } from "@/lib/roles";
+import { canViewFinancialReports } from "@/lib/roles";
 import { type Currency, CLINIC_BASE_CURRENCY } from "@/lib/money";
 
 export async function GET(req: NextRequest) {
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "غير مصرح." }, { status: 401 });
-  if (!canViewMoney(session.role)) {
-    return NextResponse.json({ message: "المطابقة المالية للإدارة والاستقبال المصرح لهما فقط." }, { status: 403 });
+  // P1: reconcile 30 historical shifts and clinic-wide cash/expense totals are administrative data.
+  // Deny before calling any database readers; patient-specific collection remains in /api/payments.
+  if (!canViewFinancialReports(session.role)) {
+    return NextResponse.json({ message: "المطابقة المالية للإدارة والمحاسب المخوّل فقط." }, { status: 403 });
   }
 
   try {
