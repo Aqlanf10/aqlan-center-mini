@@ -6,7 +6,7 @@ import { reserveRestoredNumber } from "../lib/restore/numbering-reservation";
 const binding = { lineage: "synthetic_lineage_001", generation: "synthetic_generation_002" };
 const archive = { prefix: "P", allocatedThrough: 7027n, historicalThrough: 7027n,
   pendingNext: null, historyComplete: true, revision: "synthetic-r1" };
-function fixture(options: { generation?: string; watermark?: unknown; beginLost?: boolean; beginUnexpected?: boolean; durabilityLost?: boolean; durabilityUnexpected?: boolean; rollbackLost?: boolean; rollbackUnexpected?: boolean; commitLost?: boolean; commitRollback?: boolean; missing?: boolean; conflict?: boolean; secondPrefixReadLost?: boolean } = {}) {
+function fixture(options: { generation?: string; watermark?: unknown; beginLost?: boolean; beginUnexpected?: boolean; durabilityLost?: boolean; durabilityUnexpected?: boolean; rollbackLost?: boolean; rollbackUnexpected?: boolean; commitLost?: boolean; commitRollback?: boolean; missing?: boolean; conflict?: boolean; secondPrefixReadLost?: boolean; updateLost?: boolean } = {}) {
   const calls: Array<{ sql: string; args?: unknown[] }> = [];
   const release = vi.fn();
   const query = vi.fn(async (sql: string, args?: unknown[]) => {
@@ -28,7 +28,10 @@ function fixture(options: { generation?: string; watermark?: unknown; beginLost?
       if (options.secondPrefixReadLost && args?.[1] === "Q") throw new Error("synthetic lost watermark read");
       return { rows: options.missing ? [] : [{ reserved_through: options.watermark === undefined ? "7029" : options.watermark }] };
     }
-    if (sql.startsWith("UPDATE")) return { rowCount: options.conflict ? 0 : 1 };
+    if (sql.startsWith("UPDATE")) {
+      if (options.updateLost) throw new Error("synthetic lost UPDATE response");
+      return { rowCount: options.conflict ? 0 : 1 };
+    }
     if (sql === "COMMIT") {
       if (options.commitLost) throw new Error("synthetic lost response");
       return { command: options.commitRollback ? "ROLLBACK" : "COMMIT" };
@@ -63,6 +66,18 @@ describe("independent PG reservation SQL protocol (mock, no database)", () => {
     expect(result).toEqual([true, false]);
     expect(f.calls.filter(c => c.sql.startsWith("UPDATE"))).toHaveLength(1);
     expect(f.calls.at(-1)?.sql).toBe("COMMIT");
+  });
+  it("rolls back even if a caller catches an unconfirmed watermark update", async () => {
+    const f = fixture({ updateLost: true });
+    await expect(f.backend.transaction(binding, async tx => {
+      const witness = await tx.readFresh("P");
+      if (!witness) throw new Error("missing synthetic witness");
+      await expect(tx.advance(witness, 7030n)).rejects.toThrow("synthetic lost UPDATE response");
+      return "must not be exposed";
+    })).rejects.toThrow("Authority advance not confirmed");
+    expect(f.calls.some(c => c.sql === "COMMIT")).toBe(false);
+    expect(f.calls.at(-1)?.sql).toBe("ROLLBACK");
+    expect(f.release).toHaveBeenCalledWith(false);
   });
   it("does not retry an unsuccessful CAS in the same transaction", async () => {
     const f = fixture({ conflict: true });
