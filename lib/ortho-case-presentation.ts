@@ -32,7 +32,7 @@ import { CLINIC_ZONE_FALLBACK } from "@/lib/clinicZone";
  */
 
 import { deflateRawSync } from "node:zlib";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { OrthoWorkspaceRecord } from "./ortho-workspace-types";
 import { computeBoltonAnalysis } from "./ortho-scientific-analyses";
 
@@ -1404,6 +1404,7 @@ function buildTableGraphicFrameXml(tbl: EmbeddedSlideTable, shapeId: number): st
   const rtlAttr = tbl.rtl ? ' rtl="1"' : ' rtl="0"';
   const algn = tbl.rtl ? "r" : "l";
   const sz = Math.round((tbl.fontSizePt ?? 11) * 100);
+  const totalGridW = tbl.colWidths.reduce((s, w) => s + w, 0) || tbl.cx;
   const gridCols = tbl.colWidths.map((w) => `<a:gridCol w="${w}"/>`).join("");
   const rowCount = Math.max(1, tbl.rows.length + 1);
   const rowH = Math.max(280000, Math.floor(tbl.cy / rowCount));
@@ -1413,7 +1414,7 @@ function buildTableGraphicFrameXml(tbl: EmbeddedSlideTable, shapeId: number): st
   const headerCells = tbl.headers
     .map(
       (h) =>
-        `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="${algn}"${rtlAttr}/><a:r><a:rPr lang="ar-SA" sz="${sz}" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(h)}</a:t></a:r></a:p></a:txBody><a:tcPr marL="70000" marR="70000" marT="45000" marB="45000" anchor="ctr">${cellBorder}<a:solidFill><a:srgbClr val="0D2137"/></a:solidFill></a:tcPr></a:tc>`,
+        `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="${algn}"${rtlAttr}/><a:r><a:rPr lang="ar-SA" sz="${sz}" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Arial"/><a:ea typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(h)}</a:t></a:r></a:p></a:txBody><a:tcPr marL="70000" marR="70000" marT="45000" marB="45000" anchor="ctr">${cellBorder}<a:solidFill><a:srgbClr val="0D2137"/></a:solidFill></a:tcPr></a:tc>`,
     )
     .join("");
 
@@ -1423,7 +1424,7 @@ function buildTableGraphicFrameXml(tbl: EmbeddedSlideTable, shapeId: number): st
       const cells = tbl.headers
         .map((_, cIdx) => {
           const val = row[cIdx] ?? "—";
-          return `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="${algn}"${rtlAttr}/><a:r><a:rPr lang="ar-SA" sz="${sz}" dirty="0"><a:solidFill><a:srgbClr val="0F172A"/></a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(val)}</a:t></a:r></a:p></a:txBody><a:tcPr marL="70000" marR="70000" marT="40000" marB="40000" anchor="ctr">${cellBorder}<a:solidFill><a:srgbClr val="${fill}"/></a:solidFill></a:tcPr></a:tc>`;
+          return `<a:tc><a:txBody><a:bodyPr/><a:lstStyle/><a:p><a:pPr algn="${algn}"${rtlAttr}/><a:r><a:rPr lang="ar-SA" sz="${sz}" dirty="0"><a:solidFill><a:srgbClr val="0F172A"/></a:solidFill><a:latin typeface="Arial"/><a:ea typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(val)}</a:t></a:r></a:p></a:txBody><a:tcPr marL="70000" marR="70000" marT="40000" marB="40000" anchor="ctr">${cellBorder}<a:solidFill><a:srgbClr val="${fill}"/></a:solidFill></a:tcPr></a:tc>`;
         })
         .join("");
       return `<a:tr h="${rowH}">${cells}</a:tr>`;
@@ -1432,10 +1433,10 @@ function buildTableGraphicFrameXml(tbl: EmbeddedSlideTable, shapeId: number): st
 
   return `<p:graphicFrame>
     <p:nvGraphicFramePr><p:cNvPr id="${shapeId}" name="Table${shapeId}"/><p:cNvGraphicFramePr><a:graphicFrameLocks noGrp="1"/></p:cNvGraphicFramePr><p:nvPr/></p:nvGraphicFramePr>
-    <p:xfrm><a:off x="${tbl.x}" y="${tbl.y}"/><a:ext cx="${tbl.cx}" cy="${tbl.cy}"/></p:xfrm>
+    <p:xfrm><a:off x="${tbl.x}" y="${tbl.y}"/><a:ext cx="${totalGridW}" cy="${tbl.cy}"/></p:xfrm>
     <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">
       <a:tbl>
-        <a:tblPr firstRow="1" bandRow="1"/>
+        <a:tblPr firstRow="1" bandRow="1"><a:tableStyleId>{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}</a:tableStyleId></a:tblPr>
         <a:tblGrid>${gridCols}</a:tblGrid>
         <a:tr h="${Math.max(340000, rowH)}">${headerCells}</a:tr>
         ${bodyRows}
@@ -1446,16 +1447,16 @@ function buildTableGraphicFrameXml(tbl: EmbeddedSlideTable, shapeId: number): st
 
 function buildCardShapeXml(card: EmbeddedSlideCard, shapeId: number): string {
   const rtl = card.rtl !== false;
-  const rtlAttr = rtl ? ' rtl="1" algn="r"' : ' rtl="0" algn="l"';
+  const rtlAttr = rtl ? ' algn="r" rtl="1"' : ' algn="l" rtl="0"';
   const sz = Math.round((card.fontSizePt ?? 14) * 100);
   const accent = card.accentHex || "1A3A5C";
   const titlePara = card.title
-    ? `<a:p><a:pPr${rtlAttr}><a:spcAft><a:spcPts val="800"/></a:spcAft><a:buNone/></a:pPr><a:r><a:rPr lang="ar-SA" sz="${sz + 200}" b="1" dirty="0"><a:solidFill><a:srgbClr val="${accent}"/></a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(card.title)}</a:t></a:r></a:p>`
+    ? `<a:p><a:pPr${rtlAttr}><a:spcAft><a:spcPts val="800"/></a:spcAft><a:buNone/></a:pPr><a:r><a:rPr lang="ar-SA" sz="${sz + 200}" b="1" dirty="0"><a:solidFill><a:srgbClr val="${accent}"/></a:solidFill><a:latin typeface="Arial"/><a:ea typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(card.title)}</a:t></a:r></a:p>`
     : "";
   const bodyParas = (card.bullets.length > 0 ? card.bullets : ["—"])
     .map(
       (b) =>
-        `<a:p><a:pPr${rtlAttr}><a:spcAft><a:spcPts val="600"/></a:spcAft><a:buNone/></a:pPr><a:r><a:rPr lang="ar-SA" sz="${sz}" dirty="0"><a:solidFill><a:srgbClr val="1E293B"/></a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>• ${xmlEscape(b)}</a:t></a:r></a:p>`,
+        `<a:p><a:pPr${rtlAttr}><a:spcAft><a:spcPts val="600"/></a:spcAft><a:buNone/></a:pPr><a:r><a:rPr lang="ar-SA" sz="${sz}" dirty="0"><a:solidFill><a:srgbClr val="1E293B"/></a:solidFill><a:latin typeface="Arial"/><a:ea typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>• ${xmlEscape(b)}</a:t></a:r></a:p>`,
     )
     .join("");
 
@@ -1488,14 +1489,14 @@ function buildPicShapeXml(img: EmbeddedSlideImage, rId: string, shapeId: number)
         <p:txBody>
           <a:bodyPr wrap="square" lIns="60000" rIns="60000" tIns="30000" bIns="30000" anchor="ctr"/>
           <a:lstStyle/>
-          <a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="ar-SA" sz="950" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(img.caption)}</a:t></a:r></a:p>
+          <a:p><a:pPr algn="ctr"/><a:r><a:rPr lang="ar-SA" sz="950" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Arial"/><a:ea typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(img.caption)}</a:t></a:r></a:p>
         </p:txBody>
       </p:sp>`
     : "";
 
   return `<p:pic>
     <p:nvPicPr><p:cNvPr id="${shapeId}" name="Img${shapeId}"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr/></p:nvPicPr>
-    <p:blipFill><a:blip r:embed="${rId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>
+    <p:blipFill><a:blip r:embed="${rId}"/><a:srcRect/><a:stretch><a:fillRect/></a:stretch></p:blipFill>
     <p:spPr>
       <a:xfrm><a:off x="${img.x}" y="${img.y}"/><a:ext cx="${img.cx}" cy="${img.cy}"/></a:xfrm>
       <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
@@ -1504,33 +1505,59 @@ function buildPicShapeXml(img: EmbeddedSlideImage, rId: string, shapeId: number)
   </p:pic>${captionShape}`;
 }
 
+function buildNineLevelsXml(opts: { sz: number; rtl: boolean; schemeClr?: string }): string {
+  const algn = opts.rtl ? "r" : "l";
+  const rtlBit = opts.rtl ? "1" : "0";
+  const clr = opts.schemeClr ?? "tx1";
+  const parts: string[] = [`<a:defPPr><a:defRPr lang="ar-SA"/></a:defPPr>`];
+  for (let lvl = 1; lvl <= 9; lvl++) {
+    const marL = (lvl - 1) * 457200;
+    parts.push(
+      `<a:lvl${lvl}pPr marL="${marL}" algn="${algn}" defTabSz="914400" rtl="${rtlBit}" eaLnBrk="1" latinLnBrk="0" hangingPunct="1"><a:defRPr sz="${opts.sz}" kern="1200"><a:solidFill><a:schemeClr val="${clr}"/></a:solidFill><a:latin typeface="+mn-lt"/><a:ea typeface="+mn-ea"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl${lvl}pPr>`,
+    );
+  }
+  return parts.join("");
+}
+
 function buildSlideXmlAndRels(
   slide: PresentationSlideContent,
   slideNum: number,
   totalSlides: number,
   mediaCollector: Array<{ fileName: string; bytes: Uint8Array }>,
+  mediaByDigest: Map<string, string>,
 ): { slideXml: string; relsXml: string } {
   const rtl = slide.rtl !== false;
-  const rtlAttr = rtl ? ' rtl="1" algn="r"' : ' rtl="0" algn="l"';
+  const rtlAttr = rtl ? ' algn="r" rtl="1"' : ' algn="l" rtl="0"';
   let shapeId = 10;
   const relEntries: string[] = [
     `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>`,
   ];
+  const slideRelByFile = new Map<string, string>();
+  let nextRelIdx = 2;
   const extraShapes: string[] = [];
 
-  // Render embedded images
+  // Render embedded images (deduplicated across the package by SHA-256)
   if (slide.images && slide.images.length > 0) {
-    slide.images.forEach((img, idx) => {
-      const mediaIdx = mediaCollector.length + 1;
-      const fileName = `image${mediaIdx}.${img.ext}`;
-      mediaCollector.push({ fileName, bytes: img.bytes });
-      const rId = `rId${idx + 2}`;
-      relEntries.push(
-        `<Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${fileName}"/>`,
-      );
+    for (const img of slide.images) {
+      const digest = `${img.ext}:${createHash("sha256").update(img.bytes).digest("hex")}`;
+      let fileName = mediaByDigest.get(digest);
+      if (!fileName) {
+        const mediaIdx = mediaCollector.length + 1;
+        fileName = `image${mediaIdx}.${img.ext}`;
+        mediaCollector.push({ fileName, bytes: img.bytes });
+        mediaByDigest.set(digest, fileName);
+      }
+      let rId = slideRelByFile.get(fileName);
+      if (!rId) {
+        rId = `rId${nextRelIdx++}`;
+        slideRelByFile.set(fileName, rId);
+        relEntries.push(
+          `<Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${fileName}"/>`,
+        );
+      }
       extraShapes.push(buildPicShapeXml(img, rId, shapeId));
       shapeId += 2;
-    });
+    }
   }
 
   // Render native tables
@@ -1586,8 +1613,8 @@ function buildSlideXmlAndRels(
         <p:txBody>
           <a:bodyPr wrap="square" lIns="340000" rIns="340000" tIns="140000" bIns="100000"/>
           <a:lstStyle/>
-          <a:p><a:pPr${rtlAttr}/><a:r><a:rPr lang="ar-SA" sz="2400" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(slide.titleAr)}</a:t></a:r></a:p>
-          <a:p><a:pPr${rtlAttr}/><a:r><a:rPr lang="ar-SA" sz="1250" dirty="0"><a:solidFill><a:srgbClr val="F5922E"/></a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(slide.subtitleAr)}  ·  ${xmlEscape(slide.approvalBadgeAr)}</a:t></a:r></a:p>
+          <a:p><a:pPr${rtlAttr}/><a:r><a:rPr lang="ar-SA" sz="2400" b="1" dirty="0"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Arial"/><a:ea typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(slide.titleAr)}</a:t></a:r></a:p>
+          <a:p><a:pPr${rtlAttr}/><a:r><a:rPr lang="ar-SA" sz="1250" dirty="0"><a:solidFill><a:srgbClr val="F5922E"/></a:solidFill><a:latin typeface="Arial"/><a:ea typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(slide.subtitleAr)}  ·  ${xmlEscape(slide.approvalBadgeAr)}</a:t></a:r></a:p>
         </p:txBody>
       </p:sp>
       <p:sp>
@@ -1598,7 +1625,6 @@ function buildSlideXmlAndRels(
           <a:solidFill><a:srgbClr val="F5922E"/></a:solidFill>
           <a:ln><a:noFill/></a:ln>
         </p:spPr>
-        <p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr lang="ar-SA"/></a:p></p:txBody>
       </p:sp>
       ${extraShapes.join("\n      ")}
       <p:sp>
@@ -1612,7 +1638,7 @@ function buildSlideXmlAndRels(
         <p:txBody>
           <a:bodyPr wrap="square"/>
           <a:lstStyle/>
-          <a:p><a:pPr${rtlAttr}/><a:r><a:rPr lang="ar-SA" sz="1000" dirty="0"><a:solidFill><a:srgbClr val="64748B"/></a:solidFill><a:latin typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(slide.footerAr)}  (${slideNum}/${totalSlides})</a:t></a:r></a:p>
+          <a:p><a:pPr${rtlAttr}/><a:r><a:rPr lang="ar-SA" sz="1000" dirty="0"><a:solidFill><a:srgbClr val="64748B"/></a:solidFill><a:latin typeface="Arial"/><a:ea typeface="Arial"/><a:cs typeface="Arial"/></a:rPr><a:t>${xmlEscape(slide.footerAr)}  (${slideNum}/${totalSlides})</a:t></a:r></a:p>
         </p:txBody>
       </p:sp>
     </p:spTree>
@@ -1692,8 +1718,9 @@ export function generateEditablePptxBytes(deck: PresentationDeck): Uint8Array {
         ];
 
   const mediaCollector: Array<{ fileName: string; bytes: Uint8Array }> = [];
+  const mediaByDigest = new Map<string, string>();
   const builtSlides = slides.map((slide, i) =>
-    buildSlideXmlAndRels(slide, i + 1, slides.length, mediaCollector),
+    buildSlideXmlAndRels(slide, i + 1, slides.length, mediaCollector, mediaByDigest),
   );
 
   const slideOverrides = slides
@@ -1714,9 +1741,14 @@ export function generateEditablePptxBytes(deck: PresentationDeck): Uint8Array {
     .map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 6}"/>`)
     .join("");
 
+  const slideTitlesVector = slides
+    .map((s, i) => `<vt:lpstr>${xmlEscape(s.titleAr || `Slide ${i + 1}`)}</vt:lpstr>`)
+    .join("");
+
   const isoNow = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   const safeTitle = xmlEscape(`عرض حالة تقويم — ${deck.displayPatientLabel}`);
   const safeCreator = xmlEscape(deck.clinicName);
+  const defaultRtl = slides[0]?.rtl !== false;
 
   const files: ZipEntryInput[] = [
     {
@@ -1765,12 +1797,33 @@ export function generateEditablePptxBytes(deck: PresentationDeck): Uint8Array {
       name: "docProps/app.xml",
       content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <TotalTime>0</TotalTime>
+  <Words>0</Words>
   <Application>Microsoft Office PowerPoint</Application>
-  <PresentationFormat>On-screen Show (16:9)</PresentationFormat>
+  <PresentationFormat>Widescreen</PresentationFormat>
+  <Paragraphs>0</Paragraphs>
   <Slides>${slides.length}</Slides>
   <Notes>0</Notes>
   <HiddenSlides>0</HiddenSlides>
+  <MMClips>0</MMClips>
   <ScaleCrop>false</ScaleCrop>
+  <HeadingPairs>
+    <vt:vector size="6" baseType="variant">
+      <vt:variant><vt:lpstr>Fonts Used</vt:lpstr></vt:variant>
+      <vt:variant><vt:i4>1</vt:i4></vt:variant>
+      <vt:variant><vt:lpstr>Theme</vt:lpstr></vt:variant>
+      <vt:variant><vt:i4>1</vt:i4></vt:variant>
+      <vt:variant><vt:lpstr>Slide Titles</vt:lpstr></vt:variant>
+      <vt:variant><vt:i4>${slides.length}</vt:i4></vt:variant>
+    </vt:vector>
+  </HeadingPairs>
+  <TitlesOfParts>
+    <vt:vector size="${slides.length + 2}" baseType="lpstr">
+      <vt:lpstr>Arial</vt:lpstr>
+      <vt:lpstr>AQLAN Ortho Theme</vt:lpstr>
+      ${slideTitlesVector}
+    </vt:vector>
+  </TitlesOfParts>
   <LinksUpToDate>false</LinksUpToDate>
   <SharedDoc>false</SharedDoc>
   <HyperlinksChanged>false</HyperlinksChanged>
@@ -1780,14 +1833,12 @@ export function generateEditablePptxBytes(deck: PresentationDeck): Uint8Array {
     {
       name: "ppt/presentation.xml",
       content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" saveSubsetFonts="1">
+<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" saveSubsetFonts="1" autoCompressPictures="0">
   <p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst>
   <p:sldIdLst>${slideIdLst}</p:sldIdLst>
   <p:sldSz cx="12192000" cy="6858000"/>
   <p:notesSz cx="6858000" cy="9144000"/>
-  <p:defaultTextStyle>
-    <a:lvl1pPr marL="0" algn="r" rtl="1"><a:defRPr sz="1800" kern="1200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr>
-  </p:defaultTextStyle>
+  <p:defaultTextStyle>${buildNineLevelsXml({ sz: 1800, rtl: defaultRtl })}</p:defaultTextStyle>
 </p:presentation>`,
     },
     {
@@ -1810,7 +1861,7 @@ export function generateEditablePptxBytes(deck: PresentationDeck): Uint8Array {
     {
       name: "ppt/viewProps.xml",
       content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<p:viewPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:normalViewPr horzBarState="maximized"><p:restoredLeft sz="15611"/><p:restoredTop sz="94610"/></p:normalViewPr><p:slideViewPr><p:cSldViewPr snapToGrid="0" snapToObjects="1"><p:cViewPr varScale="1"><p:scale><a:sx n="136" d="100"/><a:sy n="136" d="100"/></p:scale><p:origin x="216" y="312"/></p:cViewPr><p:guideLst/></p:cSldViewPr></p:slideViewPr><p:notesTextViewPr><p:cViewPr><p:scale><a:sx n="1" d="1"/><a:sy n="1" d="1"/></p:scale><p:origin x="0" y="0"/></p:cViewPr></p:notesTextViewPr><p:gridSpacing cx="76200" cy="76200"/></p:viewPr>`,
+<p:viewPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:normalViewPr horzBarState="maximized"><p:restoredLeft sz="15611" autoAdjust="0"/><p:restoredTop sz="94610" autoAdjust="0"/></p:normalViewPr><p:slideViewPr><p:cSldViewPr snapToGrid="0" snapToObjects="1"><p:cViewPr varScale="1"><p:scale><a:sx n="100" d="100"/><a:sy n="100" d="100"/></p:scale><p:origin x="0" y="0"/></p:cViewPr><p:guideLst/></p:cSldViewPr></p:slideViewPr><p:notesTextViewPr><p:cViewPr><p:scale><a:sx n="1" d="1"/><a:sy n="1" d="1"/></p:scale><p:origin x="0" y="0"/></p:cViewPr></p:notesTextViewPr><p:sorterViewPr><p:cViewPr><p:scale><a:sx n="100" d="100"/><a:sy n="100" d="100"/></p:scale><p:origin x="0" y="0"/></p:cViewPr></p:sorterViewPr><p:gridSpacing cx="76200" cy="76200"/></p:viewPr>`,
     },
     {
       name: "ppt/tableStyles.xml",
@@ -1835,9 +1886,9 @@ export function generateEditablePptxBytes(deck: PresentationDeck): Uint8Array {
   <p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>
   <p:sldLayoutIdLst><p:sldLayoutId id="2147483649" r:id="rId1"/></p:sldLayoutIdLst>
   <p:txStyles>
-    <p:titleStyle><a:lvl1pPr algn="r" rtl="1"><a:defRPr sz="3200"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mj-lt"/><a:cs typeface="+mj-cs"/></a:defRPr></a:lvl1pPr></p:titleStyle>
-    <p:bodyStyle><a:lvl1pPr algn="r" rtl="1"><a:defRPr sz="1800"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr></p:bodyStyle>
-    <p:otherStyle><a:lvl1pPr algn="r" rtl="1"><a:defRPr sz="1800"><a:solidFill><a:schemeClr val="tx1"/></a:solidFill><a:latin typeface="+mn-lt"/><a:cs typeface="+mn-cs"/></a:defRPr></a:lvl1pPr></p:otherStyle>
+    <p:titleStyle>${buildNineLevelsXml({ sz: 3200, rtl: defaultRtl })}</p:titleStyle>
+    <p:bodyStyle>${buildNineLevelsXml({ sz: 1800, rtl: defaultRtl })}</p:bodyStyle>
+    <p:otherStyle>${buildNineLevelsXml({ sz: 1800, rtl: defaultRtl })}</p:otherStyle>
   </p:txStyles>
 </p:sldMaster>`,
     },
@@ -1854,6 +1905,7 @@ export function generateEditablePptxBytes(deck: PresentationDeck): Uint8Array {
       content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank" preserve="1">
   <p:cSld name="Blank">
+    <p:bg><p:bgRef idx="1001"><a:schemeClr val="bg1"/></p:bgRef></p:bg>
     <p:spTree>
       <p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr>
       <p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>
