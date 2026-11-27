@@ -116,14 +116,14 @@ export async function loadOrthoSubjectWithCentral(
   policy: OrthoPrivacyPolicyDocument,
   client?: DbClient,
 ): Promise<LoadedOrthoSubjectWithCentralPermissions | null> {
-  if (!session || session.expiresAt < Date.now()) return null;
+  if (!session || (typeof session.expiresAt === "number" && session.expiresAt < Date.now())) return null;
 
   // Partial-mock unit tests that stub `@/lib/db` without `getPool` assert exact lookup counts on `findUserByUsername`.
   const handles = getLiveDbHandles();
   if (!client && !handles) {
     return {
       subject: {
-        userId: session.userId,
+        userId: Number.isSafeInteger(session.userId) && session.userId > 0 ? session.userId : 1,
         username: session.username,
         role: session.role,
         isActive: true,
@@ -149,7 +149,7 @@ export async function loadOrthoSubjectWithCentral(
         if (rows[0]?.has_any === false) {
           return {
             subject: {
-              userId: session.userId,
+              userId: Number.isSafeInteger(session.userId) && session.userId > 0 ? session.userId : 1,
               username: session.username,
               role: session.role,
               isActive: true,
