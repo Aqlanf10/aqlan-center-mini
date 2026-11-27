@@ -72,6 +72,19 @@ describe("independent PG reservation SQL protocol (mock, no database)", () => {
     });
     expect(f.calls.filter(c => c.sql.startsWith("UPDATE"))).toHaveLength(1);
   });
+  it("invalidates the earlier witness when another prefix is read", async () => {
+    const f = fixture();
+    await f.backend.transaction(binding, async tx => {
+      const first = await tx.readFresh("P");
+      const second = await tx.readFresh("Q");
+      if (!first || !second) throw new Error("missing synthetic witness");
+      expect(await tx.advance(first, 7030n)).toBe(false);
+      expect(await tx.advance(second, 7030n)).toBe(true);
+    });
+    const updates = f.calls.filter(c => c.sql.startsWith("UPDATE"));
+    expect(updates).toHaveLength(1);
+    expect(updates[0].args).toEqual([binding.lineage, "Q", "7030", "7029"]);
+  });
   it("rejects overlapping reads without changing the selected witness", async () => {
     const f = fixture();
     await f.backend.transaction(binding, async tx => {
