@@ -1,6 +1,8 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { caseSiteScope } from "@/lib/invoice-clinical-linkage";
+import type { AssessmentCase } from "@/lib/patient-workflow-cases";
 import { isClinicalSignResult } from "@/lib/clinical-sign-result";
 import { LegacyOnboardingChecklist } from "./LegacyOnboardingChecklist";
 import { OrthoPackageLink } from "./OrthoPackageLink";
@@ -388,8 +390,9 @@ function readCases(payload: unknown, patientId: number): OrthoCase[] {
   return list as OrthoCase[];
 }
 
-export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatmentEntry, onOpenAccount, onClinicalChange, onNavigationGuardChange }: {
+export function PatientOrtho({ patientId, pendingAssessments, context, onContextChange, onOpenTreatmentEntry, onOpenAccount, onClinicalChange, onNavigationGuardChange }: {
   patientId: number;
+  pendingAssessments?: readonly AssessmentCase[];
   context?: ClinicalNavigationContext;
   onContextChange?: (context: ClinicalNavigationContext) => unknown;
   onOpenTreatmentEntry?: () => unknown;
@@ -420,11 +423,11 @@ export function PatientOrtho({ patientId, context, onContextChange, onOpenTreatm
   }, [owner]);
   useLayoutEffect(() => onNavigationGuardChange?.(canLeave), [canLeave, onNavigationGuardChange]);
   return <OrthoOwnerContext.Provider value={owner}>
-    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onOpenAccount={onOpenAccount} onClinicalChange={onClinicalChange} />
+    <PatientOrthoWorkspace key={`${patientId}:${authority}`} patientId={patientId} pendingAssessments={pendingAssessments} context={context} onContextChange={onContextChange} onOpenTreatmentEntry={onOpenTreatmentEntry} onOpenAccount={onOpenAccount} onClinicalChange={onClinicalChange} />
   </OrthoOwnerContext.Provider>;
 }
 
-function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTreatmentEntry, onOpenAccount, onClinicalChange }: { patientId: number; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; onOpenTreatmentEntry?: () => unknown; onOpenAccount?: () => unknown; onClinicalChange?: () => void }) {
+function PatientOrthoWorkspace({ patientId, pendingAssessments, context, onContextChange, onOpenTreatmentEntry, onOpenAccount, onClinicalChange }: { patientId: number; pendingAssessments?: readonly AssessmentCase[]; context?: ClinicalNavigationContext; onContextChange?: (context: ClinicalNavigationContext) => unknown; onOpenTreatmentEntry?: () => unknown; onOpenAccount?: () => unknown; onClinicalChange?: () => void }) {
   const owner = useContext(OrthoOwnerContext)!;
   const today = clinicDateString(new Date(), CLINIC_ZONE_FALLBACK);
   const [cases, setCases] = useState<OrthoCase[]>([]);
@@ -432,9 +435,13 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
   const [readState, setReadState] = useState<OrthoReadState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
+  const [openingAssessment, setOpeningAssessment] = useState<number | null>(null);
   const [recordingLegacy, setRecordingLegacy] = useState(false);
   const session = useSession();
   const canRecordBaseline = session?.role === "doctor" || session?.role === "admin";
+  const pendingOrtho = canRecordBaseline ? (pendingAssessments ?? []).filter((row) =>
+    row.patientId === patientId && row.specialty === "orthodontics") : [];
+  const assessmentId = pendingOrtho.length === 1 ? pendingOrtho[0].id : null;
   const [adjusting, setAdjusting] = useState<number | null>(null);
   const [saved, setSaved] = useState<SavedAdjustment | null>(null);
   const [compareSessionTarget, setCompareSessionTarget] = useState<{ caseId: number; sessionId: number } | null>(null);
@@ -461,13 +468,15 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     setError("غير مصرّح لك بعرض كابينة التقويم لهذا المريض.");
   }, [owner]);
   useLayoutEffect(() => { owner.bindDenial(deny); }, [owner, deny]);
+  const readUsername = session?.username;
+  const readRole = session?.role;
   const load = useCallback(() => {
     if (!owner.active) return;
     const controller = new AbortController();
     const sequence = owner.beginRead(controller);
     const current = () => owner.active && owner.readSequence === sequence && !controller.signal.aborted;
     setReadState("loading"); setPatient(null); setError(null);
-    if (!session?.username?.trim() || !["admin", "doctor", "reception", "assistant"].includes(session.role)) {
+    if (!readUsername?.trim() || !["admin", "doctor", "reception", "assistant"].includes(readRole!)) {
       deny(); return;
     }
     let finished = 0;
@@ -511,7 +520,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
     };
     // Independent continuations: no stalled peer or JSON body can postpone denial.
     void read("clinical"); void read("contact");
-  }, [owner, patientId, session?.username, session?.role, deny]);
+  }, [owner, patientId, readUsername, readRole, deny]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -639,7 +648,7 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
             </div>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => { if (!currentView() || !mayDiscard("new") || !mayDiscard("baseline")) return; if (opening) disposeDraft(owner, "new"); disposeDraft(owner, "baseline"); setOpening((value) => !value); setRecordingLegacy(false); }}
+                onClick={() => { if (!currentView() || !mayDiscard("new") || !mayDiscard("baseline")) return; if (opening) disposeDraft(owner, "new"); disposeDraft(owner, "baseline"); setOpeningAssessment(opening ? null : assessmentId); setOpening((value) => !value); setRecordingLegacy(false); }}
                 className="rounded-xl bg-navy-800 px-4 py-2 text-xs font-black text-white hover:bg-navy-900 transition-colors shadow-xs"
               >
                 {opening ? "✕ إغلاق النموذج" : "+ فتح حالة تقويم جديدة"}
@@ -666,8 +675,10 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
           ) : null}
           {opening ? (
             <div className="mt-3">
-              <NewCase
+              <NewCaseIntake
                 patientId={patientId}
+                assessmentId={openingAssessment}
+                assessmentChanged={pendingOrtho.length > 1 || openingAssessment !== assessmentId}
                 today={today}
                 onSaved={() => { if (!owner.active || owner.denied) return; disposeDraft(owner, "new"); setOpening(false); refreshAfterConfirmedChange(); }}
                 onError={safeError}
@@ -1449,21 +1460,78 @@ function NextAppointmentCard({
 
 /* ═══════════════ نماذج الحالة والشدّة ═══════════════ */
 
-function NewCase({ patientId, today, onSaved, onError }: {
+type NewCaseProps = {
   patientId: number; today: string; onSaved: () => void; onError: (message: string | null) => void;
+};
+
+function NewCaseIntake({ assessmentId, assessmentChanged, ...props }: NewCaseProps & {
+  assessmentId: number | null; assessmentChanged: boolean;
+}) {
+  const { patientId } = props;
+  const [attempt, retry] = useState(0);
+  const [read, setRead] = useState<{ id: number; attempt: number; arches: Arches | null } | null>(null);
+  useEffect(() => {
+    if (assessmentId === null || assessmentChanged) return;
+    const controller = new AbortController();
+    let current = true;
+    const timer = setTimeout(() => {
+      controller.abort();
+      if (current) setRead({ id: assessmentId, attempt, arches: null });
+    }, ORTHO_PARENT_READ_TIMEOUT_MS);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/patients/${patientId}/cases`, { cache: "no-store", signal: controller.signal });
+        const payload: unknown = response.ok ? await response.json() : null;
+        if (current && !controller.signal.aborted) {
+          setRead({ id: assessmentId, attempt, arches: verifiedInvoiceOrthoArches(payload, patientId, assessmentId) });
+        }
+      } catch {
+        if (current && !controller.signal.aborted) setRead({ id: assessmentId, attempt, arches: null });
+      } finally { clearTimeout(timer); }
+    })();
+    return () => { current = false; clearTimeout(timer); controller.abort(); };
+  }, [patientId, assessmentId, assessmentChanged, attempt]);
+
+  if (assessmentChanged) return <p role="alert">تغيّرت الحالة الأولية أو توجد أكثر من حالة. راجع الحالات ثم أعد فتح النموذج؛ لم يُختَر نطاق بديل.</p>;
+  if (assessmentId === null) return <NewCase {...props} />;
+  if (read?.id !== assessmentId || read.attempt !== attempt) return <p role="status">جارٍ التحقق من نطاق حالة التقويم الأولية…</p>;
+  if (!read.arches) return <div>
+    <p role="alert">تعذّر التحقق من نطاق حالة التقويم المرتبطة بالفاتورة. لم يُفترض أي فك.</p>
+    <button type="button" onClick={() => retry((value) => value + 1)} className="min-h-11 rounded-lg border border-slate-300 px-3">إعادة التحقق</button>
+  </div>;
+  return <NewCase {...props} invoiceAssessment={{ id: assessmentId, arches: read.arches }} />;
+}
+
+export function verifiedInvoiceOrthoArches(payload: unknown, patientId: number, id: number): Arches | null {
+  if (!payload || typeof payload !== "object") return null;
+  const rows = (payload as { cases?: unknown }).cases;
+  if (!Array.isArray(rows)) return null;
+  const matches = rows.filter((row) => row && typeof row === "object" && row.kind === "specialty" && row.id === id);
+  if (matches.length !== 1) return null;
+  const row = matches[0];
+  if (row.patientId !== patientId || row.specialty !== "orthodontics" || row.orthoCaseId !== null
+    || row.origin !== "invoice" || row.needsAssessment !== true
+    || !["active", "waiting"].includes(row.status) || typeof row.site !== "string") return null;
+  const scope = caseSiteScope(row.site);
+  return scope === "upper" || scope === "lower" || scope === "both" ? scope : null;
+}
+
+function NewCase({ patientId, today, onSaved, onError, invoiceAssessment }: NewCaseProps & {
+  invoiceAssessment?: { id: number; arches: Arches };
 }) {
   const form = useOrthoDraft("new", patientId);
   const [appliance, setAppliance] = form.field<Appliance>("appliance", "fixed_metal");
-  const [arches, setArches] = form.field<Arches>("arches", "both");
+  const [arches, setArches] = form.field<Arches>("arches", invoiceAssessment?.arches ?? "both");
   const [slot, setSlot] = form.field<SlotSize>("slot", "022");
   const [bracketSystem, setBracketSystem] = form.field("bracketSystem", "MBT");
   const [startDate, setStartDate] = form.field("startDate", today);
   const [plannedMonths, setPlannedMonths] = form.field("plannedMonths", "18");
   const saving = form.draft.busy;
+  const scopeMismatch = invoiceAssessment !== undefined && arches !== invoiceAssessment.arches;
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (saving || form.draft.uncertain) return;
+    if (saving || form.draft.uncertain || scopeMismatch) return;
     const operation = form.begin(!form.owner.cases.some((row) => row.status === "active" || row.status === "retention"));
     if (!operation) return;
     onError(null);
@@ -1472,6 +1540,7 @@ function NewCase({ patientId, today, onSaved, onError }: {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           patientId, appliance, arches, slot, bracketSystem, startDate,
+          ...(invoiceAssessment ? { expectedAssessmentCaseId: invoiceAssessment.id } : {}),
           plannedMonths: Number(plannedMonths) || 18,
         }),
       });
@@ -1491,6 +1560,10 @@ function NewCase({ patientId, today, onSaved, onError }: {
     <form onSubmit={submit} className="rounded-2xl border border-navy-800 bg-white p-4 shadow-xs">
       <UncertainWrite draft={form.draft} />
       <h3 className="mb-3 text-sm font-black text-navy-900">فتح حالة تقويم جديدة</h3>
+      {invoiceAssessment ? <p data-testid="ortho-invoice-arches" className="mb-2 text-xs text-slate-700">
+        نطاق الحالة المرتبطة بالفاتورة: <strong>{ARCHES_LABEL[invoiceAssessment.arches]}</strong>. الربط لا يؤكد السداد أو الجاهزية السريرية.
+      </p> : null}
+      {scopeMismatch ? <p role="alert" className="mb-2 text-xs font-bold text-amber-900">النطاق المختار لا يطابق الحالة الأولية. راجع النطاق قبل الحفظ.</p> : null}
       <div className="mb-2 flex flex-wrap gap-2">
         <label className="min-w-[9rem] flex-1">
           <span className="mb-1 block text-[10px] font-bold text-slate-500">الجهاز</span>
@@ -1550,7 +1623,7 @@ function NewCase({ patientId, today, onSaved, onError }: {
         </label>
       </div>
 
-      <button type="submit" disabled={saving || form.draft.uncertain}
+      <button type="submit" disabled={saving || form.draft.uncertain || scopeMismatch}
         className="w-full rounded-xl bg-navy-800 py-2.5 text-xs font-black text-white disabled:opacity-50">
         افتح الحالة
       </button>

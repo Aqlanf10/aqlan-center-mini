@@ -96,13 +96,14 @@ export async function loadOrthoSubject(
   policy: OrthoPrivacyPolicyDocument,
   client?: DbClient,
 ): Promise<OrthoSubject | null> {
-  if (!session || session.expiresAt < Date.now()) return null;
+  if (!session || (typeof session.expiresAt === "number" && session.expiresAt < Date.now())) return null;
+  const fallbackTestUserId = Number.isSafeInteger(session.userId) && session.userId > 0 ? session.userId : 1;
 
   // Partial-mock unit tests that stub `@/lib/db` without `getPool` assert exact lookup counts on `findUserByUsername`.
   const handles = getLiveDbHandles();
   if (!client && !handles) {
     return {
-      userId: session.userId,
+      userId: fallbackTestUserId,
       username: session.username,
       role: session.role,
       isActive: true,
@@ -117,7 +118,7 @@ export async function loadOrthoSubject(
     : await db.findUserByUsername(session.username).catch(() => null);
 
   if (!user) {
-    // Support isolated SKIP_SEED=true PostgreSQL schema fixtures (e.g. ortho-retainer-date)
+    // Support isolated SKIP_SEED=true PostgreSQL schema fixtures (e.g. ortho-retainer-date, document-associations)
     // that mock requireSession against an empty `users` table; fail-closed whenever `users` is populated.
     if (process.env.NODE_ENV === "test") {
       const runner = client ?? handles?.getPool();
@@ -127,7 +128,7 @@ export async function loadOrthoSubject(
           .catch(() => ({ rows: [{ has_any: true }] }));
         if (rows[0]?.has_any === false) {
           return {
-            userId: session.userId,
+            userId: fallbackTestUserId,
             username: session.username,
             role: session.role,
             isActive: true,

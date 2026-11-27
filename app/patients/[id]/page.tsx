@@ -1260,6 +1260,7 @@ function PatientFileWorkspace({ id, checkoutVisitRequest }: { id: string; checko
                 patientName={patient.fullName}
                 patientCode={patient.patientNumber ?? ""}
                 hasActiveOrthoCase={Boolean(summary?.counts.orthoCase)}
+                pendingAssessments={summary?.assessmentCases}
                 onOpenTreatmentEntry={canStartTreatmentEntry ? openTreatmentEntry : undefined}
                 onOpenAccount={summary?.canSeeFinancial ? openExistingAccount : undefined}
                 context={clinicalContext.context ?? (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "ceph" ? { patientId: patient.id, pillar: "diagnostics" } : undefined)}

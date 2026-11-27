@@ -45,6 +45,7 @@ export interface AdvancedOrthoWorkspaceProps {
   patientName: string;
   patientCode: string;
   hasActiveOrthoCase: boolean;
+  pendingAssessments?: React.ComponentProps<typeof PatientOrtho>["pendingAssessments"];
   context?: ClinicalNavigationContext;
   onContextChange?: (context: ClinicalNavigationContext) => boolean | Promise<boolean>;
   onClinicalChange?: () => void;
@@ -64,7 +65,7 @@ export function AdvancedOrthoWorkspace({
   patientId,
   patientName,
   patientCode,
-  hasActiveOrthoCase,
+  pendingAssessments,
   context,
   onContextChange,
   onClinicalChange,
@@ -84,7 +85,7 @@ export function AdvancedOrthoWorkspace({
       const q = new URLSearchParams(window.location.search).get("orthoTab") as OrthoWorkspaceTabId | null;
       if (q && ORTHO_WORKSPACE_TABS.some((t) => t.id === q)) return q;
     }
-    return hasActiveOrthoCase ? "sessions" : "overview";
+    return "sessions";
   });
 
   const [record, setRecord] = useState<OrthoWorkspaceRecord>(() =>
@@ -112,8 +113,10 @@ export function AdvancedOrthoWorkspace({
     setActiveOrthoCorePatientId(patientId, liveCase?.id ?? null);
   }, [patientId, liveCase?.id]);
 
+  const needsExtendedWorkspace = activeTab !== "sessions" || printState.open || aiDrawerOpen;
+
   const loadWorkspaceAndLiveContext = useCallback(async () => {
-    if (perms.loading) return;
+    if (!needsExtendedWorkspace || perms.loading) return;
     if (!perms.moduleVisible || !perms.can("records.read")) {
       setLoadingWorkspace(false);
       return;
@@ -157,7 +160,7 @@ export function AdvancedOrthoWorkspace({
     } finally {
       setLoadingWorkspace(false);
     }
-  }, [patientId, perms.loading, perms.moduleVisible, perms.can, perms.canField]);
+  }, [needsExtendedWorkspace, patientId, perms.loading, perms.moduleVisible, perms.can, perms.canField]);
 
   useEffect(() => {
     void loadWorkspaceAndLiveContext();
@@ -291,11 +294,16 @@ export function AdvancedOrthoWorkspace({
   );
 
   const visibleTabs = useMemo(() => {
+    if (perms.loading) {
+      return ORTHO_WORKSPACE_TABS.filter((t) => t.id === "sessions");
+    }
     if (!perms.moduleVisible) return [];
     if (!perms.can("records.read") && perms.can("records.blind_create")) {
       return ORTHO_WORKSPACE_TABS.filter((t) => t.id === "sessions");
     }
-    return ORTHO_WORKSPACE_TABS.filter((t) => perms.canSection(t.sectionKey));
+    return ORTHO_WORKSPACE_TABS.filter(
+      (t) => perms.canSection(t.sectionKey) || (t.id === "sessions" && perms.can("records.read")),
+    );
   }, [perms]);
 
   useEffect(() => {
@@ -304,7 +312,7 @@ export function AdvancedOrthoWorkspace({
     }
   }, [perms.loading, visibleTabs, activeTab]);
 
-  if (perms.loading) {
+  if (perms.loading && activeTab !== "sessions") {
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-500">
         جارٍ التحقق من صلاحيات وحدة التقويم…
@@ -312,7 +320,7 @@ export function AdvancedOrthoWorkspace({
     );
   }
 
-  if (!perms.moduleVisible) {
+  if (!perms.loading && !perms.moduleVisible) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-xs text-amber-900 flex items-center gap-2">
         <ShieldAlert className="h-4 w-4 shrink-0" />
@@ -554,14 +562,15 @@ export function AdvancedOrthoWorkspace({
             )}
 
             {/* Tab 8: Native AQLAN Daily Tightening Workflow + Package 2 Live Camera + Follow-up Doctor */}
-            {activeTab === "sessions" && (perms.canSection("sessions") || isBlindOnly) && (
+            {activeTab === "sessions" && (perms.loading || perms.canSection("sessions") || perms.can("records.read") || isBlindOnly) && (
               <PatientOrtho
                 patientId={patientId}
+                pendingAssessments={pendingAssessments}
                 context={context}
                 onContextChange={onContextChange}
                 onClinicalChange={() => {
                   onClinicalChange?.();
-                  void loadWorkspaceAndLiveContext();
+                  if (needsExtendedWorkspace) void loadWorkspaceAndLiveContext();
                 }}
                 onNavigationGuardChange={onNavigationGuardChange}
                 onOpenTreatmentEntry={onOpenTreatmentEntry}

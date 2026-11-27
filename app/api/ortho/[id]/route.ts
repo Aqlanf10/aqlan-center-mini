@@ -31,6 +31,9 @@ const forbidden = (msg = "غير مصرّح لك بالوصول لهذه الح�
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (!["admin", "reception", "doctor"].includes(session.role)) {
+    return forbidden("غير مصرّح لك بالوصول لهذه الحالة.");
+  }
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
@@ -99,6 +102,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (!["admin", "reception", "doctor"].includes(session.role)) {
+    return forbidden("غير مصرّح لك بالوصول لهذه الحالة.");
+  }
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
@@ -215,6 +221,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (!["admin", "reception", "doctor"].includes(session.role)) {
+    return forbidden("غير مصرّح لك بالوصول لهذه الحالة.");
+  }
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
