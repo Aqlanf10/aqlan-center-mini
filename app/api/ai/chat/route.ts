@@ -61,7 +61,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
 
-  const user = await findUserByUsername(session.username);
+  let user: Awaited<ReturnType<typeof findUserByUsername>>;
+  try {
+    user = await findUserByUsername(session.username);
+  } catch {
+    return NextResponse.json({ message: "تعذّر التحقق من حساب المستخدم. أعد المحاولة لاحقًا." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   if (!user || !user.isActive) {
     return NextResponse.json({ message: "حساب المستخدم غير نشط أو غير موجود." }, { status: 403 });
   }
