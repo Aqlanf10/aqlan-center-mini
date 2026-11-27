@@ -59,6 +59,23 @@ describe("synthetic assistant mode matrix", () => {
     expect(reply).toMatchObject({ sourceType: "external_ai", reply: "مسودة عامة." });
     expect(JSON.stringify(m.ai.mock.calls)).not.toContain("SYNTHETIC_HISTORY");
   });
+  it.each([0, -1, 1.5, 9007199254740992, "303", "", true, {}, []])(
+    "rejects malformed supplied patient context %j before dispatch", async conversationPatientId => {
+      const response = await chat(make({ conversationPatientId, message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+      expect(response.status).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(m.access).not.toHaveBeenCalled();
+      expect(m.process).not.toHaveBeenCalled();
+      expect(m.names).not.toHaveBeenCalled();
+      expect(m.ai).not.toHaveBeenCalled();
+    },
+  );
+  it("accepts explicit null patient context for an ordinary administrative request", async () => {
+    const response = await chat(make({ conversationPatientId: null, message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ sourceType: "external_ai" });
+    expect(m.ai).toHaveBeenCalledOnce();
+  });
   it.each(["administrative", "clinical"])("keeps a rejected patient-linked %s request local", async kind => {
     vi.stubEnv("USE_LOCAL_DB", "true");
     vi.stubEnv("DATABASE_URL", "postgresql://synthetic.invalid/test");
