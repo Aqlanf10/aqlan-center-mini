@@ -133,6 +133,29 @@ describe("the decision is stored once, complete, attributed and append-only", ()
     expect(results.find(result => !result.ok)).toEqual({ ok: false, reason: "stale_head" });
     expect(await q("SELECT count(*)::int AS n FROM commission_case_participations WHERE case_id=$1", [c.caseId])).toEqual([{ n: 1 }]);
   });
+
+  it("competing approvals of a pending head cannot pay both versions or rewrite the approved run", async () => {
+    const a = await doctor(40), b = await doctor(30), c = await sharedCase(a.partyId);
+    const pending = await decide(c.caseId, "pending", [], null);
+    if (!pending.ok) throw new Error("fixture");
+    await decidedAt(pending.record.id, OCT);
+    const october = await run("2026-10");
+    await payroll.approvePayrollRun(october.id, admin);
+    const prior = (await itemOf(october.id, a.staffId))?.commissionsMinor;
+    expect(prior).toBe(40_000);
+    const results = await Promise.all([
+      decide(c.caseId, "approved", [[a.partyId, 6_000], [b.partyId, 4_000]], pending.record.id),
+      decide(c.caseId, "approved", [[a.partyId, 5_000], [b.partyId, 5_000]], pending.record.id),
+    ]);
+    expect(results.filter(result => result.ok)).toHaveLength(1);
+    expect(results.find(result => !result.ok)).toEqual({ ok: false, reason: "stale_head" });
+    expect(await q("SELECT status FROM commission_case_participations WHERE case_id=$1 ORDER BY id", [c.caseId])).toEqual([{ status: "pending" }, { status: "approved" }]);
+    const winner = results.find(result => result.ok);
+    if (!winner?.ok) throw new Error("winning decision missing");
+    const shareA = winner.record.participants.find(participant => participant.doctorId === a.partyId)?.shareBp;
+    expect([await earned(a.partyId), await earned(b.partyId)]).toEqual(shareA === 6_000 ? [24_000, 12_000] : [20_000, 15_000]);
+    expect((await itemOf(october.id, a.staffId))?.commissionsMinor).toBe(prior);
+  });
 });
 
 describe("the commission report follows the decision in force", () => {
@@ -145,17 +168,40 @@ describe("the commission report follows the decision in force", () => {
     expect(plain.caseId).not.toBe(shared.caseId);
   });
 
-  it("a pending case holds its commission; approving releases it; voiding returns the line to its doctor", async () => {
+  // Owner clarification #483 6905003552: a pending decision is a review marker; it holds nothing.
+  it("a pending case pays its line doctor as if undecided and is listed as under review; approving splits it; voiding returns the line", async () => {
     const a = await doctor(40), b = await doctor(30), c = await sharedCase(a.partyId);
     const pending = await decide(c.caseId, "pending", [], null);
     if (!pending.ok) throw new Error("fixture");
-    expect([await earned(a.partyId), await earned(b.partyId)]).toEqual([0, 0]);
+    expect([await earned(a.partyId), await earned(b.partyId)]).toEqual([40_000, 0]);
+    const detail = await db.commissionDetailReport("1970-01-01", FAR, { doctorId: a.partyId, currency: null, category: null });
+    expect(detail.underReviewParticipations).toEqual([expect.objectContaining({ caseId: c.caseId, invoiceId: c.invoiceId, lineDoctorId: a.partyId, amountMinor: 100_000 })]);
+    const otherDoctor = await db.commissionDetailReport("1970-01-01", FAR, { doctorId: b.partyId });
+    expect(otherDoctor.underReviewParticipations).toEqual([]);
+    const otherCategory = await db.commissionDetailReport("1970-01-01", FAR, { category: "orthodontics" });
+    expect(otherCategory.underReviewParticipations).toEqual([]);
     const approved = await decide(c.caseId, "approved", [[a.partyId, 5_000], [b.partyId, 5_000]], pending.record.id, "equal");
     if (!approved.ok) throw new Error("fixture");
     expect([await earned(a.partyId), await earned(b.partyId)]).toEqual([20_000, 15_000]);
     const voided = await decide(c.caseId, "void", [], approved.record.id);
     expect(voided.ok).toBe(true);
     expect([await earned(a.partyId), await earned(b.partyId)]).toEqual([40_000, 0]);
+  });
+
+  it("payroll calculates and is approved with a pending case; a later approval is absorbed by the next run and the approved run is not rewritten", async () => {
+    const a = await doctor(40), b = await doctor(30), c = await sharedCase(a.partyId);
+    const pending = await decide(c.caseId, "pending", [], null);
+    if (!pending.ok) throw new Error("fixture");
+    await decidedAt(pending.record.id, OCT);
+    const october = await run("2026-10");
+    expect((await itemOf(october.id, a.staffId))?.commissionsMinor).toBe(40_000);
+    await payroll.approvePayrollRun(october.id, admin);
+    const approved = await decide(c.caseId, "approved", [[a.partyId, 6_000], [b.partyId, 4_000]], pending.record.id);
+    if (!approved.ok) throw new Error("fixture");
+    await decidedAt(approved.record.id, NOV);
+    expect((await itemOf(october.id, a.staffId))?.commissionsMinor).toBe(40_000);
+    const november = await run("2026-11");
+    expect([(await itemOf(november.id, a.staffId))?.commissionsMinor ?? 0, (await itemOf(november.id, b.staffId))?.commissionsMinor]).toEqual([0, 12_000]);
   });
 
   it("a report for an earlier period keeps the split that was in force then", async () => {

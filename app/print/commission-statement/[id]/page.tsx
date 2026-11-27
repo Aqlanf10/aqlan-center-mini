@@ -209,7 +209,9 @@ export default async function CommissionStatementPrintPage({
                     <td className="num">{line.clinicDate}</td>
                     <td>{line.patientName}</td>
                     <td className="num">{line.invoiceNumber ?? `#${line.invoiceId}`}</td>
-                    <td>{line.serviceName ?? "—"}{line.categoryLabel ? ` · ${line.categoryLabel}` : ""}</td>
+                    <td>{line.serviceName ?? "—"}{line.categoryLabel ? ` · ${line.categoryLabel}` : ""}
+                      {report.underReviewParticipations.some(item => item.invoiceId === line.invoiceId && item.caseId === line.caseId && item.patientId === line.patientId && item.lineDoctorId === line.doctorId && item.currency === line.currency && item.category === line.category)
+                        ? <div>قرار المشاركة قيد المراجعة</div> : null}</td>
                     <td className="num">{formatMoney(line.amountMinor, line.currency)}</td>
                     <td className="num">
                       {line.labDeducted ? <div>مختبر {formatMoney(line.labCostMinor, line.currency)}</div> : null}

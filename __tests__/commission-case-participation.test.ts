@@ -1,7 +1,7 @@
 /** Owner decision 2026-11-11 (finance point 3, option 2, per case): participants of a shared case
  * hold shares that add up to 100%; each is paid at his own contract rate on his part of the line's
- * base after the discount, with laboratory and material costs split the same way; without an
- * approved split the commission is held. Pure engine tests, synthetic numbers. */
+ * base after the discount, with laboratory and material costs split the same way; a pending
+ * decision holds nothing (owner #483 6905003552). Pure engine tests, synthetic numbers. */
 import { describe, expect, it } from "vitest";
 import {
   allocateByWeights, allocateInvoiceDiscount, caseParticipationProblem, commissionForPatientAtEventTime, splitShareByParticipation,
@@ -23,7 +23,7 @@ function run(invoices: CommissionInvoice[], chunks: CoverageChunk[], policyAt: R
   const held: { invoiceId: number; caseId: number; amountMinor: number }[] = [];
   const result = commissionForPatientAtEventTime(invoices, chunks, policyAt, undefined, {
     participationAt: participation ? caseId => (caseId === CASE ? participation : undefined) : undefined,
-    onHeld: entry => held.push({ invoiceId: entry.invoiceId, caseId: entry.caseId, amountMinor: entry.amountMinor }),
+    onUnderReview: entry => held.push({ invoiceId: entry.invoiceId, caseId: entry.caseId, amountMinor: entry.amountMinor }),
   });
   const of = (doctorId: number, currency: Currency = "YER") => result.get(doctorId)?.[currency] ?? { accruedMinor: 0, earnedMinor: 0 };
   return { of, held };
@@ -88,18 +88,19 @@ describe("option 2: each participant at his own rate on his part of the work", (
   });
 });
 
-describe("without an approved split the shared commission is held", () => {
-  it("a pending case pays no one and reports what is held", () => {
+describe("a pending decision holds nothing (owner #483 6905003552)", () => {
+  it("a pending case pays its line doctor as with no decision and reports the line as under review", () => {
     const { of, held } = run([invoice([line(100_000)], 100_000)], [paid(1, 100_000)], policies({ [A]: plain(40), [B]: plain(30) }),
       { caseId: CASE, status: "pending", participants: [] });
-    expect([of(A), of(B)]).toEqual([{ accruedMinor: 0, earnedMinor: 0 }, { accruedMinor: 0, earnedMinor: 0 }]);
+    expect([of(A), of(B)]).toEqual([{ accruedMinor: 40_000, earnedMinor: 40_000 }, { accruedMinor: 0, earnedMinor: 0 }]);
     expect(held).toEqual([{ invoiceId: 1, caseId: CASE, amountMinor: 100_000 }]);
   });
   it("shares below or above 100% are never paid, even if marked approved", () => {
     for (const parts of [[[A, 6_000], [B, 3_000]], [[A, 6_000], [B, 5_000]]] as [number, number][][]) {
       const { of, held } = run([invoice([line(100_000)], 100_000)], [paid(1, 100_000)], policies({ [A]: plain(40), [B]: plain(30) }), approved(parts));
       expect(of(A).earnedMinor + of(B).earnedMinor).toBe(0);
-      expect(held).toHaveLength(1);
+      // Corrupt approved data is held, but must not be presented as a paid pending decision.
+      expect(held).toHaveLength(0);
     }
   });
 });

@@ -16,7 +16,7 @@ interface DetailLine {
   invoiceId: number; invoiceNumber: string | null; visitId: number | null; clinicDate: string;
   patientId: number; patientName: string; patientNumber: string | null;
   doctorId: number; doctorName: string; currency: Currency;
-  serviceName: string | null; categoryLabel: string | null;
+  serviceName: string | null; category: string | null; categoryLabel: string | null;
   caseId: number | null; caseTitle: string | null; planId: number | null; planTitle: string | null;
   amountMinor: number; labCostMinor: number; materialCostMinor: number;
   labDeducted: boolean; materialDeducted: boolean; baseMinor: number;
@@ -27,8 +27,10 @@ interface Unallocated {
   movementId: number; patientName: string | null; invoiceId: number; itemName: string; costMinor: number; reasonLabel: string;
 }
 interface Finding { doctorName: string; ruleName: string; percent: number; status: "ambiguous" | "unresolved"; candidateServiceIds: number[] }
+interface UnderReview { invoiceId: number; caseId: number; lineDoctorId: number; patientId: number; currency: Currency; amountMinor: number; category: string | null }
 interface DetailPayload {
   lines: DetailLine[]; unallocatedMaterials: Unallocated[]; serviceRateFindings: Finding[]; isPersonalOnly: boolean;
+  underReviewParticipations: UnderReview[];
   rows: Array<{ doctorId: number; doctorName: string }>;
 }
 
@@ -45,7 +47,7 @@ function isLine(value: unknown): value is DetailLine {
     && has(value, ["invoiceId", "patientId", "doctorId", "amountMinor", "labCostMinor", "materialCostMinor", "baseMinor",
       "percent", "accruedMinor", "earnedMinor", "invoiceNetMinor", "invoiceCoveredMinor"], isNumber)
     && has(value, ["clinicDate", "patientName", "doctorName", "ruleSourceLabel"], isText)
-    && has(value, ["invoiceNumber", "patientNumber", "serviceName", "categoryLabel", "caseTitle", "planTitle"], isTextOrNull)
+    && has(value, ["invoiceNumber", "patientNumber", "serviceName", "category", "categoryLabel", "caseTitle", "planTitle"], isTextOrNull)
     && has(value, ["visitId", "caseId", "planId"], isNumberOrNull)
     && has(value, ["labDeducted", "materialDeducted"], (field) => typeof field === "boolean")
     && (CURRENCIES as readonly unknown[]).includes(value.currency);
@@ -54,7 +56,7 @@ function isLine(value: unknown): value is DetailLine {
 /** عقد الردّ كاملًا قبل أي عرض: ردٌّ ناقص لا يُعرض جزؤه ولا تُخترع له أصفار. */
 function parseDetailPayload(payload: unknown): DetailPayload | null {
   if (!isShape(payload) || typeof payload.isPersonalOnly !== "boolean") return null;
-  const { lines, rows, unallocatedMaterials, serviceRateFindings } = payload;
+  const { lines, rows, unallocatedMaterials, serviceRateFindings, underReviewParticipations } = payload;
   if (!Array.isArray(lines) || !lines.every(isLine)) return null;
   if (!Array.isArray(rows) || !rows.every((row) => isShape(row) && isNumber(row.doctorId) && isText(row.doctorName))) return null;
   if (!Array.isArray(unallocatedMaterials) || !unallocatedMaterials.every((item) => isShape(item)
@@ -64,6 +66,9 @@ function parseDetailPayload(payload: unknown): DetailPayload | null {
     && has(finding, ["doctorName", "ruleName"], isText) && isNumber(finding.percent)
     && (finding.status === "ambiguous" || finding.status === "unresolved")
     && Array.isArray(finding.candidateServiceIds) && finding.candidateServiceIds.every(isNumber))) return null;
+  if (!Array.isArray(underReviewParticipations) || !underReviewParticipations.every((item) => isShape(item)
+    && has(item, ["invoiceId", "caseId", "lineDoctorId", "patientId", "amountMinor"], isNumber)
+    && isTextOrNull(item.category) && (CURRENCIES as readonly unknown[]).includes(item.currency))) return null;
   return payload as unknown as DetailPayload;
 }
 
@@ -291,7 +296,9 @@ export function CommissionDetailPanel({ from, to, base }: { from: string; to: st
                         <td className="p-1.5 whitespace-nowrap">{line.invoiceNumber ?? `#${line.invoiceId}`}{line.visitId ? <span className="block text-slate-400">زيارة #{line.visitId}</span> : null}</td>
                         {!data.isPersonalOnly ? <td className="p-1.5">{line.doctorName}</td> : null}
                         <td className="p-1.5">{line.serviceName ?? "—"}</td>
-                        <td className="p-1.5">{line.categoryLabel ?? "—"}{line.caseTitle || line.planTitle ? <span className="block text-slate-500">{line.caseTitle ? `حالة: ${line.caseTitle}` : `خطة: ${line.planTitle}`}</span> : null}</td>
+                        <td className="p-1.5">{line.categoryLabel ?? "—"}{line.caseTitle || line.planTitle ? <span className="block text-slate-500">{line.caseTitle ? `حالة: ${line.caseTitle}` : `خطة: ${line.planTitle}`}</span> : null}
+                          {data.underReviewParticipations.some(item => item.invoiceId === line.invoiceId && item.caseId === line.caseId && item.patientId === line.patientId && item.lineDoctorId === line.doctorId && item.currency === line.currency && item.category === line.category)
+                            ? <span className="block text-amber-800">قرار المشاركة قيد المراجعة</span> : null}</td>
                         <td className="p-1.5 whitespace-nowrap">{formatMoney(line.amountMinor, line.currency)}</td>
                         <td className="p-1.5 whitespace-nowrap">
                           {line.labDeducted ? <span className="block">مختبر {formatMoney(line.labCostMinor, line.currency)}</span> : null}
