@@ -24,7 +24,17 @@ const fakeDb = {
   findUserByUsername: async () => ({ partyId: 7, permissions: {} }),
   doctorOwnsPatient: async () => scope,
   getPatientFile: async id => { dataCalls.push("clinical"); return { patient: { id, medicalAlert: marker } }; },
+  listPatientPlannedVisits: async id => { assert.equal(id, deskId); return []; },
   getPool: () => ({ query: async (sql, args) => {
+    if (sql.includes('AS "openVisitId"')) {
+      assert.equal(args[0], deskId);
+      assert.equal(args[1], "Asia/Aden");
+      assert.match(args[2], /^\d{4}-\d{2}-\d{2}$/);
+      assert.match(sql, /v.patient_id = p.id/);
+      assert.match(sql, /WHERE p.id = \$1/);
+      dataCalls.push("activeVisit");
+      return { rows: [{ openVisitId: null }] };
+    }
     assert.deepEqual(args, [deskId]); assert.match(sql, /WHERE (patient_)?id = \$1/);
     assert.doesNotMatch(sql, /SELECT \*/i);
     dataCalls.push("query");
@@ -103,7 +113,7 @@ test("desk identity and balance are explicit, scoped representations", async () 
   assert.deepEqual(await okPrivate(await invoke("patient", "?projection=reception")), identity);
   assert.deepEqual(dataCalls, ["query"]);
   const money = await okPrivate(await invoke("patient", "?projection=reception-money"));
-  assert.deepEqual(money, { ...moneyFixture(), canCollect:true });
+  assert.deepEqual(money, { ...moneyFixture(), openVisitId:null, canCollect:true });
   wrongOwner = true; assert.equal((await invoke("patient", "?projection=reception-money")).status, 500);
 });
 test("role, patient scope, money permission and malformed queries fail before data access", async () => {
@@ -210,7 +220,7 @@ test(process.env.RECEPTION_TEST_DOM ? "React DOM: reception page mounts bounded 
       addEventListener:()=>{},removeEventListener:()=>{}, fetch:async(url, opts={})=>{
         const u=new URL(url,"http://desk.invalid"); const mode=u.searchParams.get("projection");
         paths.push(u.pathname+u.search);
-        assert.equal(u.pathname,"/api/patients/31"); assert.ok(["appointments","reception","reception-money"].includes(mode));
+        assert.equal(u.pathname,"/api/patients/31"); assert.ok(["appointments","reception","reception-money","reception-booking"].includes(mode));
         return invoke("patient",u.search);
       }};
     context.window=context; context.self=context;
@@ -237,7 +247,7 @@ test(process.env.RECEPTION_TEST_DOM ? "React DOM: reception page mounts bounded 
       paths.push(req.method() + " " + path + url.search);
       let res;
       if (path === "/api/patients/31" && req.method() === "GET") {
-        if (!["appointments", "reception", "reception-money"].includes(url.searchParams.get("projection"))) unexpected.push(req.url());
+        if (!["appointments", "reception", "reception-money", "reception-booking"].includes(url.searchParams.get("projection"))) unexpected.push(req.url());
         res = await invoke("patient", url.search);
       } else if (path === "/api/patients/31/documents" && req.method() === "POST") {
         res = await routes.documents.POST(new Request(req.url(), {method:"POST", headers:req.headers(), body:req.postDataBuffer()}),

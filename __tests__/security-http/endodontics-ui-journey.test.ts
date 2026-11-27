@@ -83,7 +83,8 @@ async function open(who: "doctorA" | "reception"): Promise<{ context: BrowserCon
   await context.addCookies([{ name, value: value.join("="), url: baseUrl }]);
   const page = await context.newPage();
   await page.goto(`${baseUrl}/patients/${patientId}?tab=treatment&sub=endo`, { waitUntil: "domcontentloaded" });
-  await page.getByTestId("patient-endo").waitFor();
+  if (who === "reception") await page.getByRole("heading", { name: "حساب المريض", exact: true }).waitFor();
+  else await page.getByTestId("patient-endo").waitFor();
   return { context, page };
 }
 
@@ -317,13 +318,13 @@ describe("ENDO-4 — endodontic chairside journey", () => {
     }
   });
 
-  it("reception reads the record but has no write controls; and no money appears anywhere", async () => {
+  it("reception can open the patient account without loading endodontic records", async () => {
     const { context, page } = await open("reception");
-    expect(await page.getByTestId("endo-strip").innerText()).toContain("مكتمل");
+    expect(await page.getByTestId("endo-strip").count()).toBe(0);
     expect(await page.getByTestId("endo-new").count()).toBe(0);
     expect(await page.getByTestId("endo-record").count()).toBe(0);
     expect(await page.getByTestId("endo-complete").count()).toBe(0);
-    expect(await page.getByTestId("patient-endo").innerText()).not.toMatch(/ريال|YER|SAR|USD/);
+    expect(await page.getByTestId("patient-endo").count()).toBe(0);
     await context.close();
   });
 
