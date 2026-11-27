@@ -88,6 +88,7 @@ export function createIndependentPgReservationBackend(
                 `UPDATE ${watermarks} SET reserved_through=$3::bigint
                   WHERE lineage=$1 AND prefix=$2 AND reserved_through=$4::bigint`,
                 [lineage, read.prefix, next.toString(), read.reservedThrough.toString()]);
+              if (update.command !== "UPDATE") throw new Error("Authority update not confirmed");
               const advanced = update.rowCount === 1;
               if (update.rowCount !== 0 && !advanced) throw new Error("Invalid watermark cardinality");
               advanceUnconfirmed = false;
