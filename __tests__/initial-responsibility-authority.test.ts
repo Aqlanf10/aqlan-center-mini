@@ -1,6 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const deps = vi.hoisted(() => ({ current: vi.fn(), access: vi.fn(), query: vi.fn() }));
 vi.mock("../lib/session", () => ({ revalidateSessionInTransaction: deps.current }));
+vi.mock("../lib/session-revalidate", () => ({ revalidateSessionInTransaction: deps.current }));
 vi.mock("../lib/patient-access", () => ({ canAccessPatient: deps.access }));
 import { authorizeInitialResponsibility } from "../lib/initial-responsibility-authority";
 const session = { userId: 1, username: "synthetic", role: "doctor", partyId: 7, expiresAt: Date.now() + 60000 };

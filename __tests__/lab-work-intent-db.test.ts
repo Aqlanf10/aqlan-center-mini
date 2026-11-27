@@ -3,6 +3,7 @@ import type { SessionPayload } from "../lib/auth";
 import { createHash } from "node:crypto";
 const mocks=vi.hoisted(()=>({session:vi.fn(),access:vi.fn()}));
 vi.mock("../lib/session",()=>({revalidateSessionInTransaction:mocks.session}));
+vi.mock("../lib/session-revalidate",()=>({revalidateSessionInTransaction:mocks.session}));
 vi.mock("../lib/patient-access",()=>({canAccessPatient:mocks.access}));
 import { labWorkIntentSupported, readLabWorkCommandInTransaction, assertLabWorkCommandApplied, recordRejectedLabWorkCommandInTransaction } from "../lib/lab-work-intent-db";
 const session={userId:7,username:"synthetic",role:"admin",expiresAt:Date.now()+60000} as SessionPayload;
