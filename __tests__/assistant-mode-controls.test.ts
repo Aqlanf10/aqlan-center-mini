@@ -83,6 +83,29 @@ describe("synthetic assistant mode matrix", () => {
     expect(m.ai).not.toHaveBeenCalled();
     expect(m.audit).not.toHaveBeenCalled();
   });
+  it.each([null, true, 12, "synthetic", [], { role: "assistant", content: null },
+    { role: "user", content: {} }, { role: "user", content: "  " }].map(turn => ({ turn })))(
+    "rejects malformed final turn instead of replaying a previous request: %j", async ({ turn }) => {
+      const response = await chat(make({ messages: [
+        { role: "user", content: EXTERNAL_ADMIN_TEMPLATES[0] }, turn,
+      ] }));
+      expect(response.status).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(m.master).not.toHaveBeenCalled();
+      expect(m.process).not.toHaveBeenCalled();
+      expect(m.ai).not.toHaveBeenCalled();
+      expect(m.audit).not.toHaveBeenCalled();
+    },
+  );
+  it.each([{}, "synthetic", 12, true].map(messages => ({ messages })))(
+    "rejects a malformed history container rather than using legacy message: %j", async ({ messages }) => {
+      const response = await chat(make({ messages, message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+      expect(response.status).toBe(400);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      expect(m.process).not.toHaveBeenCalled();
+      expect(m.ai).not.toHaveBeenCalled();
+    },
+  );
   it("accepts explicit null patient context for an ordinary administrative request", async () => {
     const response = await chat(make({ conversationPatientId: null, message: EXTERNAL_ADMIN_TEMPLATES[0] }));
     expect(response.status).toBe(200);
