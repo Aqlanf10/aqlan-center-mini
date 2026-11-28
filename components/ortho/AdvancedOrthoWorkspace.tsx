@@ -26,6 +26,7 @@ import {
   applyOrthoCoreCaseToWorkspace,
   buildClinicSettingsForOrthoCore,
   buildOrthoCorePatientCase,
+  buildPreviousCasesMedia,
   type LiveOrthoCaseSummary,
   type LivePatientDocument,
 } from "./orthocore/utils/caseAdapter";
@@ -92,7 +93,10 @@ export function AdvancedOrthoWorkspace({
     createDefaultOrthoWorkspace(patientId),
   );
   const [liveDocs, setLiveDocs] = useState<LivePatientDocument[]>([]);
-  const [liveCase, setLiveCase] = useState<LiveOrthoCaseSummary | null>(null);
+  const [liveCases, setLiveCases] = useState<LiveOrthoCaseSummary[]>([]);
+  const [selectedOrthoCaseId, setSelectedOrthoCaseId] = useState<number | null>(
+    context?.orthoCaseId ?? null,
+  );
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [savingState, setSavingState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -109,6 +113,17 @@ export function AdvancedOrthoWorkspace({
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestRecordRef = useRef<OrthoWorkspaceRecord>(record);
 
+  const effectiveCaseId = context?.orthoCaseId ?? selectedOrthoCaseId;
+
+  const liveCase = useMemo(
+    () =>
+      liveCases.find((c) => c.id === effectiveCaseId) ??
+      liveCases.find((c) => c.status === "active" || c.status === "retention") ??
+      liveCases[0] ??
+      null,
+    [liveCases, effectiveCaseId],
+  );
+
   useEffect(() => {
     setActiveOrthoCorePatientId(patientId, liveCase?.id ?? null);
   }, [patientId, liveCase?.id]);
@@ -123,7 +138,10 @@ export function AdvancedOrthoWorkspace({
     }
     setLoadingWorkspace(true);
     try {
-      const canSeePhotos = perms.can("photos.view") && perms.canField("previousPhotos");
+      const canSeePhotos =
+        session?.role !== "reception" &&
+        perms.can("photos.view") &&
+        perms.canField("previousPhotos");
       const [wsRes, orthoRes, docsRes] = await Promise.all([
         fetch(`/api/ortho/workspace/${patientId}`, { cache: "no-store" }),
         fetch(`/api/ortho?patientId=${patientId}`, { cache: "no-store" }),
@@ -142,8 +160,21 @@ export function AdvancedOrthoWorkspace({
 
       if (orthoRes.ok) {
         const orthoData = (await orthoRes.json()) as { cases?: LiveOrthoCaseSummary[] };
-        const active = orthoData.cases?.find((c) => c.status === "active") ?? orthoData.cases?.[0] ?? null;
-        setLiveCase(active);
+        const casesList = Array.isArray(orthoData.cases) ? orthoData.cases : [];
+        setLiveCases(casesList);
+        setSelectedOrthoCaseId((prev) => {
+          if (context?.orthoCaseId && casesList.some((c) => c.id === context.orthoCaseId)) {
+            return context.orthoCaseId;
+          }
+          if (prev !== null && casesList.some((c) => c.id === prev)) {
+            return prev;
+          }
+          const preferred =
+            casesList.find((c) => c.status === "active" || c.status === "retention") ??
+            casesList[0] ??
+            null;
+          return preferred?.id ?? null;
+        });
       }
 
       if (docsRes && docsRes.ok) {
@@ -160,7 +191,7 @@ export function AdvancedOrthoWorkspace({
     } finally {
       setLoadingWorkspace(false);
     }
-  }, [needsExtendedWorkspace, patientId, perms.loading, perms.moduleVisible, perms.can, perms.canField]);
+  }, [needsExtendedWorkspace, patientId, perms.loading, perms.moduleVisible, perms.can, perms.canField, session?.role, context?.orthoCaseId]);
 
   useEffect(() => {
     void loadWorkspaceAndLiveContext();
@@ -204,7 +235,10 @@ export function AdvancedOrthoWorkspace({
     };
   }, []);
 
-  const canViewPhotos = perms.can("photos.view") && perms.canField("previousPhotos");
+  const canViewPhotos =
+    session?.role !== "reception" &&
+    perms.can("photos.view") &&
+    perms.canField("previousPhotos");
   const clinicSettings = useMemo(() => buildClinicSettingsForOrthoCore(clinicName), [clinicName]);
 
   const orthoCoreDraft: PatientCase = useMemo(
@@ -219,6 +253,11 @@ export function AdvancedOrthoWorkspace({
         canViewPhotos,
       }),
     [patientId, patientName, patientCode, record, liveDocs, liveCase, canViewPhotos],
+  );
+
+  const previousCasesMedia = useMemo(
+    () => buildPreviousCasesMedia(liveDocs, liveCase?.id ?? null, canViewPhotos),
+    [liveDocs, liveCase?.id, canViewPhotos],
   );
 
   const latestCaseRef = useRef<PatientCase>(orthoCoreDraft);
@@ -462,6 +501,39 @@ export function AdvancedOrthoWorkspace({
             </div>
           ) : null}
 
+          {/* Case Selector Bar when patient has multiple orthodontic cases */}
+          {!isBlindOnly && liveCases.length > 1 && activeTab !== "sessions" ? (
+            <div
+              data-testid="ortho-case-selector-bar"
+              dir="rtl"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-navy-100 bg-slate-50 px-3 py-2 text-xs"
+            >
+              <span className="font-bold text-navy-900">
+                فصل السجل والصور حسب الحالة التقويمية:
+              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {liveCases.map((c) => {
+                  const isCurrentActive = c.status === "active" || c.status === "retention";
+                  const isSelected = liveCase?.id === c.id;
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => setSelectedOrthoCaseId(c.id)}
+                      className={`rounded-lg border px-3 py-1 text-xs font-bold transition-colors ${
+                        isSelected
+                          ? "border-navy-900 bg-navy-900 text-white"
+                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                      }`}
+                    >
+                      {isCurrentActive ? `الحالة الحالية #${c.id}` : `حالة سابقة #${c.id}`}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           {/* Exact OrthoCore 10 Interconnected Tabs */}
           <nav
             aria-label="أقسام وحدة تقويم الأسنان"
@@ -527,6 +599,8 @@ export function AdvancedOrthoWorkspace({
                 lang={lang}
                 role={orthoRole}
                 actorName={actorName}
+                currentOrthoCaseId={liveCase?.id ?? null}
+                previousCasesMedia={previousCasesMedia}
                 onChange={handleOrthoCoreUpdate}
               />
             )}

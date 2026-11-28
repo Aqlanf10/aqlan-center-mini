@@ -1,6 +1,7 @@
 "use client";
 
 import type { ClinicSettings, Language, MediaRecord, PatientCase } from "../types/ortho";
+import { getActiveOrthoCoreCaseId } from "./api";
 import {
   renderCephalometricTracingImage,
   renderPhotoAnalysisImage,
@@ -225,6 +226,7 @@ export async function exportCaseToPowerPoint(opts: {
       format: "pptx",
       anonymize: opts.anonymize === true,
       lang: opts.lang,
+      orthoCaseId: getActiveOrthoCoreCaseId(),
       selectedSlideIds,
       selectedMediaIds: opts.selectedMediaIds,
       tracedOverlays,

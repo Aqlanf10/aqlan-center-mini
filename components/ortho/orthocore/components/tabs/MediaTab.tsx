@@ -31,10 +31,21 @@ interface MediaTabProps {
   lang: Language;
   role: UserRole;
   actorName: string;
+  currentOrthoCaseId?: number | null;
+  previousCasesMedia?: Array<{ orthoCaseId: number; media: MediaRecord[] }>;
   onChange: (next: PatientCase, timelineMsg?: { ar: string; en: string }) => void;
 }
 
-export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, role, actorName, onChange }) => {
+export const MediaTab: React.FC<MediaTabProps> = ({
+  patient,
+  settings,
+  lang,
+  role,
+  actorName,
+  currentOrthoCaseId,
+  previousCasesMedia = [],
+  onChange,
+}) => {
   const [stageFilter, setStageFilter] = useState<'ALL' | RecordStage>('ALL');
   const [uploadStage, setUploadStage] = useState<RecordStage>('T0');
   const [uploadView, setUploadView] = useState<string>('intraoral_right');
@@ -55,8 +66,10 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
   const [aiReviewError, setAiReviewError] = useState('');
   const [aiReviewResult, setAiReviewResult] = useState<AiMediaReview | null>(null);
   const [aiReviewSaved, setAiReviewSaved] = useState(false);
+  const [blindUploadConfirmed, setBlindUploadConfirmed] = useState(false);
 
   const canUpload = role === 'doctor' || role === 'assistant' || role === 'admin';
+  const uploadDisabledForMissingCase = currentOrthoCaseId === null;
   const canUseAi = role === 'doctor' || role === 'assistant';
   const aiConsentReady = Boolean(settings?.allowExternalAi && patient.consents.externalAiConsent);
 
@@ -103,10 +116,12 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
   };
 
   const handleFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0 || !canUpload) return;
+    if (!files || files.length === 0 || !canUpload || uploadDisabledForMissingCase) return;
     setUploading(true);
+    setBlindUploadConfirmed(false);
     try {
       const added: MediaRecord[] = [];
+      let blindCount = 0;
       for (let i = 0; i < files.length; i++) {
         const f = files[i];
         const lower = f.name.toLowerCase();
@@ -126,10 +141,16 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
           takenOn: captureDate,
           photoStage: uploadStage,
           photoView: uploadView,
+          orthoCaseId: currentOrthoCaseId ?? null,
           note: sourceNote,
         });
+        if (!uploaded.docId || !uploaded.url) {
+          blindCount++;
+          continue;
+        }
         added.push({
-          id: uploaded.docId ? `doc-${uploaded.docId}` : `med-${Date.now()}-${i}`,
+          id: `doc-${uploaded.docId}`,
+          orthoCaseId: currentOrthoCaseId ?? null,
           title: displayTitle,
           mediaKind: detectedKind,
           stage: uploadStage,
@@ -151,13 +172,18 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
           },
         });
       }
-      onChange(
-        { ...patient, media: [...added, ...patient.media] },
-        {
-          ar: `رفع ${added.length} سجل/صور تشخيصية (${uploadStage})`,
-          en: `Uploaded ${added.length} diagnostic record(s) (${uploadStage})`,
-        },
-      );
+      if (blindCount > 0) {
+        setBlindUploadConfirmed(true);
+      }
+      if (added.length > 0) {
+        onChange(
+          { ...patient, media: [...added, ...patient.media] },
+          {
+            ar: `رفع ${added.length} سجل/صور تشخيصية (${uploadStage})`,
+            en: `Uploaded ${added.length} diagnostic record(s) (${uploadStage})`,
+          },
+        );
+      }
     } finally {
       setUploading(false);
     }
@@ -281,7 +307,23 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
       )}
 
       {/* Drag & Drop + Camera Upload */}
-      {canUpload && (
+      {canUpload && uploadDisabledForMissingCase && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs font-medium text-amber-900">
+          {tr(
+            lang,
+            'افتح حالة تقويم أولاً من تبويب «الشدّات والجلسات» لربط الصور والأشعة بحالة محددة وعزلها عن أي حالات أخرى.',
+            'Open an orthodontic case first in the Sessions tab so diagnostic photos are strictly bound to that case.',
+          )}
+        </div>
+      )}
+
+      {blindUploadConfirmed && (
+        <p role="status" className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-2.5 text-xs font-semibold text-emerald-900">
+          {tr(lang, 'تم رفع الملف بنجاح.', 'File uploaded successfully.')}
+        </p>
+      )}
+
+      {canUpload && !uploadDisabledForMissingCase && (
         <div
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
@@ -390,19 +432,26 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
 
       {/* Gallery Filters & Cards */}
       <div className="space-y-4">
-        <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg w-fit">
-          {(['ALL', 'T0', 'T1', 'T2', 'T3'] as const).map((st) => (
-            <button
-              key={st}
-              type="button"
-              onClick={() => setStageFilter(st)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                stageFilter === st ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
-              }`}
-            >
-              {st === 'ALL' ? tr(lang, 'الكل', 'All Stages') : st}
-            </button>
-          ))}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg w-fit">
+            {(['ALL', 'T0', 'T1', 'T2', 'T3'] as const).map((st) => (
+              <button
+                key={st}
+                type="button"
+                onClick={() => setStageFilter(st)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  stageFilter === st ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'
+                }`}
+              >
+                {st === 'ALL' ? tr(lang, 'الكل', 'All Stages') : st}
+              </button>
+            ))}
+          </div>
+          {typeof currentOrthoCaseId === 'number' && currentOrthoCaseId > 0 ? (
+            <span className="px-2.5 py-1 rounded-lg bg-navy-50 border border-navy-200 text-xs font-semibold text-navy-900">
+              {tr(lang, `صور الحالة التقويمية #${currentOrthoCaseId} فقط`, `Case #${currentOrthoCaseId} Media Only`)}
+            </span>
+          ) : null}
         </div>
 
         {filteredMedia.length === 0 ? (
@@ -500,6 +549,51 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
         )}
       </div>
 
+      {/* Isolated Archive of Previous Orthodontic Cases */}
+      {role !== 'reception' && previousCasesMedia.length > 0 && (
+        <details
+          data-testid="ortho-previous-cases-media"
+          className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-4"
+        >
+          <summary className="cursor-pointer text-xs font-bold text-slate-800 select-none">
+            أرشيف صور الحالات التقويمية السابقة (معزولة عن الحالة الحالية) ({previousCasesMedia.reduce((acc, g) => acc + g.media.length, 0)})
+          </summary>
+          <div className="pt-3 space-y-4 border-t border-slate-200">
+            {previousCasesMedia.map((group) => (
+              <div key={group.orthoCaseId} className="space-y-2">
+                <h4 className="text-xs font-bold text-navy-900">
+                  {`حالة التقويم السابقة #${group.orthoCaseId}`} ({group.media.length})
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {group.media.map((m) => (
+                    <div key={m.id} className="bg-white border border-slate-200 rounded-lg overflow-hidden flex flex-col">
+                      <div className="h-40 bg-slate-900 flex items-center justify-center">
+                        {m.mediaKind === 'photo' || m.mediaKind === 'radiograph' ? (
+                          <img
+                            src={m.originalUrl}
+                            alt={m.title}
+                            referrerPolicy="no-referrer"
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <span className="text-xs font-mono text-slate-300">{m.mediaKind.toUpperCase()}</span>
+                        )}
+                      </div>
+                      <div className="p-3 space-y-1">
+                        <p className="text-xs font-semibold text-slate-900 truncate">{m.title}</p>
+                        <p className="text-[11px] font-mono text-slate-500 tabular-nums">
+                          {m.stage} · {m.captureDate}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
       {/* Specialized Modals */}
       <PhotoEditorModal
         open={Boolean(editorMedia)}
@@ -508,12 +602,16 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
         lang={lang}
         onClose={() => setEditorMedia(null)}
         onSaveDerived={(derived, updatedState) => {
+          const taggedDerived: MediaRecord = {
+            ...derived,
+            orthoCaseId: currentOrthoCaseId ?? null,
+          };
           const nextMedia = patient.media.map((item) =>
-            item.id === derived.parentMediaId && updatedState ? { ...item, editorState: updatedState } : item,
+            item.id === taggedDerived.parentMediaId && updatedState ? { ...item, editorState: updatedState } : item,
           );
           onChange(
-            { ...patient, media: [derived, ...nextMedia] },
-            { ar: `حفظ نسخة معدلة من ${derived.title}`, en: `Saved derived image copy: ${derived.title}` },
+            { ...patient, media: [taggedDerived, ...nextMedia] },
+            { ar: `حفظ نسخة معدلة من ${taggedDerived.title}`, en: `Saved derived image copy: ${taggedDerived.title}` },
           );
         }}
       />

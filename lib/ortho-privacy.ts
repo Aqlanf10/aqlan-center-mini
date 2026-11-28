@@ -235,7 +235,7 @@ export function isOrthoFieldKey(value: unknown): value is OrthoFieldKey {
  * السياسة الافتراضية الآمنة عند التشغيل الأول:
  * - المالك/المدير (admin): كامل الصلاحيات.
  * - الطبيب (doctor): عمل سريري كامل على مرضاه بدون مالية وبدون حذف وبدون إعدادات الوحدة.
- * - الاستقبال (reception): متابعة المواعيد والمعلومات الأساسية والصور المسموح بها دون اعتماد سريري أو قياسات.
+ * - الاستقبال (reception): متابعة المواعيد والمعلومات الأساسية والرفع الأعمى عند الإذن دون عرض الصور أو المراجع أو الاعتماد السريري.
  * - المساعد السريري (assistant): إدخال أعمى وتصوير/رفع شدّات اليوم فقط — بلا رؤية للصور السابقة أو التشخيص أو الخطة أو المالية.
  * - الكاشير والمحاسب (cashier / accountant): وحدة التقويم مخفية بالكامل (منع تام).
  */
@@ -765,6 +765,16 @@ export function resolveOrthoAccess(
   }
   for (const k of ORTHO_FIELDS) {
     fields[k] = allowField[k] && !denyField[k];
+  }
+
+  // حظر قطعي لدور الاستقبال (غير المالك) من عرض أو تحرير أو تنزيل صور التقويم أو مراجعها حتى لو وُجدت قاعدة سماح صريحة
+  if (subject.role === "reception") {
+    permissions["photos.view"] = false;
+    permissions["photos.edit"] = false;
+    permissions["photos.download"] = false;
+    sections["media"] = false;
+    sections["photo_analysis"] = false;
+    fields["previousPhotos"] = false;
   }
 
   return {

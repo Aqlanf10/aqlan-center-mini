@@ -15,6 +15,7 @@ export interface LivePatientDocument {
   takenOn: string | null;
   uploadedBy?: string;
   uploadedAt?: string;
+  orthoCaseId?: number | null;
   photoStage: string | null;
   photoView: string | null;
   adjustmentId: number | null;
@@ -25,6 +26,8 @@ export interface LiveOrthoCaseSummary {
   id: number;
   phase?: string;
   status?: string;
+  startDate?: string;
+  closedAt?: string | null;
   upperWire?: string | null;
   lowerWire?: string | null;
   responsibleDoctorName?: string | null;
@@ -111,6 +114,7 @@ function mapDocToMediaRecord(doc: LivePatientDocument): MediaRecord {
 
   return {
     id: `doc-${doc.id}`,
+    orthoCaseId: doc.orthoCaseId ?? null,
     title: doc.title || `مستند #${doc.id}`,
     mediaKind,
     stage,
@@ -388,8 +392,10 @@ export function buildOrthoCorePatientCase(input: {
       }
     : baseCase;
 
-  // Sync live PostgreSQL tightening sessions into merged.sessions (for Reports/Header/Timeline!)
-  if (liveCase?.adjustments && liveCase.adjustments.length > 0) {
+  // Sync live PostgreSQL tightening sessions strictly for the selected ortho case!
+  if (!liveCase) {
+    merged.sessions = [];
+  } else if (Array.isArray(liveCase.adjustments)) {
     const syncedSessions: TreatmentSession[] = liveCase.adjustments.map((a, idx) => ({
       id: `adj-${a.id}`,
       visitNumber: liveCase.adjustments!.length - idx,
@@ -415,33 +421,67 @@ export function buildOrthoCorePatientCase(input: {
     merged.sessions = syncedSessions;
   }
 
-  // Sync live authenticated PostgreSQL patient documents into merged.media (respecting photos.view!)
-  if (!canViewPhotos) {
+  // Sync live authenticated PostgreSQL patient documents strictly to activeCaseId (never mix cases or unassigned docs!)
+  const activeCaseId = liveCase?.id ?? null;
+  if (!canViewPhotos || activeCaseId === null) {
     merged.media = [];
   } else {
     const existingMedia = Array.isArray(merged.media) ? merged.media : [];
-    const byUrl = new Map<string, MediaRecord>();
+    const savedByUrl = new Map<string, MediaRecord>();
+    const retainedNonDocMedia: MediaRecord[] = [];
     for (const m of existingMedia) {
-      if (m.originalUrl && m.originalUrl.startsWith("/api/documents/")) byUrl.set(m.originalUrl, m);
+      if (m.originalUrl && m.originalUrl.startsWith("/api/documents/")) {
+        savedByUrl.set(m.originalUrl, m);
+      } else if (m.orthoCaseId === activeCaseId) {
+        retainedNonDocMedia.push(m);
+      }
     }
+    const caseMediaByUrl = new Map<string, MediaRecord>();
     for (const doc of liveDocs) {
+      if (doc.orthoCaseId !== activeCaseId) continue;
       const mapped = mapDocToMediaRecord(doc);
-      const prev = byUrl.get(mapped.originalUrl);
+      const prev = savedByUrl.get(mapped.originalUrl);
       if (!prev) {
-        byUrl.set(mapped.originalUrl, mapped);
+        caseMediaByUrl.set(mapped.originalUrl, mapped);
       } else {
-        byUrl.set(mapped.originalUrl, {
+        caseMediaByUrl.set(mapped.originalUrl, {
           ...prev,
+          orthoCaseId: activeCaseId,
           stage: doc.photoStage ? mapped.stage : prev.stage,
           viewType: doc.photoView ? mapped.viewType : prev.viewType,
           captureDate: doc.takenOn || prev.captureDate,
         });
       }
     }
-    merged.media = Array.from(byUrl.values());
+    merged.media = [...caseMediaByUrl.values(), ...retainedNonDocMedia];
   }
 
   return merged;
+}
+
+export function buildPreviousCasesMedia(
+  liveDocs: LivePatientDocument[],
+  activeCaseId: number | null,
+  canViewPhotos: boolean,
+): Array<{ orthoCaseId: number; media: MediaRecord[] }> {
+  if (!canViewPhotos) return [];
+  const grouped = new Map<number, MediaRecord[]>();
+  for (const doc of liveDocs) {
+    if (
+      typeof doc.orthoCaseId !== "number" ||
+      !Number.isSafeInteger(doc.orthoCaseId) ||
+      doc.orthoCaseId <= 0 ||
+      doc.orthoCaseId === activeCaseId
+    ) {
+      continue;
+    }
+    const list = grouped.get(doc.orthoCaseId) ?? [];
+    list.push(mapDocToMediaRecord(doc));
+    grouped.set(doc.orthoCaseId, list);
+  }
+  return Array.from(grouped.entries())
+    .sort((a, b) => b[0] - a[0])
+    .map(([orthoCaseId, media]) => ({ orthoCaseId, media }));
 }
 
 export function applyOrthoCoreCaseToWorkspace(

@@ -93,7 +93,8 @@ beforeAll(async () => {
     id: `syn-rec-photo-${stamp}`,
     effect: "allow",
     target: { userIds: [recPhoto.userId] },
-    permissions: ["photos.view"],
+    permissions: ["photos.view", "photos.upload", "photos.edit", "photos.download"],
+    sections: ["media", "photo_analysis"],
     fields: ["previousPhotos"],
   });
   await db.query(
@@ -173,15 +174,55 @@ describe("ortho list patient and image isolation over real HTTP", () => {
     expect((await authedGet(`/api/documents/${photoB}`, h.sessions.reception)).status).toBe(403);
   });
 
-  it("grants reception photo visibility only to an explicitly authorized synthetic account", async () => {
-    const grantedBody = await listAs(receptionWithPhotos);
-    expect(grantedBody.cases.map((row) => row.id)).toEqual(expect.arrayContaining([caseA, caseB]));
+  it("hard-blocks reception photo visibility/references even under an explicit allow rule and restricts reception upload to confirmation-only", async () => {
+    for (const suffix of ["", `?patientId=${patientB}`]) {
+      const grantedBody = await listAs(receptionWithPhotos, suffix);
+      const target = grantedBody.cases.find((row) => row.id === caseB);
+      expect(target).toBeDefined();
+      expect(target).toMatchObject({
+        photosVisible: false,
+        adjustments: [expect.objectContaining({ photos: [] })],
+      });
+    }
     const grantedCase = await authedGet(`/api/ortho/${caseB}`, receptionWithPhotos);
     expect(grantedCase.status).toBe(200);
     expect(await grantedCase.json()).toMatchObject({
-      photosVisible: true,
-      adjustments: [expect.objectContaining({ photos: [expect.objectContaining({ id: photoB })] })],
+      photosVisible: false,
+      adjustments: [expect.objectContaining({ photos: [] })],
     });
+    expect((await authedGet(`/api/documents/${photoB}`, receptionWithPhotos)).status).toBe(403);
+
+    const recDocs = await authedGet(`/api/patients/${patientB}/documents?orthoCaseId=${caseB}`, receptionWithPhotos);
+    expect(recDocs.status).toBe(200);
+    expect((await recDocs.json()).documents).toEqual([]);
+
+    const validPng = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    const form = new FormData();
+    form.set("file", new Blob([new Uint8Array(validPng)], { type: "image/png" }), "secret-reception-name.png");
+    form.set("kind", "photo");
+    form.set("title", "Secret Reception Title");
+    form.set("orthoCaseId", String(caseB));
+    form.set("photoStage", "progress");
+    form.set("photoView", "intraoral_frontal");
+
+    const uploadRes = await fetch(`${baseUrl}/api/patients/${patientB}/documents`, {
+      method: "POST",
+      headers: {
+        Cookie: receptionWithPhotos.cookie,
+        Origin: baseUrl,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: form,
+      redirect: "manual",
+    });
+    expect(uploadRes.status).toBe(201);
+    const uploadBody = await uploadRes.json();
+    expect(uploadBody).toEqual({ ok: true });
+    expect(JSON.stringify(uploadBody)).not.toContain("secret-reception-name");
+    expect(JSON.stringify(uploadBody)).not.toContain("Secret Reception Title");
   });
 
   it("preserves the explicit all-patient grant even without a linked doctor party", async () => {

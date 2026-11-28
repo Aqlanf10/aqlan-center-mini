@@ -35,6 +35,10 @@ export function setActiveOrthoCorePatientId(patientId: number, orthoCaseId: numb
   activeNumericOrthoCaseId = orthoCaseId;
 }
 
+export function getActiveOrthoCoreCaseId(): number | null {
+  return activeNumericOrthoCaseId;
+}
+
 function getPatientIdOrThrow(): number {
   if (!activeNumericPatientId || activeNumericPatientId <= 0) {
     throw new Error("معرّف ملف المريض غير محدد لرفع المستند.");
@@ -97,8 +101,23 @@ export const api = {
       method: "POST",
       body: form,
     });
-    const payload = (await res.json().catch(() => null)) as { id?: number; message?: string } | null;
-    if (!res.ok || !payload?.id) {
+    const payload = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      id?: number;
+      message?: string;
+    } | null;
+    if (!res.ok) {
+      throw new Error(payload?.message || "تعذّر رفع الملف عبر خادم المركز المصادَق عليه.");
+    }
+    if (!payload?.id) {
+      if (payload?.ok === true) {
+        return {
+          url: "",
+          fileName: "",
+          mimeType: "",
+          sizeBytes: 0,
+        };
+      }
       throw new Error(payload?.message || "تعذّر رفع الملف عبر خادم المركز المصادَق عليه.");
     }
     return {

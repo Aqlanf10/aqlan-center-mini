@@ -84,6 +84,7 @@ export async function GET(request: Request) {
         if (verdict.allowed) {
           const legacyXray = await canAccessPatient(session, id, "canViewXrays");
           const canSeePhotos = Boolean(
+            session.role !== "reception" &&
             legacyXray &&
             resolved.permissions["photos.view"] &&
             resolved.fields.previousPhotos,

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { buildDefaultOrthoPrivacyPolicy, type OrthoPrivacyPolicyDocument } from "@/lib/ortho-privacy";
+import {
+  buildDefaultOrthoPrivacyPolicy,
+  resolveOrthoAccess,
+  type OrthoPrivacyPolicyDocument,
+} from "@/lib/ortho-privacy";
 import type { OrthoCase, PatientDocument } from "@/lib/db";
 
 let activePolicy: OrthoPrivacyPolicyDocument = buildDefaultOrthoPrivacyPolicy(1);
@@ -205,8 +209,9 @@ describe("ortho-privacy HTTP route enforcement", () => {
     );
     expect(uploadRes.status).toBe(201);
     const receipt = await uploadRes.json();
-    expect(receipt.blindReceipt).toBe(true);
-    expect(receipt.id).toBe(3001);
+    expect(receipt).toEqual({ ok: true });
+    expect(receipt).not.toHaveProperty("id");
+    expect(receipt).not.toHaveProperty("title");
 
     // Direct GET of ortho list, prior documents list, and image download are ALL blocked (403)
     expect((await getOrthoList(new Request("https://synthetic.invalid/api/ortho?patientId=101"))).status).toBe(403);
@@ -276,5 +281,83 @@ describe("ortho-privacy HTTP route enforcement", () => {
       params: Promise.resolve({ id: "2011" }),
     });
     expect(dlRes.status).toBe(403);
+  });
+
+  it("hard-denies reception photo viewing, editing, downloading, media sections, and previousPhotos even under explicit allow rules", async () => {
+    const base = buildDefaultOrthoPrivacyPolicy(1);
+    base.roleDefaults.reception.permissions["photos.view"] = true;
+    base.roleDefaults.reception.fields.previousPhotos = true;
+    activePolicy = {
+      ...base,
+      rules: [
+        {
+          id: "allow-reception-everything-photos",
+          effect: "allow",
+          target: { userIds: [25], roles: ["reception"] },
+          permissions: ["photos.view", "photos.edit", "photos.download", "photos.upload"],
+          sections: ["media", "photo_analysis"],
+          fields: ["previousPhotos"],
+        },
+      ],
+    };
+
+    const resolved = resolveOrthoAccess(
+      activePolicy,
+      { userId: 25, username: "rec-explicit", role: "reception", isActive: true },
+      { patientId: 101, orthoCaseId: 11 },
+    );
+    expect(resolved.permissions["photos.view"]).toBe(false);
+    expect(resolved.permissions["photos.edit"]).toBe(false);
+    expect(resolved.permissions["photos.download"]).toBe(false);
+    expect(resolved.sections.media).toBe(false);
+    expect(resolved.sections.photo_analysis).toBe(false);
+    expect(resolved.fields.previousPhotos).toBe(false);
+    expect(resolved.permissions["photos.upload"]).toBe(true);
+
+    vi.mocked(requireSession).mockResolvedValue({
+      userId: 25,
+      username: "rec-explicit",
+      role: "reception",
+      expiresAt: Date.now() + 60_000,
+    });
+    vi.mocked(findUserByUsername).mockResolvedValue({
+      id: 25,
+      username: "rec-explicit",
+      role: "reception",
+      isActive: true,
+      partyId: null,
+      permissions: null,
+    } as never);
+    vi.mocked(getDocumentForDownload).mockResolvedValue({
+      storageKey: "k-1",
+      document: {
+        id: 2011,
+        patientId: 101,
+        orthoCaseId: 11,
+        photoStage: "progress",
+        title: "Ortho Photo",
+        mimeType: "image/png",
+        removedAt: null,
+      } as PatientDocument,
+    });
+
+    const listRes = await getOrthoList(new Request("https://synthetic.invalid/api/ortho?patientId=101"));
+    expect(listRes.status).toBe(200);
+    const listBody = await listRes.json();
+    expect(listBody.cases[0].photosVisible).toBe(false);
+    expect(listBody.cases[0].adjustments[0].photos).toEqual([]);
+
+    const detailRes = await getOrthoDetail(new Request("https://synthetic.invalid/api/ortho/11"), {
+      params: Promise.resolve({ id: "11" }),
+    });
+    expect(detailRes.status).toBe(200);
+    const detailBody = await detailRes.json();
+    expect(detailBody.photosVisible).toBe(false);
+    expect(detailBody.adjustments[0].photos).toEqual([]);
+
+    const docRes = await getDocument(new Request("https://synthetic.invalid/api/documents/2011"), {
+      params: Promise.resolve({ id: "2011" }),
+    });
+    expect(docRes.status).toBe(403);
   });
 });

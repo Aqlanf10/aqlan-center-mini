@@ -47,6 +47,11 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       found.document.photoStage != null,
     );
     if (isOrthoMedia) {
+      if (session.role === "reception") {
+        return orthoForbiddenResponse(
+          download ? "غير مصرّح لك بتنزيل صور وأشعة التقويم." : "غير مصرّح لك بعرض صور وأشعة التقويم.",
+        );
+      }
       const mediaGate = await evaluateOrthoPermission(
         session,
         { permission: download ? "photos.download" : "photos.view" },

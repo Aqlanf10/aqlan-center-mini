@@ -211,4 +211,36 @@ describe("ortho-privacy pure policy engine", () => {
     });
     expect(parsed.ok).toBe(false);
   });
+
+  it("never grants photo viewing, editing, downloading, media section, or previousPhotos to reception even with explicit allow rules", () => {
+    const base = buildDefaultOrthoPrivacyPolicy(OWNER.userId);
+    base.roleDefaults.reception.permissions["photos.view"] = true;
+    base.roleDefaults.reception.fields.previousPhotos = true;
+    const policy = {
+      ...base,
+      rules: [
+        {
+          id: "allow-reception-photos",
+          effect: "allow" as const,
+          target: { userIds: [55], roles: ["reception" as const] },
+          permissions: ["photos.view" as const, "photos.edit" as const, "photos.download" as const, "photos.upload" as const],
+          sections: ["media" as const, "photo_analysis" as const],
+          fields: ["previousPhotos" as const],
+        },
+      ],
+    };
+    const access = resolveOrthoAccess(policy, {
+      userId: 55,
+      username: "reception-1",
+      role: "reception",
+      isActive: true,
+    });
+    expect(access.permissions["photos.view"]).toBe(false);
+    expect(access.permissions["photos.edit"]).toBe(false);
+    expect(access.permissions["photos.download"]).toBe(false);
+    expect(access.sections.media).toBe(false);
+    expect(access.sections.photo_analysis).toBe(false);
+    expect(access.fields.previousPhotos).toBe(false);
+    expect(access.permissions["photos.upload"]).toBe(true);
+  });
 });

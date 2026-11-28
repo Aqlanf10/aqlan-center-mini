@@ -103,6 +103,8 @@ function PatientDocumentsForPatient({
   const cameraInput = useRef<HTMLInputElement>(null);
   const [photoStage, setPhotoStage] = useState<PhotoStage>("progress");
   const [photoView, setPhotoView] = useState<PhotoView | "">("");
+  const [blindSuccess, setBlindSuccess] = useState(false);
+  const isReceptionBlind = session?.role === "reception";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -130,6 +132,7 @@ function PatientDocumentsForPatient({
     if (!file || busy) return;
     setBusy(true);
     setError(null);
+    setBlindSuccess(false);
     try {
       const form = new FormData();
       form.set("file", file);
@@ -146,6 +149,7 @@ function PatientDocumentsForPatient({
       setTitle("");
       setPicked(null);
       setPhotoView("");
+      if (isReceptionBlind) setBlindSuccess(true);
       if (fileInput.current) fileInput.current.value = "";
       if (cameraInput.current) cameraInput.current.value = "";
       await load();
@@ -175,9 +179,16 @@ function PatientDocumentsForPatient({
   };
 
   const imageDocs = documents.filter((d) => d.isImage && !d.removedAt);
+  const hasComparableSameCasePair = imageDocs.some((a, idx) =>
+    imageDocs.slice(idx + 1).some((b) => (a.orthoCaseId ?? null) === (b.orthoCaseId ?? null)),
+  );
 
   const openComparisonSlider = (beforeDoc?: PatientDocument, afterDoc?: PatientDocument) => {
     if (beforeDoc && afterDoc) {
+      if ((beforeDoc.orthoCaseId ?? null) !== (afterDoc.orthoCaseId ?? null)) {
+        setError("لا يمكن مقارنة صورتين من حالتين تقويميتين مختلفتين.");
+        return;
+      }
       setSliderBeforeUrl(`/api/documents/${beforeDoc.id}`);
       setSliderAfterUrl(`/api/documents/${afterDoc.id}`);
       setSliderTitle(`مقارنة: ${beforeDoc.title} ⟷ ${afterDoc.title}`);
@@ -187,25 +198,57 @@ function PatientDocumentsForPatient({
 
     if (imageDocs.length < 2) return;
 
-    const initial = imageDocs.find((d) => d.photoStage === "initial") || imageDocs[imageDocs.length - 1];
-    const after = imageDocs.find((d) => d.photoStage === "debond" || d.photoStage === "retention" || d.photoStage === "progress") || imageDocs[0];
+    const byCase = new Map<number | null, PatientDocument[]>();
+    for (const d of imageDocs) {
+      const key = d.orthoCaseId ?? null;
+      const list = byCase.get(key) ?? [];
+      list.push(d);
+      byCase.set(key, list);
+    }
+    const eligibleGroups = Array.from(byCase.entries())
+      .filter(([, list]) => list.length >= 2)
+      .sort((a, b) => {
+        if (a[0] === null) return 1;
+        if (b[0] === null) return -1;
+        return b[0] - a[0];
+      });
+    if (eligibleGroups.length === 0) {
+      setError("لا توجد صورتان لنفس الحالة لإجراء المقارنة؛ لا تُخلط صور الحالات المختلفة.");
+      return;
+    }
+
+    const [groupCaseId, sameCaseDocs] = eligibleGroups[0];
+    const initial = sameCaseDocs.find((d) => d.photoStage === "initial") || sameCaseDocs[sameCaseDocs.length - 1];
+    const after =
+      sameCaseDocs.find(
+        (d) =>
+          d.id !== initial.id &&
+          (d.photoStage === "debond" || d.photoStage === "retention" || d.photoStage === "progress"),
+      ) ||
+      sameCaseDocs.find((d) => d.id !== initial.id) ||
+      sameCaseDocs[0];
 
     if (initial && after && initial.id !== after.id) {
       setSliderBeforeUrl(`/api/documents/${initial.id}`);
       setSliderAfterUrl(`/api/documents/${after.id}`);
-      setSliderTitle("مقارنة مراحل العلاج (قبل وبعد)");
-    } else {
-      setSliderBeforeUrl(`/api/documents/${imageDocs[imageDocs.length - 1].id}`);
-      setSliderAfterUrl(`/api/documents/${imageDocs[0].id}`);
-      setSliderTitle("مقارنة الصور السريرية");
+      setSliderTitle(
+        groupCaseId !== null
+          ? `مقارنة مراحل العلاج — حالة تقويم #${groupCaseId}`
+          : "مقارنة الصور السريرية",
+      );
+      setShowSliderModal(true);
     }
-    setShowSliderModal(true);
   };
 
   return (
     <div>
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+      ) : null}
+      {isReceptionBlind && blindSuccess ? (
+        <p role="status" className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800">
+          تم رفع الملف بنجاح.
+        </p>
       ) : null}
 
       {/*
@@ -237,7 +280,7 @@ function PatientDocumentsForPatient({
             <span>إقرار طبي رقمي جديد</span>
           </button>
 
-          {imageDocs.length >= 2 && (
+          {hasComparableSameCasePair && (
             <button
               type="button"
               onClick={() => openComparisonSlider()}
@@ -319,6 +362,7 @@ function PatientDocumentsForPatient({
             disabled={busy}
             onChange={(event) => {
               setPicked(event.target.files?.[0] ?? null);
+              if (isReceptionBlind) setBlindSuccess(false);
               if (cameraInput.current) cameraInput.current.value = "";
             }}
             className="sr-only" />
@@ -333,6 +377,7 @@ function PatientDocumentsForPatient({
             onChange={(event) => {
               const cameraFile = event.target.files?.[0];
               setPicked(cameraFile ?? null);
+              if (isReceptionBlind) setBlindSuccess(false);
               if (fileInput.current) fileInput.current.value = "";
               if (cameraFile) setKind("photo");
             }}
@@ -342,7 +387,11 @@ function PatientDocumentsForPatient({
             📷 التقاط صورة الآن
           </button>
           <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
-            {picked?.name ?? "لم يُختَر ملف بعد — صورة أو PDF"}
+            {isReceptionBlind
+              ? picked
+                ? "تم تحديد ملف للرفع"
+                : "لم يُختَر ملف بعد — صورة أو PDF"
+              : picked?.name ?? "لم يُختَر ملف بعد — صورة أو PDF"}
           </span>
           <button type="submit" disabled={busy || !ready || !picked}
             className="rounded-lg bg-navy-800 px-4 py-1.5 text-xs font-extrabold text-white disabled:opacity-40">
@@ -407,12 +456,17 @@ function PatientDocumentsForPatient({
                     <span>طباعة الإقرار (A4)</span>
                   </a>
                 )}
-                {document.isImage && imageDocs.length >= 2 && (
+                {document.isImage &&
+                  imageDocs.some(
+                    (d) => d.id !== document.id && (d.orthoCaseId ?? null) === (document.orthoCaseId ?? null),
+                  ) && (
                   <button
                     type="button"
                     onClick={() => {
-                      const other = imageDocs.find((d) => d.id !== document.id) || document;
-                      openComparisonSlider(other, document);
+                      const other = imageDocs.find(
+                        (d) => d.id !== document.id && (d.orthoCaseId ?? null) === (document.orthoCaseId ?? null),
+                      );
+                      if (other) openComparisonSlider(other, document);
                     }}
                     className="text-[11px] font-bold text-amber-700 hover:text-amber-900 flex items-center gap-0.5"
                   >

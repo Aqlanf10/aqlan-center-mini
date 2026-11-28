@@ -242,6 +242,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const legacyXray = await canAccessPatient(session, found.patientId, "canViewXrays");
   const photosVisible = Boolean(
+    session.role !== "reception" &&
     legacyXray &&
     readGate.access?.permissions["photos.view"] &&
     readGate.access?.fields.previousPhotos,

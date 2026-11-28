@@ -125,6 +125,7 @@ export async function POST(
     format?: "pptx" | "pdf";
     anonymize?: boolean;
     lang?: "ar" | "en";
+    orthoCaseId?: number | null;
     selectedSlideIds?: string[];
     selectedMediaIds?: string[];
     tracedOverlays?: Record<string, string>;
@@ -184,16 +185,33 @@ export async function POST(
   const clinicName = settings?.["clinic.name"]?.trim() || "مركز الدكتور عقلان";
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
   const cases = await listPatientOrthoCases(patientId, today).catch(() => []);
+  const requestedOrthoCaseId =
+    typeof body.orthoCaseId === "number" && Number.isSafeInteger(body.orthoCaseId) && body.orthoCaseId > 0
+      ? body.orthoCaseId
+      : null;
+  if (requestedOrthoCaseId !== null && !cases.some((c) => c.id === requestedOrthoCaseId)) {
+    return NextResponse.json(
+      { message: "حالة التقويم المحددة غير موجودة لهذا المريض." },
+      { status: 404, headers: NO_STORE_HEADERS },
+    );
+  }
+  const activeCase =
+    (requestedOrthoCaseId !== null ? cases.find((c) => c.id === requestedOrthoCaseId) : undefined) ??
+    cases.find((c) => c.status === "active" || c.status === "retention") ??
+    cases[0] ??
+    null;
+
   const oc = (filtered.orthoCoreCase && typeof filtered.orthoCoreCase === "object"
     ? filtered.orthoCoreCase
     : null) as Record<string, unknown> | null;
 
   const doctorName =
+    activeCase?.responsibleDoctorName ??
     cases.find((c) => c.responsibleDoctorName)?.responsibleDoctorName ??
     (typeof oc?.assignedDoctor === "string" ? oc.assignedDoctor : undefined);
 
-  const rawAdjustments = cases
-    .flatMap((c) => c.adjustments ?? [])
+  const rawAdjustments = (activeCase?.adjustments ?? [])
+    .slice()
     .sort((a, b) => a.doneOn.localeCompare(b.doneOn) || a.id - b.id);
 
   const sessionSummaries: PresentationSessionInput[] = rawAdjustments.map((a, idx) => ({
@@ -222,6 +240,13 @@ export async function POST(
   const derivedDocIdsToSkipStandalone = new Set<number>();
   const rawOcMedia = Array.isArray(oc?.media) ? (oc.media as Array<Record<string, unknown>>) : [];
   for (const m of rawOcMedia) {
+    if (
+      activeCase !== null &&
+      m.orthoCaseId != null &&
+      Number(m.orthoCaseId) !== activeCase.id
+    ) {
+      continue;
+    }
     const origId = extractDocIdFromUrl(m.originalUrl);
     const derivId = extractDocIdFromUrl(m.derivedUrl);
     if (derivId && origId && derivId !== origId) {
@@ -238,12 +263,14 @@ export async function POST(
     });
   }
 
-  // Load permitted clinical photos from durable disk storage for embedding into PPTX
+  // Load permitted clinical photos from durable disk storage for embedding into PPTX (strictly isolated to activeCase.id!)
   const mediaAssets: PresentationMediaAsset[] = [];
   const canEmbedPhotos =
-    evalCreate.access.permissions["photos.view"] && evalCreate.access.fields.previousPhotos;
+    session.role !== "reception" &&
+    evalCreate.access.permissions["photos.view"] &&
+    evalCreate.access.fields.previousPhotos;
 
-  if (canEmbedPhotos && format === "pptx") {
+  if (canEmbedPhotos && format === "pptx" && activeCase !== null) {
     const docs = await listPatientDocuments(patientId).catch(() => []);
     const selectedSet =
       Array.isArray(body.selectedMediaIds) && body.selectedMediaIds.length > 0
@@ -256,7 +283,13 @@ export async function POST(
     }
 
     const imageDocs = docs
-      .filter((d) => d.isImage && !d.removedAt && !derivedDocIdsToSkipStandalone.has(d.id))
+      .filter(
+        (d) =>
+          d.isImage &&
+          !d.removedAt &&
+          d.orthoCaseId === activeCase.id &&
+          !derivedDocIdsToSkipStandalone.has(d.id),
+      )
       .filter((d) => {
         if (!selectedSet) return true;
         const meta = ocMediaByDocId.get(d.id);

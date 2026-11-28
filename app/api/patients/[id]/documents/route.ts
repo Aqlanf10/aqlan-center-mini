@@ -38,7 +38,7 @@ const patientIdFrom = async (context: { params: Promise<{ id: string }> }) => {
   return Number.isInteger(value) && value > 0 ? value : null;
 };
 
-export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
   const patientId = await patientIdFrom(context);
@@ -50,17 +50,42 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "غير مصرّح لك بالوصول إلى مستندات هذا المريض." }, { status: 403, headers: NO_STORE_HEADERS });
   }
 
+  const orthoCaseFilters = new URL(request.url).searchParams.getAll("orthoCaseId");
+  let filterOrthoCaseId: number | null = null;
+  if (orthoCaseFilters.length > 0) {
+    const parsedCaseId = Number(orthoCaseFilters[0]);
+    if (
+      orthoCaseFilters.length > 1 ||
+      !/^[1-9]\d*$/.test(orthoCaseFilters[0]) ||
+      !Number.isSafeInteger(parsedCaseId) ||
+      parsedCaseId > 2147483647
+    ) {
+      return NextResponse.json(
+        { message: "رقم حالة التقويم غير صالح." },
+        { status: 400, headers: NO_STORE_HEADERS },
+      );
+    }
+    filterOrthoCaseId = parsedCaseId;
+  }
+
   try {
     const storage = await storageStatus();
     const allDocs = await listPatientDocuments(patientId, isAdmin(session.role));
-    const orthoPhotoGate = await evaluateOrthoPermission(
-      session,
-      { permission: "photos.view", field: "previousPhotos" },
-      { patientId },
-    );
-    const documents = orthoPhotoGate.allowed
+    const orthoPhotoGate =
+      session.role === "reception"
+        ? { allowed: false }
+        : await evaluateOrthoPermission(
+            session,
+            { permission: "photos.view", field: "previousPhotos" },
+            { patientId, orthoCaseId: filterOrthoCaseId },
+          );
+    const allowedDocs = orthoPhotoGate.allowed
       ? allDocs
       : allDocs.filter((doc) => doc.orthoCaseId == null && doc.adjustmentId == null && doc.photoStage == null);
+    const documents =
+      filterOrthoCaseId !== null
+        ? allowedDocs.filter((doc) => doc.orthoCaseId === filterOrthoCaseId)
+        : allowedDocs;
     return NextResponse.json(
       {
         documents,
@@ -193,6 +218,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     if (orthoGate.access) orthoUploadAccess = orthoGate.access;
   }
 
+  const blindConfirmationOnly =
+    session.role === "reception" ||
+    Boolean(isOrthoUpload && (!orthoUploadAccess || !orthoUploadAccess.permissions["photos.view"]));
+
   try {
     await validateDocumentAssociations({ patientId, visitId, orthoCaseId, adjustmentId });
     const bytes = Buffer.from(await file.arrayBuffer());
@@ -240,36 +269,27 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         );
         if (dup.rows[0]) {
           const existing = dup.rows[0];
-          const blind = Boolean(isOrthoUpload && orthoUploadAccess && !orthoUploadAccess.permissions["photos.view"]);
+          if (blindConfirmationOnly) {
+            return NextResponse.json({ ok: true }, { status: 200, headers: NO_STORE_HEADERS });
+          }
           return NextResponse.json(
-            blind
-              ? {
-                  id: existing.id,
-                  title: existing.title,
-                  photoStage: existing.photo_stage,
-                  photoView: existing.photo_view,
-                  orthoCaseId: existing.ortho_case_id,
-                  adjustmentId: existing.adjustment_id,
-                  blindReceipt: true,
-                  existing: true,
-                }
-              : {
-                  id: existing.id,
-                  patientId: existing.patient_id,
-                  kind: existing.kind,
-                  title: existing.title,
-                  mimeType: existing.mime_type,
-                  sizeBytes: Number(existing.size_bytes),
-                  note: existing.note,
-                  takenOn: existing.taken_on,
-                  uploadedBy: existing.uploaded_by,
-                  uploadedAt: existing.uploaded_at,
-                  orthoCaseId: existing.ortho_case_id,
-                  adjustmentId: existing.adjustment_id,
-                  photoStage: existing.photo_stage,
-                  photoView: existing.photo_view,
-                  existing: true,
-                },
+            {
+              id: existing.id,
+              patientId: existing.patient_id,
+              kind: existing.kind,
+              title: existing.title,
+              mimeType: existing.mime_type,
+              sizeBytes: Number(existing.size_bytes),
+              note: existing.note,
+              takenOn: existing.taken_on,
+              uploadedBy: existing.uploaded_by,
+              uploadedAt: existing.uploaded_at,
+              orthoCaseId: existing.ortho_case_id,
+              adjustmentId: existing.adjustment_id,
+              photoStage: existing.photo_stage,
+              photoView: existing.photo_view,
+              existing: true,
+            },
             { status: 200, headers: NO_STORE_HEADERS },
           );
         }
@@ -303,19 +323,8 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       actor: session.username,
       actorRole: session.role,
     });
-    if (isOrthoUpload && orthoUploadAccess && !orthoUploadAccess.permissions["photos.view"]) {
-      return NextResponse.json(
-        {
-          id: document.id,
-          title: document.title,
-          photoStage: document.photoStage,
-          photoView: document.photoView,
-          orthoCaseId: document.orthoCaseId,
-          adjustmentId: document.adjustmentId,
-          blindReceipt: true,
-        },
-        { status: 201, headers: NO_STORE_HEADERS },
-      );
+    if (blindConfirmationOnly) {
+      return NextResponse.json({ ok: true }, { status: 201, headers: NO_STORE_HEADERS });
     }
     return NextResponse.json(document, { status: 201, headers: NO_STORE_HEADERS });
   } catch (error) {

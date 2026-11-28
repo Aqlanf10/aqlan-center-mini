@@ -1067,12 +1067,18 @@ function PatientOrthoWorkspace({ patientId, pendingAssessments, context, onConte
                     <div className="space-y-4">
                       {/* معرض سجلات الحالة والأشعة المعياري الـ 12 كمنصة WebCeph */}
                       <section>
-                        <WebCephRecordsGrid
-                          patientId={patientId}
-                          orthoCaseId={row.id}
-                          currentPhase={row.phase}
-                          startDate={row.startDate}
-                        />
+                        {session?.role === "reception" ? (
+                          <p role="status" className="rounded-2xl border border-slate-200 bg-white p-3.5 text-xs text-slate-600">
+                            معرض سجلات الصور والأشعة محجوب لحساب الاستقبال.
+                          </p>
+                        ) : (
+                          <WebCephRecordsGrid
+                            patientId={patientId}
+                            orthoCaseId={row.id}
+                            currentPhase={row.phase}
+                            startDate={row.startDate}
+                          />
+                        )}
                       </section>
 
                       {/* السيفالومتري ومخطط ويب سيف (WebCeph Station) */}
@@ -1671,15 +1677,23 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
     photos: QueuedPhoto[];
   } | null>(null);
   const [retryingPhotos, setRetryingPhotos] = useState(false);
+  const blindPhotoUpload = form.session?.role === "reception" || form.session?.role === "assistant";
 
   const addFiles = (files: FileList | null) => {
     if (!files || !form.editable() || !mayUpload(form.session)) return;
     const added: QueuedPhoto[] = [];
+    const baseSeq = Number(form.draft.values.get("blindSeq") ?? 0);
+    let nextSeq = baseSeq;
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
-      const preview = URL.createObjectURL(file); form.draft.urls.add(preview);
+      nextSeq += 1;
+      const preview = blindPhotoUpload
+        ? `blind-upload-${caseRow.id}-${nextSeq}`
+        : URL.createObjectURL(file);
+      if (!blindPhotoUpload) form.draft.urls.add(preview);
       added.push({ file, preview, view: "", timing: "during", note: "" });
     }
+    if (nextSeq !== baseSeq) form.draft.values.set("blindSeq", nextSeq);
     if (added.length > 0) setQueue((current) => [...current, ...added]);
   };
 
@@ -1935,7 +1949,9 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
         ) : null}
         {queue.length > 0 ? (
           <p data-testid="ortho-photo-queue-preview" className="mb-1.5 text-[10px] text-slate-500">
-            الصور المختارة معاينة فقط؛ لا تُعد مجموعة محفوظة حتى تظهر في السجل بعد نجاح الرفع.
+            {blindPhotoUpload
+              ? "تم تجهيز الصور للرفع دون معاينة؛ لا تُحفظ حتى نجاح الإرسال."
+              : "الصور المختارة معاينة فقط؛ لا تُعد مجموعة محفوظة حتى تظهر في السجل بعد نجاح الرفع."}
           </p>
         ) : null}
         {fullSet?.required ? (
@@ -1945,10 +1961,12 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) setLiveCameraOpen(true); }}
-            className="min-w-[10rem] flex-1 rounded-xl bg-brand-navy py-2.5 text-xs font-black text-white hover:opacity-95">
-            🎥 كاميرا حية (هاتف / كمبيوتر / USB)
-          </button>
+          {!blindPhotoUpload ? (
+            <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) setLiveCameraOpen(true); }}
+              className="min-w-[10rem] flex-1 rounded-xl bg-brand-navy py-2.5 text-xs font-black text-white hover:opacity-95">
+              🎥 كاميرا حية (هاتف / كمبيوتر / USB)
+            </button>
+          ) : null}
           <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) cameraInput.current?.click(); }}
             className="rounded-xl bg-navy-800 px-4 py-2.5 text-xs font-black text-white hover:bg-navy-900">
             📷 التقط بالكاميرا الآن
@@ -1975,24 +1993,26 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
           </div>
         ) : null}
 
-        <TighteningCameraStudio
-          open={liveCameraOpen}
-          onClose={() => setLiveCameraOpen(false)}
-          onConfirm={(captured) => {
-            form.draft.urls.add(captured.previewUrl);
-            setQueue((current) => [
-              ...current,
-              {
-                file: captured.originalFile,
-                derivedFile: captured.derivedFile,
-                preview: captured.previewUrl,
-                view: captured.view,
-                timing: captured.timing,
-                note: captured.note,
-              },
-            ]);
-          }}
-        />
+        {!blindPhotoUpload ? (
+          <TighteningCameraStudio
+            open={liveCameraOpen}
+            onClose={() => setLiveCameraOpen(false)}
+            onConfirm={(captured) => {
+              form.draft.urls.add(captured.previewUrl);
+              setQueue((current) => [
+                ...current,
+                {
+                  file: captured.originalFile,
+                  derivedFile: captured.derivedFile,
+                  preview: captured.previewUrl,
+                  view: captured.view,
+                  timing: captured.timing,
+                  note: captured.note,
+                },
+              ]);
+            }}
+          />
+        ) : null}
 
         <input ref={cameraInput} type="file" accept="image/*" capture="environment"
           aria-label="كاميرا الجلسة" className="sr-only"
@@ -2017,7 +2037,13 @@ export function AdjustmentForm({ caseRow, today, wires, patientId, onSaved, onEr
             {queue.map((photo, index) => (
               <li key={photo.preview} className="space-y-1.5 rounded-lg bg-slate-50 p-2 border border-slate-100">
                 <div className="flex flex-wrap items-center gap-2">
-                  <img src={photo.preview} alt="صورة الجلسة" className="h-12 w-12 rounded-lg object-cover" />
+                  {blindPhotoUpload ? (
+                    <span className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700">
+                      تم إرفاق صورة للرفع (دون معاينة)
+                    </span>
+                  ) : (
+                    <img src={photo.preview} alt="صورة الجلسة" className="h-12 w-12 rounded-lg object-cover" />
+                  )}
                   <select value={photo.view}
                     onChange={(event) => {
                       const view = event.target.value as PhotoView | "";
@@ -2126,7 +2152,7 @@ function OrthoComparisonContent({ patientId, orthoCaseId }: { patientId: number;
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch(`/api/patients/${patientId}/documents`, { cache: "no-store" });
+      const response = await fetch(`/api/patients/${patientId}/documents?orthoCaseId=${orthoCaseId}`, { cache: "no-store" });
       const payload = await response.json();
       if (!response.ok) throw new Error("تعذّر التحميل.");
       const documents = (payload.documents ?? []) as {

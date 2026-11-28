@@ -166,6 +166,7 @@ export interface CalibrationData {
 
 export interface MediaRecord {
   id: string;
+  orthoCaseId?: number | null;
   title: string;
   mediaKind: MediaKind;
   stage: RecordStage;
