@@ -70,6 +70,8 @@ export type SettingKey =
   | "plans.specialty_templates"
   | "reminders.auto_template"
   | "reminders.auto_language"
+  | "ai.internal_assistant"
+  | "ai.external_assistant"
   | "ai.clinical_external"
   /* مُرحَّلة من ثوابت الشيفرة في المرحلة ١أ — لكلٍّ مستهلكٌ فعليّ، وافتراضيُّها
      يساوي الثابت الذي كان مكتوبًا فلا يتغيّر سلوك العيادة يوم النشر. */
@@ -194,6 +196,8 @@ export const SETTING_DEFAULTS: Record<SettingKey, string> = {
   "reminders.auto_language": "ar",
   // (P2-11 — قرار المالك) المزوّد الخارجي للمهام الإدارية فقط: النص السريري وتحليل
   // السيفالو لا يخرجان من المركز إلا بتفعيلٍ صريح من المدير.
+  "ai.internal_assistant": "true",
+  "ai.external_assistant": "true",
   "ai.clinical_external": "false",
 
   // المُرحَّلة — القيم هي الثوابت نفسها التي كانت في lib/arrivals.ts وlib/flow.ts
@@ -432,7 +436,7 @@ export function validateSetting(key: SettingKey, value: string): string | null {
   if (key === "reminders.auto_language") {
     if (!/^[a-z]{2}(_[A-Z]{2})?$/.test(trimmed)) return "رمز لغة القالب مثل ar أو en_US.";
   }
-  if (key === "ai.clinical_external") {
+  if (key === "ai.clinical_external" || key === "ai.internal_assistant" || key === "ai.external_assistant") {
     if (trimmed !== "true" && trimmed !== "false") return "القيمة: true أو false.";
   }
   if (key === "backup.schedule_time") {

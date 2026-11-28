@@ -4,10 +4,13 @@ import { bodyErrorResponse, readJsonBody } from "@/lib/http-body";
 import { requireSession } from "@/lib/session";
 import { findUserByUsername, recordAudit } from "@/lib/db";
 import { type Role, canUseAiChat } from "@/lib/roles";
+import { getAiSettings } from "@/lib/ai";
 import { verifyToolConfirmation } from "@/lib/ai-confirmation";
 import { executeAiTool } from "@/lib/ai-tools/registry";
 import { resolveToolPolicy } from "@/lib/ai-tools/policy";
 import type { AiToolContext } from "@/lib/ai-tools/types";
+import { readAssistantControlSettings } from "@/lib/assistant-mode-settings";
+import { assistantModes } from "@/lib/assistant-modes";
 import { dbTodayISO } from "@/lib/reports";
 
 export const dynamic = "force-dynamic";
@@ -23,18 +26,28 @@ export const dynamic = "force-dynamic";
  * المعاملات — فما وافق عليه المستخدم في المعاينة هو ما يُنفَّذ حرفيًّا.
  */
 export async function POST(request: Request) {
+  const response = await handlePost(request);
+  // Denials and bounded-body errors must also be non-cacheable.
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
+async function handlePost(request: Request) {
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
 
-  let body: Record<string, unknown>;
+  let body: unknown;
   try {
-    body = (await readJsonBody<Record<string, unknown>>(request, AI_CHAT_BODY_LIMIT_BYTES));
+    body = await readJsonBody(request, AI_CHAT_BODY_LIMIT_BYTES);
   } catch (error) { const bounded = bodyErrorResponse(error); if (bounded) return bounded;
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
-  const token = body.token;
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
+  const token = (body as Record<string, unknown>).token;
   if (typeof token !== "string" || token.length === 0) {
     return NextResponse.json({ message: "رمز التأكيد مفقود." }, { status: 400 });
   }
@@ -58,9 +71,19 @@ export async function POST(request: Request) {
 
   /* إعادة تحميل المستخدم من قاعدة البيانات: الرمز صالح، لكن الحساب نفسه قد
      عُطّل أو سُحبت صلاحيته أو تغيّر دوره منذ العرض — كل ذلك يُفحص الآن. */
-  const user = await findUserByUsername(session.username);
+  let user: Awaited<ReturnType<typeof findUserByUsername>>;
+  try {
+    user = await findUserByUsername(session.username);
+  } catch {
+    return NextResponse.json({ message: "تعذّر التحقق من حساب المستخدم. أعد المحاولة لاحقًا." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   if (!user || !user.isActive) {
     return NextResponse.json({ message: "حساب المستخدم غير نشط أو غير موجود." }, { status: 403 });
+  }
+  // The account can change between requireSession and this second read. Never
+  // combine a different account or role with the already admitted session.
+  if (user.id !== session.userId || user.role !== session.role) {
+    return NextResponse.json({ message: "تغيّرت بيانات الحساب. سجّل الدخول من جديد." }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   if (payload.userId !== user.id) {
     return NextResponse.json(
@@ -73,6 +96,17 @@ export async function POST(request: Request) {
       { message: "ليس لديك صلاحية تنفيذ إجراءات المساعد الذكي." },
       { status: 403 },
     );
+  }
+
+  // Re-check the master switch for previously issued confirmations, without requiring a cloud key.
+  const masterSettings = await getAiSettings().catch(() => null);
+  if (masterSettings?.enabled !== true) {
+    return NextResponse.json({ message: "المساعد الذكي متوقف أو تعذّر التحقق من إعداداته. لم يُنفّذ الإجراء." }, { status: 503 });
+  }
+
+  const settings = await readAssistantControlSettings().catch(() => null);
+  if (!settings || !assistantModes(settings).internal) {
+    return NextResponse.json({ message: "المساعد الداخلي متوقف أو تعذّر التحقق من إعداداته. لم يُنفّذ الإجراء." }, { status: 503 });
   }
 
   const todayISO = await dbTodayISO().catch(() => new Date().toISOString().slice(0, 10));
@@ -89,7 +123,8 @@ export async function POST(request: Request) {
     databaseUrl.includes("ci-placeholder");
   const isDbConnected = !isCiPlaceholder && Boolean(databaseUrl || process.env.USE_LOCAL_DB === "true");
 
-  const doctorPartyId = user.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+  // The freshly loaded account is authoritative; an unlinked doctor must not inherit a stale session party.
+  const doctorPartyId = user.partyId ?? null;
 
   /* دفاع في العمق (مراجعة P0): الرمز الخام الموقّع يُمرّر كما هو إلى المنفّذ
      المركزي الذي يتحقق بنفسه من التوقيع والعمر والأداة والمستخدم — لا حمولة
@@ -142,5 +177,5 @@ export async function POST(request: Request) {
     ok: result.success,
     reply: result.textSummary,
     ...result,
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
 }

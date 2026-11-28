@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
   recordAudit: vi.fn(),
   /* (P2-11) هذه الاختبارات تصف مسار الاستشارة السريرية حين يفعّلها المالك صراحةً —
      والافتراضي معطَّل (Claude للمهام الإدارية فقط، انظر ai-scope.test). */
-  getSettingsSafe: vi.fn(async () => ({ "ai.clinical_external": "true" })),
+  controlSettings: vi.fn(async () => ({ "ai.clinical_external": "true" })),
   personNameTokens: vi.fn(async () => new Set(["احمد", "علي"])),
   getAiSettings: vi.fn(),
   aiChat: vi.fn(),
@@ -23,16 +23,23 @@ vi.mock("@/lib/session", () => ({
   requireSession: mocks.requireSession,
 }));
 
+// Staff-chat RBAC and cloud tests run without a database; strict limiter behavior
+// is covered independently in ai-rate-limit-fail-closed.test.ts.
+vi.mock("@/lib/security-rate-limit", () => ({
+  consumeSecurityLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }),
+}));
+
 vi.mock("@/lib/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/db")>();
   return {
     ...actual,
     findUserByUsername: mocks.findUserByUsername,
     recordAudit: mocks.recordAudit,
-    getSettingsSafe: mocks.getSettingsSafe,
     personNameTokens: mocks.personNameTokens,
   };
 });
+
+vi.mock("@/lib/assistant-mode-settings", () => ({ readAssistantControlSettings: mocks.controlSettings }));
 
 vi.mock("@/lib/ai", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/ai")>();
@@ -102,7 +109,7 @@ describe("تحليل الصلاحيات وقيمها الافتراضية (parse
 describe("مسار استدعاء المساعد الذكي (POST /api/ai/chat)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.getSettingsSafe.mockResolvedValue({ "ai.clinical_external": "true" });
+    mocks.controlSettings.mockResolvedValue({ "ai.clinical_external": "true" });
     mocks.requireSession.mockResolvedValue({
       userId: 1,
       username: "dr.ahmed",
@@ -272,7 +279,7 @@ describe("مسار استدعاء المساعد الذكي (POST /api/ai/chat)"
 describe("\u062d\u0627\u0631\u0633 \u0627\u0644\u0642\u0635\u062f \u0627\u0644\u0633\u0631\u064a\u0631\u064a \u0644\u0644\u0627\u0633\u062a\u0634\u0627\u0631\u0629 \u0627\u0644\u062e\u0627\u0631\u062c\u064a\u0629 (\u0645\u0631\u0627\u062c\u0639\u0629 P0)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mocks.getSettingsSafe.mockResolvedValue({ "ai.clinical_external": "true" });
+    mocks.controlSettings.mockResolvedValue({ "ai.clinical_external": "true" });
     mocks.requireSession.mockResolvedValue({
       userId: 2,
       username: "reception2",
@@ -346,7 +353,7 @@ describe("(P2-11) Claude للمهام الإدارية فقط — الافترا
   beforeEach(() => {
     vi.resetAllMocks();
     // الافتراضي: الإرسال السريري معطَّل.
-    mocks.getSettingsSafe.mockResolvedValue({ "ai.clinical_external": "false" });
+    mocks.controlSettings.mockResolvedValue({ "ai.clinical_external": "false" });
     mocks.personNameTokens.mockResolvedValue(new Set(["احمد", "علي"]));
     mocks.getAiSettings.mockResolvedValue({ enabled: true, hasKey: true, model: "claude-haiku-4-5-20251001" });
     mocks.aiChat.mockResolvedValue({ ok: true, content: "إعلانٌ مهذب عن إغلاق يوم العيد.", model: "claude-haiku-4-5-20251001", latencyMs: 50 });
