@@ -108,6 +108,17 @@ describe("synthetic assistant mode matrix", () => {
       vi.unstubAllEnvs();
     }
   });
+  it("fails closed without cloud egress when local classification fails", async () => {
+    m.process.mockRejectedValue(new Error("SYNTHETIC_PRIVATE_ENGINE_ERROR"));
+    const response = await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.text()).not.toContain("SYNTHETIC_PRIVATE_ENGINE_ERROR");
+    expect(m.process).toHaveBeenCalledOnce();
+    expect(m.names).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
   it.each(["rejected", "not-ok", "empty"] as const)("labels the local fallback when the cloud response is %s", async mode => {
     m.process.mockResolvedValue({ answer: "محلي", intent: "general_clinical", toolsUsed: [], sourceType: "internal_engine", model: "synthetic-local", warnings: ["SYNTHETIC_EXISTING_WARNING"] });
     if (mode === "rejected") m.ai.mockRejectedValue(new Error("SYNTHETIC_PRIVATE_PROVIDER_ERROR"));
