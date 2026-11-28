@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/session", () => ({ requireSession: mocks.requireSession }));
+// Cloud trust tests use only synthetic state; the real distributed limiter is covered separately.
+vi.mock("@/lib/security-rate-limit", () => ({ consumeSecurityLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }) }));
 
 vi.mock("@/lib/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/db")>();
