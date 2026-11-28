@@ -108,6 +108,18 @@ describe("synthetic assistant mode matrix", () => {
       vi.unstubAllEnvs();
     }
   });
+  it.each(["rejected", "not-ok", "empty"] as const)("labels the local fallback when the cloud response is %s", async mode => {
+    m.process.mockResolvedValue({ answer: "محلي", intent: "general_clinical", toolsUsed: [], sourceType: "internal_engine", model: "synthetic-local", warnings: ["SYNTHETIC_EXISTING_WARNING"] });
+    if (mode === "rejected") m.ai.mockRejectedValue(new Error("SYNTHETIC_PRIVATE_PROVIDER_ERROR"));
+    else m.ai.mockResolvedValue({ ok: mode === "empty", content: mode === "empty" ? "  " : "SYNTHETIC_PRIVATE_PROVIDER_ERROR", model: "synthetic-cloud" });
+    const response = await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+    expect(response.status).toBe(200);
+    const reply = await response.json();
+    expect(reply).toMatchObject({ sourceType: "internal_engine", reply: "محلي", model: "synthetic-local" });
+    expect(reply.warnings).toEqual(["SYNTHETIC_EXISTING_WARNING", "لم يكتمل الرد من المساعد الخارجي؛ المعروض هو رد المساعد الداخلي."]);
+    expect(JSON.stringify(reply)).not.toContain("SYNTHETIC_PRIVATE_PROVIDER_ERROR");
+    expect(m.ai).toHaveBeenCalledOnce();
+  });
   it("keeps the local administrative answer when name redaction lookup fails", async () => {
     m.names.mockRejectedValue(new Error("synthetic redaction lookup unavailable"));
     const response = await chat(make({ message: "اكتب رسالة شكر إلى أحمد علي" }));
