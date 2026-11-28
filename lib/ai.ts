@@ -78,7 +78,7 @@ const DEFAULTS = {
 };
 
 /** يقرأ الصف الوحيد — بلا صفٍّ يعيد الافتراضي: الخدمة معطّلة حتى يضبطها المالك. */
-export async function getAiSettings(): Promise<AiSettingsRow> {
+export async function getAiSettings(): Promise<AiSettingsRow & { savedRevision: string | null }> {
   const { rows } = await getPool().query<{
     enabled: boolean;
     provider: string;
@@ -90,8 +90,10 @@ export async function getAiSettings(): Promise<AiSettingsRow> {
     last_test_message: string | null;
     updated_by: string | null;
     updated_at: Date | null;
+    saved_revision: string | null;
   }>(`SELECT enabled, provider, base_url, model, api_key_enc,
-             last_test_at, last_test_ok, last_test_message, updated_by, updated_at
+             last_test_at, last_test_ok, last_test_message, updated_by, updated_at,
+             updated_at::text AS saved_revision
       FROM ai_settings WHERE id = 1`);
 
   if (rows.length === 0) {
@@ -107,6 +109,7 @@ export async function getAiSettings(): Promise<AiSettingsRow> {
       lastTestMessage: null,
       updatedBy: null,
       updatedAt: null,
+      savedRevision: null,
     };
   }
 
@@ -135,6 +138,7 @@ export async function getAiSettings(): Promise<AiSettingsRow> {
     lastTestMessage: row.last_test_message,
     updatedBy: row.updated_by,
     updatedAt: row.updated_at,
+    savedRevision: row.saved_revision,
   };
 }
 
@@ -443,14 +447,18 @@ export async function testAiConnection(
 
   // Mirror the registry's saved-credential proof boundary. A temporary key
   // must not certify (or invalidate) the different key stored in ai_settings.
+  // Bind to the exact save revision too: an A→B→A change (or a save of the
+  // same fields) invalidates in-flight evidence. Keep PostgreSQL microseconds
+  // as text rather than a JS Date, which loses precision.
   if (!input.apiKey?.trim()) {
     const persisted = await getPool().query(
       `UPDATE ai_settings
        SET last_test_at = NOW(), last_test_ok = $1, last_test_message = $2
        WHERE id = 1 AND api_key_enc IS NOT DISTINCT FROM $3
-         AND enabled = $4 AND provider = $5 AND base_url = $6 AND model = $7`,
+         AND enabled = $4 AND provider = $5 AND base_url = $6 AND model = $7
+         AND updated_at::text IS NOT DISTINCT FROM $8`,
       [outcome.ok, outcome.message, settings.apiKeyEnc, settings.enabled,
-        settings.provider, settings.baseUrl, settings.model],
+        settings.provider, settings.baseUrl, settings.model, settings.savedRevision],
     );
     if (persisted.rowCount !== 1) {
       outcome = { ok: false, message: "تغيّرت إعدادات المزود أثناء الاختبار أو لم تُحفظ بعد؛ أعد الاختبار بالإعدادات الحالية.", latencyMs: outcome.latencyMs };
