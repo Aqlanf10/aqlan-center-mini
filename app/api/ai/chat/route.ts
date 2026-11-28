@@ -340,9 +340,18 @@ export async function POST(request: Request) {
           sourceType: "external_ai",
           latencyMs: cloudResult.latencyMs,
         };
+      } else {
+        response = {
+          ...response,
+          warnings: [...(response.warnings || []), "لم يكتمل الرد من المساعد الخارجي؛ المعروض هو رد المساعد الداخلي."],
+        };
       }
     } catch {
-      // الاستمرار على رد المحرك المحلي عند فشل المزوّد
+      // Do not expose provider errors or imply that a cloud request actually ran.
+      response = {
+        ...response,
+        warnings: [...(response.warnings || []), "لم يكتمل الرد من المساعد الخارجي؛ المعروض هو رد المساعد الداخلي."],
+      };
     }
   }
 
