@@ -18,6 +18,7 @@ const row = {
   model: "synthetic-model", api_key_enc: "synthetic-saved-ciphertext",
   organization_id: null, custom_headers: {}, timeout_ms: 30000, max_tokens: 2048,
   temperature: 0.2, enabled: true, is_default: false, priority: 10, last_test_ok: null,
+  saved_revision: "2026-11-28 16:00:00.123456+00",
 };
 const outcome = { ok: true, message: "synthetic READY", latencyMs: 20 };
 
@@ -46,8 +47,10 @@ describe("provider connection evidence belongs to saved configuration", () => {
     expect(sql).toContain("protocol_type = $6 AND base_url = $7 AND model = $8");
     expect(sql).toContain("api_endpoint IS NOT DISTINCT FROM $9");
     expect(sql).toContain("custom_headers::jsonb");
+    expect(sql).toContain("updated_at::text = $15");
+    expect(query.mock.calls[0][0]).toContain("updated_at::text AS saved_revision");
     expect(params).toEqual([true, outcome.message, 20, row.id, row.api_key_enc,
-      row.protocol_type, row.base_url, row.model, null, null, "{}", 30000, 2048, 0.2]);
+      row.protocol_type, row.base_url, row.model, null, null, "{}", 30000, 2048, 0.2, row.saved_revision]);
     expect(audit.mock.calls[0][0].details).toMatchObject({ usesUnsavedKey: false });
   });
 
@@ -61,6 +64,32 @@ describe("provider connection evidence belongs to saved configuration", () => {
     expect(audit.mock.calls[0][0].details).toMatchObject({ ok: false });
   });
 
+  it("rejects evidence after an identical-fields save or A-B-A change with a newer microsecond revision", async () => {
+    query.mockResolvedValueOnce({ rows: [row], rowCount: 1 })
+      .mockImplementationOnce(async (_sql, params) => ({
+        rows: [], rowCount: params[14] === "2026-11-28 16:00:00.123457+00" ? 1 : 0,
+      }));
+    const result = await testAiProviderConnection(row.id);
+    expect(result.ok).toBe(false);
+    expect(testConnection).toHaveBeenCalledOnce();
+    expect(query.mock.calls[1][1][14]).toBe(row.saved_revision);
+    expect(audit.mock.calls[0][0].details.ok).toBe(false);
+  });
+
+  it.each([null, undefined, "", " ", 123])("does not test or certify saved settings without a revision (%s)", async saved_revision => {
+    query.mockResolvedValueOnce({ rows: [{ ...row, saved_revision }], rowCount: 1 });
+    expect((await testAiProviderConnection(row.id)).ok).toBe(false);
+    expect(testConnection).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledOnce();
+  });
+
+  it("permits a temporary-key test without certifying saved settings when revision is missing", async () => {
+    query.mockResolvedValueOnce({ rows: [{ ...row, saved_revision: null }], rowCount: 1 });
+    expect(await testAiProviderConnection(row.id, "synthetic-unsaved-key")).toEqual(outcome);
+    expect(query).toHaveBeenCalledOnce();
+    expect(testConnection.mock.calls[0][0]).not.toHaveProperty("savedRevision");
+  });
+
   it("uses effective defaults for legacy rows with nullable transport settings", async () => {
     query.mockResolvedValueOnce({ rows: [{ ...row, timeout_ms: null, max_tokens: null, temperature: null }], rowCount: 1 })
       .mockResolvedValueOnce({ rows: [], rowCount: 1 });
@@ -72,7 +101,7 @@ describe("provider connection evidence belongs to saved configuration", () => {
     expect(sql).toContain("COALESCE(timeout_ms, 30000) = $12");
     expect(sql).toContain("COALESCE(max_tokens, 2048) = $13");
     expect(sql).toContain("COALESCE(temperature, 0.2) = $14");
-    expect(params.slice(11)).toEqual([30000, 2048, 0.2]);
+    expect(params.slice(11)).toEqual([30000, 2048, 0.2, row.saved_revision]);
   });
 
   it("invalidates prior connection evidence when saving configuration", async () => {
