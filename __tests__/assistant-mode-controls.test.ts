@@ -160,6 +160,32 @@ describe("synthetic assistant mode matrix", () => {
     expect(m.process.mock.calls[0][2][0].content).toHaveLength(4000);
     expect(m.ai).not.toHaveBeenCalled();
   });
+  it.each(["SYNTHETIC_CANCEL", "", 123])("rejects a conflicting legacy instruction %j alongside history", async message => {
+    const response = await chat(make({ message, messages: [
+      { role: "user", content: EXTERNAL_ADMIN_TEMPLATES[0] },
+    ] }));
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(m.master).not.toHaveBeenCalled();
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
+  it("accepts matching legacy and history instructions without duplicate dispatch", async () => {
+    const instruction = EXTERNAL_ADMIN_TEMPLATES[0];
+    const response = await chat(make({ message: " " + instruction + " ", messages: [
+      { role: "user", content: instruction },
+    ] }));
+    expect(response.status).toBe(200);
+    expect(m.process).toHaveBeenCalledOnce();
+    expect(m.ai).toHaveBeenCalledOnce();
+  });
+  it("accepts an empty history with a valid legacy instruction", async () => {
+    const response = await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0], messages: [] }));
+    expect(response.status).toBe(200);
+    expect(m.process).toHaveBeenCalledOnce();
+    expect(m.ai).toHaveBeenCalledOnce();
+  });
   it("accepts explicit null patient context for an ordinary administrative request", async () => {
     const response = await chat(make({ conversationPatientId: null, message: EXTERNAL_ADMIN_TEMPLATES[0] }));
     expect(response.status).toBe(200);
