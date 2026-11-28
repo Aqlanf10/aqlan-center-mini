@@ -71,6 +71,18 @@ describe("synthetic assistant mode matrix", () => {
       expect(m.ai).not.toHaveBeenCalled();
     },
   );
+  it.each(["tool", "developer", "function", "", null, undefined, 1])("rejects unsupported client message role %s before dispatch", async role => {
+    const response = await chat(make({ messages: [
+      { role: "user", content: EXTERNAL_ADMIN_TEMPLATES[0] },
+      { role, content: EXTERNAL_ADMIN_TEMPLATES[1] },
+    ] }));
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(m.master).not.toHaveBeenCalled();
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
   it("accepts explicit null patient context for an ordinary administrative request", async () => {
     const response = await chat(make({ conversationPatientId: null, message: EXTERNAL_ADMIN_TEMPLATES[0] }));
     expect(response.status).toBe(200);
