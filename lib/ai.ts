@@ -218,6 +218,10 @@ export async function saveAiSettings(
        base_url = EXCLUDED.base_url,
        model = EXCLUDED.model,
        api_key_enc = COALESCE(EXCLUDED.api_key_enc, ai_settings.api_key_enc),
+       -- A save invalidates old connection evidence; a fresh test is required.
+       last_test_at = NULL,
+       last_test_ok = NULL,
+       last_test_message = NULL,
        updated_by = EXCLUDED.updated_by,
        updated_at = EXCLUDED.updated_at`,
     [input.enabled, input.provider, base, model, newKeyEnc, actor],
@@ -431,18 +435,28 @@ export async function testAiConnection(
       : settings,
   );
 
-  const outcome: AiTestOutcome = {
+  let outcome: AiTestOutcome = {
     ok: result.ok,
     message: result.ok ? `الاتصال ناجح — النموذج ${result.model} (${result.latencyMs} م.ث)` : (result.error ?? "فشل الاتصال."),
     latencyMs: result.latencyMs,
   };
 
-  await getPool().query(
-    `UPDATE ai_settings
-     SET last_test_at = NOW(), last_test_ok = $1, last_test_message = $2
-     WHERE id = 1`,
-    [outcome.ok, outcome.message],
-  );
+  // Mirror the registry's saved-credential proof boundary. A temporary key
+  // must not certify (or invalidate) the different key stored in ai_settings.
+  if (!input.apiKey?.trim()) {
+    const persisted = await getPool().query(
+      `UPDATE ai_settings
+       SET last_test_at = NOW(), last_test_ok = $1, last_test_message = $2
+       WHERE id = 1 AND api_key_enc IS NOT DISTINCT FROM $3
+         AND enabled = $4 AND provider = $5 AND base_url = $6 AND model = $7
+         AND updated_at IS NOT DISTINCT FROM $8`,
+      [outcome.ok, outcome.message, settings.apiKeyEnc, settings.enabled,
+        settings.provider, settings.baseUrl, settings.model, settings.updatedAt],
+    );
+    if (persisted.rowCount !== 1) {
+      outcome = { ok: false, message: "تغيّرت إعدادات المزود أثناء الاختبار أو لم تُحفظ بعد؛ أعد الاختبار بالإعدادات الحالية.", latencyMs: outcome.latencyMs };
+    }
+  }
 
   // في السجل: النتيجة والزمن فقط — لا مفتاح ولا بصمته.
   await recordAudit({
