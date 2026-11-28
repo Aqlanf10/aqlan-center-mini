@@ -56,6 +56,14 @@ function isDatabaseOnline(): boolean {
 }
 
 export async function POST(request: Request) {
+  const response = await handlePost(request);
+  // Denials and bounded-body/rate-limit errors must also be non-cacheable.
+  // Preserve the response status and any existing headers (e.g. Retry-After).
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
+async function handlePost(request: Request) {
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
