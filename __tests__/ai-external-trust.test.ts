@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   requireSession: vi.fn(),
   findUserByUsername: vi.fn(),
   recordAudit: vi.fn(),
+  personNameTokens: vi.fn(),
   /* (P2-11) هذه الاختبارات تصف مسار الاستشارة السريرية حين يفعّلها المالك صراحةً —
      والافتراضي معطَّل (Claude للمهام الإدارية فقط، انظر ai-scope.test). */
   controlSettings: vi.fn(async () => ({ "ai.clinical_external": "true" })),
@@ -20,6 +21,8 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/lib/session", () => ({ requireSession: mocks.requireSession }));
+// Cloud trust tests use only synthetic state; the real distributed limiter is covered separately.
+vi.mock("@/lib/security-rate-limit", () => ({ consumeSecurityLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }) }));
 
 vi.mock("@/lib/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/db")>();
@@ -27,6 +30,7 @@ vi.mock("@/lib/db", async (importOriginal) => {
     ...actual,
     findUserByUsername: mocks.findUserByUsername,
     recordAudit: mocks.recordAudit,
+    personNameTokens: mocks.personNameTokens,
     createPatient: mocks.createPatient,
     recordPayment: mocks.recordPayment,
   };
@@ -48,6 +52,7 @@ import { POST as chatRoute } from "../app/api/ai/chat/route";
 
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.personNameTokens.mockResolvedValue(new Set<string>());
     mocks.controlSettings.mockResolvedValue({ "ai.clinical_external": "true" });
   mocks.requireSession.mockResolvedValue({
     userId: 2,
@@ -87,6 +92,8 @@ describe("حدّ الثقة الخارجي (P0.4): ردّ المزود مشور�
        (المحرك المحلي قد يستخدم خبيره السريري المحلي للنوايا العامة — قراءة
        نصية بحتة، وهذا مسموح؛ الممنوع تنفيذ JSON المزود الخارجي.) */
     expect(data.sourceType).toBe("external_ai");
+    expect(mocks.personNameTokens).toHaveBeenCalledOnce();
+    expect(mocks.aiChat).toHaveBeenCalledOnce();
     expect(data.toolsUsed ?? []).not.toContain("record_patient_payment");
     expect(data.confirmation).toBeUndefined();
     expect(mocks.recordPayment).not.toHaveBeenCalled();

@@ -32,6 +32,8 @@ export interface SecurityLimitSpec {
   windowMinutes: number;
   /** ترويسات الطلب — لاستخراج المصدر خلف وسيط موثوق. */
   headers: Headers;
+  /** Opt-in: reject dispatch when the distributed counter cannot be verified. */
+  failClosed?: boolean;
 }
 
 /**
@@ -44,6 +46,7 @@ export async function consumeSecurityLimit(spec: SecurityLimitSpec): Promise<Sec
   const secret = process.env.SESSION_SECRET;
   if (!secret || secret.length < 32) {
     // بلا سرّ لا بصمة HMAC — لا نخزن هوية خام بأي حال.
+    if (spec.failClosed) throw new Error("Security limit unavailable");
     return { allowed: true, retryAfterSeconds: 0 };
   }
   const hmac = (value: string) => createHmac("sha256", secret).update(value).digest("hex");
@@ -61,6 +64,7 @@ export async function consumeSecurityLimit(spec: SecurityLimitSpec): Promise<Sec
   try {
     return await consumeLoginAttempt(limits, spec.windowMinutes);
   } catch {
+    if (spec.failClosed) throw new Error("Security limit unavailable");
     return { allowed: true, retryAfterSeconds: 0 };
   }
 }

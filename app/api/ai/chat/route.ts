@@ -56,14 +56,32 @@ function isDatabaseOnline(): boolean {
 }
 
 export async function POST(request: Request) {
+  const response = await handlePost(request);
+  // Denials and bounded-body/rate-limit errors must also be non-cacheable.
+  // Preserve the response status and any existing headers (e.g. Retry-After).
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
+async function handlePost(request: Request) {
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
 
-  const user = await findUserByUsername(session.username);
+  let user: Awaited<ReturnType<typeof findUserByUsername>>;
+  try {
+    user = await findUserByUsername(session.username);
+  } catch {
+    return NextResponse.json({ message: "تعذّر التحقق من حساب المستخدم. أعد المحاولة لاحقًا." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   if (!user || !user.isActive) {
     return NextResponse.json({ message: "حساب المستخدم غير نشط أو غير موجود." }, { status: 403 });
+  }
+  // The account can change between requireSession and this second read. Never
+  // combine a different account or role with the already admitted session.
+  if (user.id !== session.userId || user.role !== session.role) {
+    return NextResponse.json({ message: "تغيّرت بيانات الحساب. سجّل الدخول من جديد." }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
 
   const hasPermission = canUseAiChat(session.role, user.permissions);
@@ -78,11 +96,18 @@ export async function POST(request: Request) {
      بصمة HMAC للمستخدم على قاعدة البيانات (بين النسخ ومع إعادة التشغيل). */
   const limit = await consumeSecurityLimit({
     scope: "ai-chat",
+    failClosed: true,
     identifier: String(user.id),
     maximum: AI_CHAT_RATE_LIMIT.maximum,
     windowMinutes: AI_CHAT_RATE_LIMIT.windowMinutes,
     headers: request.headers,
-  });
+  }).catch(() => null);
+  if (!limit) {
+    return NextResponse.json(
+      { message: "تعذّر التحقق من حدّ طلبات المساعد. أعد المحاولة لاحقًا." },
+      { status: 503 },
+    );
+  }
   if (!limit.allowed) {
     return NextResponse.json(
       { message: "طلبات كثيرة على المساعد الذكي. أعد المحاولة بعد قليل." },
@@ -101,26 +126,61 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const source = (body ?? {}) as Record<string, unknown>;
+  // Match the confirmation endpoint: only a JSON object is a valid chat envelope.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
+  const source = body as Record<string, unknown>;
+
+  // A supplied but malformed patient context must not become an unlinked cloud request.
+  // Null/omitted is the explicit no-patient case; all other IDs must be safe positive integers.
+  const requestedPatientId = source.conversationPatientId;
+  if (requestedPatientId != null && (typeof requestedPatientId !== "number"
+    || !Number.isSafeInteger(requestedPatientId) || requestedPatientId <= 0)) {
+    return NextResponse.json({ message: "رقم سياق المريض غير صالح." }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
 
   // استخراج سجل المحادثة — رسائل العميل **بياناتٌ لا هوية** (P0.5):
   // role=system من العميل يُهمَد بالكامل (البرومبت النظامي الموثوق يملكه الخادم
   // وحده)، وrole=assistant يُقبل كسياقٍ غير موثوق لا يُمنح أي امتياز.
   const incomingMessages: AiChatMessage[] = [];
 
+  if (source.messages != null && !Array.isArray(source.messages)) {
+    return NextResponse.json({ message: "سجل المحادثة غير صالح." }, { status: 400 });
+  }
   if (Array.isArray(source.messages) && source.messages.length > 0) {
-    for (const m of source.messages) {
-      if (m && typeof m === "object") {
-        const item = m as Record<string, unknown>;
-        if (item.role === "system") continue; // برومبت نظام من العميل: مهمل
-        const role = item.role === "assistant" ? "assistant" : "user";
-        const content = typeof item.content === "string" ? item.content.trim() : "";
-        if (content) {
-          incomingMessages.push({ role, content: content.slice(0, 4000) });
-        }
+    for (const [index, m] of source.messages.entries()) {
+      // Never silently discard a malformed turn and replay an earlier user request.
+      if (!m || typeof m !== "object" || Array.isArray(m)) {
+        return NextResponse.json({ message: "رسالة المحادثة غير صالحة." }, { status: 400 });
       }
+      const item = m as Record<string, unknown>;
+      if (item.role === "system") {
+        // Ignore client system prompts, but never let a trailing ignored turn
+        // reactivate an earlier user instruction.
+        if (index === source.messages.length - 1) {
+          return NextResponse.json({ message: "اكتب رسالتك أو استفسارك أولاً." }, { status: 400 });
+        }
+        continue;
+      }
+      if (item.role !== "user" && item.role !== "assistant") {
+        return NextResponse.json({ message: "دور رسالة المحادثة غير صالح." }, { status: 400 });
+      }
+      if (typeof item.content !== "string" || !item.content.trim()) {
+        return NextResponse.json({ message: "محتوى رسالة المحادثة غير صالح." }, { status: 400 });
+      }
+      const content = item.content.trim();
+      // Never silently cut the current instruction: a suffix may change or cancel an action.
+      // Older history remains bounded for compatibility with long assistant replies.
+      if (index === source.messages.length - 1 && item.role === "user" && content.length > 4000) {
+        return NextResponse.json({ message: "الرسالة طويلة جدًا. اختصرها إلى 4000 حرف ثم أعد الإرسال." }, { status: 400 });
+      }
+      incomingMessages.push({ role: item.role, content: content.slice(0, 4000) });
     }
   } else if (typeof source.message === "string" && source.message.trim()) {
+    if (source.message.trim().length > 4000) {
+      return NextResponse.json({ message: "الرسالة طويلة جدًا. اختصرها إلى 4000 حرف ثم أعد الإرسال." }, { status: 400 });
+    }
     incomingMessages.push({
       role: "user",
       content: source.message.trim().slice(0, 4000),
@@ -131,8 +191,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "اكتب رسالتك أو استفسارك أولاً." }, { status: 400 });
   }
 
+  // Legacy message and nonempty history may coexist only when they identify
+  // the same current user instruction. Never silently prefer an older request
+  // over a different cancellation or correction in the other field.
+  if (Array.isArray(source.messages) && source.messages.length > 0 && source.message != null) {
+    const current = incomingMessages[incomingMessages.length - 1];
+    if (typeof source.message !== "string" || current.role !== "user" || source.message.trim() !== current.content) {
+      return NextResponse.json({ message: "تعارض نص الرسالة مع آخر طلب في سجل المحادثة. أعد الإرسال." }, { status: 400 });
+    }
+  }
+
   // التحقق من تفعيل خدمة الذكاء الاصطناعي
-  const settings = await getAiSettings();
+  const settings = await getAiSettings().catch(() => null);
+  if (!settings) {
+    return NextResponse.json({ message: "تعذّر التحقق من إعدادات خدمة الذكاء الاصطناعي. أعد المحاولة لاحقًا." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+  }
   if (!settings.enabled) {
     return NextResponse.json(
       {
@@ -201,7 +274,8 @@ export async function POST(request: Request) {
     }
     return replyWithAudit(simpleReply(external.content.trim(), "administrative_template", external.model, "external_ai"), started, user, session);
   }
-  const doctorPartyId = user.partyId ?? (typeof session.partyId === "number" ? session.partyId : null);
+  // The freshly loaded account is authoritative; an unlinked doctor must not inherit a stale session party.
+  const doctorPartyId = user.partyId ?? null;
   const todayISO = await dbTodayISO().catch(() => new Date().toISOString().slice(0, 10));
   const isDbConnected = isDatabaseOnline();
 
@@ -211,8 +285,8 @@ export async function POST(request: Request) {
   let droppedPatientContext = false;
   if (typeof source.conversationPatientId === "number" && source.conversationPatientId > 0) {
     const allowed = isDbConnected
-      ? await canAccessPatient(session, source.conversationPatientId).catch(() => false)
-      : true; /* بلا قاعدة بيانات لا ملفات تُفتح أصلًا */
+      ? await canAccessPatient({ ...session, partyId: doctorPartyId }, source.conversationPatientId).catch(() => false)
+      : false; /* لا يُعتمد سياق مريض بلا تحقق من قاعدة البيانات */
     if (allowed) {
       conversationPatientId = source.conversationPatientId;
     } else {
@@ -238,11 +312,20 @@ export async function POST(request: Request) {
   const latestUserMsg = last.content;
 
   // تنفيذ المعالجة عبر محرك الاستعلامات الداخلي الموحد
-  let response: StructuredAiResponse = await processAssistantQuery(
-    latestUserMsg,
-    assistantContext,
-    incomingMessages,
-  );
+  let response: StructuredAiResponse;
+  try {
+    response = await processAssistantQuery(
+      latestUserMsg,
+      assistantContext,
+      incomingMessages,
+    );
+  } catch {
+    // Without a trusted local result, we cannot classify the request for cloud egress.
+    return NextResponse.json(
+      { message: "تعذّرت معالجة الطلب داخل المركز. أعد المحاولة لاحقًا." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
 
   /* سياق مريضٍ مسموم أُسقط: يُعلَن للمستخدم لا يُمرَّر بصمت (P0.5). */
   if (droppedPatientContext) {
@@ -285,18 +368,24 @@ export async function POST(request: Request) {
           : "الاستشارة السريرية النصية (دوائية/علاجية) متاحة للحسابات ذات الهوية السريرية — الرد أعلاه من المحرك المحلي ضمن صلاحياتك الإدارية.",
       ],
     };
-  } else if (plan.kind === "clinical" || plan.kind === "administrative") {
+  } else if (!droppedPatientContext && response.sourceType === "internal_engine" && !response.confirmation && (plan.kind === "clinical" ||
+    (plan.kind === "administrative" && conversationPatientId === null))) {
+    // Never replace an authoritative database result or a pending signed action with cloud prose.
+    // Never export a rejected/unverified patient context, or patient-linked administrative text.
     try {
+      // Both cloud paths must mask registered names, including clinical history.
+      // A failed name lookup must prevent egress; the catch below keeps the local reply.
+      const nameTokens = await personNameTokens();
+      const sanitizeOutbound = (content: string) =>
+        redactPersonNames(deIdentifyClinicalContext(content), nameTokens);
       const outboundMessages: AiChatMessage[] = plan.kind === "clinical"
         ? [
           { role: "system", content: DENTAL_ASSISTANT_SYSTEM_PROMPT },
-          // تعقيم كامل سجل المحادثة قبل إرساله — ورسائل system من العميل أُسقطت أصلًا (P0.5).
-          ...incomingMessages.map((m) => ({ role: m.role, content: deIdentifyClinicalContext(m.content) })),
+          ...incomingMessages.map((m) => ({ role: m.role, content: sanitizeOutbound(m.content) })),
         ]
         : [
           { role: "system", content: ADMIN_ASSISTANT_SYSTEM_PROMPT },
-          // أسماء المسجّلين في المركز تُقنَّع أولًا، ثم الهواتف والأرقام والبريد.
-          { role: "user", content: deIdentifyClinicalContext(redactPersonNames(latestUserMsg, await personNameTokens().catch(() => new Set<string>()))) },
+          { role: "user", content: sanitizeOutbound(latestUserMsg) },
         ];
 
       const cloudResult = await aiChat({
@@ -313,9 +402,18 @@ export async function POST(request: Request) {
           sourceType: "external_ai",
           latencyMs: cloudResult.latencyMs,
         };
+      } else {
+        response = {
+          ...response,
+          warnings: [...(response.warnings || []), "لم يكتمل الرد من المساعد الخارجي؛ المعروض هو رد المساعد الداخلي."],
+        };
       }
     } catch {
-      // الاستمرار على رد المحرك المحلي عند فشل المزوّد
+      // Do not expose provider errors or imply that a cloud request actually ran.
+      response = {
+        ...response,
+        warnings: [...(response.warnings || []), "لم يكتمل الرد من المساعد الخارجي؛ المعروض هو رد المساعد الداخلي."],
+      };
     }
   }
 
@@ -355,5 +453,5 @@ async function replyWithAudit(
     reply: response.answer, // للحفاظ على التوافق الرجعي
     ...response,
     latencyMs: Date.now() - started,
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
 }

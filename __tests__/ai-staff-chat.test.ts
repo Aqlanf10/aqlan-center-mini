@@ -23,6 +23,12 @@ vi.mock("@/lib/session", () => ({
   requireSession: mocks.requireSession,
 }));
 
+// Staff-chat RBAC and cloud tests run without a database; strict limiter behavior
+// is covered independently in ai-rate-limit-fail-closed.test.ts.
+vi.mock("@/lib/security-rate-limit", () => ({
+  consumeSecurityLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }),
+}));
+
 vi.mock("@/lib/db", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/db")>();
   return {
