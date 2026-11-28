@@ -40,7 +40,6 @@ import { financeAccessFor } from "@/lib/finance-permissions";
 import { useLabBalanceOverview } from "@/components/finance/useLabBalanceOverview";
 import { EXPENSE_NOT_PERSISTED, EXPENSE_UNCERTAIN, beginExpenseAttempt, sendExpenseAttempt, sessionStorageOrNull } from "@/lib/expense-attempt";
 import PendingExpenseAttempts from "@/components/finance/PendingExpenseAttempts";
-import { ReceptionShift } from "./ReceptionShift";
 
 interface Feed {
   /** Resolved server zone; optional for compatibility with an older shift feed. */
@@ -142,13 +141,13 @@ export default function FinancePage() {
   const readOnlyMoney = !canHandleMoney(session?.role);
   const access = financeAccessFor(session?.role, session?.permissions?.financeAccess);
   const canCollect = !readOnlyMoney && (session?.role !== "cashier" || access.collectPayments);
-  const canExpense = !readOnlyMoney && session?.role !== "reception" && (session?.role !== "cashier" || access.createExpenses);
+  const canExpense = !readOnlyMoney && (session?.role !== "cashier" || access.createExpenses);
   const canShift = !readOnlyMoney && (session?.role !== "cashier" || access.operateShift);
   const canReconcile = admin;
   const labAuthorityKey = admin && session?.username.trim()
     ? JSON.stringify([session.username, session.role, session.permissions ?? null]) : null;
   const { state: labBalanceState, reload: reloadLabBalances } = useLabBalanceOverview(labAuthorityKey);
-  const canSeeCommissions = session?.role !== "cashier" && session?.role !== "reception" && (session?.role !== "accountant" || access.viewCommissions);
+  const canSeeCommissions = session?.role !== "cashier" && (session?.role !== "accountant" || access.viewCommissions);
   const canSeeReports = financeReader && (session?.role !== "accountant" || access.viewReports);
   const clinicName = useClinicName();
   const clinicPhone = useSetting("clinic.phone");

@@ -8,6 +8,7 @@ import { REQUIRED_T0_VIEWS } from "../i18n/translations";
 
 export interface LivePatientDocument {
   id: number;
+  orthoCaseId?: number | null;
   kind: string;
   title: string;
   mimeType?: string;
@@ -23,6 +24,7 @@ export interface LivePatientDocument {
 
 export interface LiveOrthoCaseSummary {
   id: number;
+  startDate?: string;
   phase?: string;
   status?: string;
   upperWire?: string | null;
@@ -111,6 +113,7 @@ function mapDocToMediaRecord(doc: LivePatientDocument): MediaRecord {
 
   return {
     id: `doc-${doc.id}`,
+    orthoCaseId: doc.orthoCaseId ?? null,
     title: doc.title || `مستند #${doc.id}`,
     mediaKind,
     stage,
@@ -415,33 +418,72 @@ export function buildOrthoCorePatientCase(input: {
     merged.sessions = syncedSessions;
   }
 
-  // Sync live authenticated PostgreSQL patient documents into merged.media (respecting photos.view!)
-  if (!canViewPhotos) {
+  // Sync live authenticated PostgreSQL patient documents strictly for the active ortho case (never mix previous cases or unassigned docs!)
+  if (!canViewPhotos || !liveCase?.id) {
     merged.media = [];
   } else {
     const existingMedia = Array.isArray(merged.media) ? merged.media : [];
-    const byUrl = new Map<string, MediaRecord>();
+    const prevByUrl = new Map<string, MediaRecord>();
     for (const m of existingMedia) {
-      if (m.originalUrl && m.originalUrl.startsWith("/api/documents/")) byUrl.set(m.originalUrl, m);
+      if (m.originalUrl && m.originalUrl.startsWith("/api/documents/")) {
+        prevByUrl.set(m.originalUrl, m);
+      }
     }
-    for (const doc of liveDocs) {
+    const currentCaseDocs = liveDocs.filter((doc) => doc.orthoCaseId === liveCase.id);
+    const caseMedia: MediaRecord[] = [];
+    const seenUrls = new Set<string>();
+    for (const doc of currentCaseDocs) {
       const mapped = mapDocToMediaRecord(doc);
-      const prev = byUrl.get(mapped.originalUrl);
+      if (seenUrls.has(mapped.originalUrl)) continue;
+      seenUrls.add(mapped.originalUrl);
+      const prev = prevByUrl.get(mapped.originalUrl);
       if (!prev) {
-        byUrl.set(mapped.originalUrl, mapped);
+        caseMedia.push(mapped);
       } else {
-        byUrl.set(mapped.originalUrl, {
+        caseMedia.push({
           ...prev,
+          orthoCaseId: liveCase.id,
           stage: doc.photoStage ? mapped.stage : prev.stage,
           viewType: doc.photoView ? mapped.viewType : prev.viewType,
           captureDate: doc.takenOn || prev.captureDate,
         });
       }
     }
-    merged.media = Array.from(byUrl.values());
+    merged.media = caseMedia;
   }
 
   return merged;
+}
+
+export interface PreviousCaseMediaGroup {
+  orthoCaseId: number;
+  status?: string;
+  startDate?: string;
+  media: MediaRecord[];
+}
+
+export function buildPreviousCasesMedia(input: {
+  liveDocs?: LivePatientDocument[];
+  liveCases?: LiveOrthoCaseSummary[];
+  activeCaseId?: number | null;
+  canViewPhotos?: boolean;
+}): PreviousCaseMediaGroup[] {
+  const { liveDocs = [], liveCases = [], activeCaseId = null, canViewPhotos = false } = input;
+  if (!canViewPhotos) return [];
+  const otherCases = liveCases.filter((c) => c.id !== activeCaseId);
+  const groups: PreviousCaseMediaGroup[] = [];
+  for (const c of otherCases) {
+    const docs = liveDocs.filter((d) => d.orthoCaseId === c.id);
+    if (docs.length > 0) {
+      groups.push({
+        orthoCaseId: c.id,
+        status: c.status,
+        startDate: c.startDate,
+        media: docs.map(mapDocToMediaRecord),
+      });
+    }
+  }
+  return groups;
 }
 
 export function applyOrthoCoreCaseToWorkspace(

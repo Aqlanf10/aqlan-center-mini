@@ -1555,12 +1555,15 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
   } | null>(null);
   const [retryingPhotos, setRetryingPhotos] = useState(false);
 
+  const blindPhotoUpload = form.session?.role === "reception" || !caseRow.photosVisible;
+
   const addFiles = (files: FileList | null) => {
     if (!files || !form.editable() || !mayUpload(form.session)) return;
     const added: QueuedPhoto[] = [];
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
-      const preview = URL.createObjectURL(file); form.draft.urls.add(preview);
+      const preview = blindPhotoUpload ? "" : URL.createObjectURL(file);
+      if (preview) form.draft.urls.add(preview);
       added.push({ file, preview, view: "", timing: "during", note: "" });
     }
     if (added.length > 0) setQueue((current) => [...current, ...added]);
@@ -1623,7 +1626,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
         const result = await uploadQueuedPhoto(photo, pendingRetry.adjustmentId);
         if (result === "ok") {
           uploaded++;
-          form.release(photo.preview);
+          if (photo.preview) form.release(photo.preview);
         } else {
           stillFailed.push(photo);
         }
@@ -1710,7 +1713,9 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
         }
       }
       if (!form.current(operation)) return;
-      for (const photo of succeededPhotos) form.release(photo.preview);
+      for (const photo of succeededPhotos) {
+        if (photo.preview) form.release(photo.preview);
+      }
       if (failedPhotos.length > 0) {
         setPendingRetry({ adjustmentId, visitId, photos: failedPhotos });
         onError(`رُفعت ${uploaded} صورة وفشل ${failedPhotos.length} — أعد المحاولة من المستندات.`);
@@ -1865,13 +1870,17 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
           open={liveCameraOpen}
           onClose={() => setLiveCameraOpen(false)}
           onConfirm={(captured) => {
-            form.draft.urls.add(captured.previewUrl);
+            if (blindPhotoUpload) {
+              if (captured.previewUrl) URL.revokeObjectURL(captured.previewUrl);
+            } else {
+              form.draft.urls.add(captured.previewUrl);
+            }
             setQueue((current) => [
               ...current,
               {
                 file: captured.originalFile,
                 derivedFile: captured.derivedFile,
-                preview: captured.previewUrl,
+                preview: blindPhotoUpload ? "" : captured.previewUrl,
                 view: captured.view,
                 timing: captured.timing,
                 note: captured.note,
@@ -1901,9 +1910,15 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
         {queue.length > 0 ? (
           <ul className="mt-2 space-y-2">
             {queue.map((photo, index) => (
-              <li key={photo.preview} className="space-y-1.5 rounded-lg bg-slate-50 p-2 border border-slate-100">
+              <li key={photo.preview || `queued-photo-${index}`} className="space-y-1.5 rounded-lg bg-slate-50 p-2 border border-slate-100">
                 <div className="flex flex-wrap items-center gap-2">
-                  <img src={photo.preview} alt="صورة الجلسة" className="h-12 w-12 rounded-lg object-cover" />
+                  {blindPhotoUpload || !photo.preview ? (
+                    <span className="rounded-lg bg-slate-200 px-2.5 py-1.5 text-[11px] font-bold text-slate-700">
+                      تم إرفاق صورة للرفع (دون معاينة)
+                    </span>
+                  ) : (
+                    <img src={photo.preview} alt="صورة الجلسة" className="h-12 w-12 rounded-lg object-cover" />
+                  )}
                   <select value={photo.view}
                     onChange={(event) => {
                       const view = event.target.value as PhotoView | "";
@@ -1939,7 +1954,7 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
                   <button type="button"
                     onClick={() => {
                       if (!form.editable()) return;
-                      form.release(photo.preview);
+                      if (photo.preview) form.release(photo.preview);
                       setQueue((current) => current.filter((_, rowIndex) => rowIndex !== index));
                     }}
                     className="text-[11px] font-bold text-red-500">حذف</button>

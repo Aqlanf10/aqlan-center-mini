@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "pg";
 import { hashPassword } from "../../lib/auth";
 import { DEFAULT_DOCTOR_PERMISSIONS } from "../../lib/doctor-permissions";
+import { buildDefaultOrthoPrivacyPolicy, ORTHO_PRIVACY_SETTING_KEY } from "../../lib/ortho-privacy";
 import type { OrthoCase } from "../../lib/db";
 import { authedGet, baseUrl, harness, loginStaff } from "./_server";
 
@@ -11,6 +12,8 @@ let db: Client;
 let patientA = 0; let patientB = 0; let caseA = 0; let caseB = 0; let photoA = 0; let photoB = 0;
 let noImages: { cookie: string }; let allPatients: { cookie: string };
 let allWithoutImages: { cookie: string }; let assistant: { cookie: string };
+let receptionWithPhotos: { cookie: string };
+let previousOrthoPolicy: string | null = null;
 const stamp = Date.now();
 const privateB = `ORTHO_SCOPE_PRIVATE_B_${stamp}`;
 type VisibleCase = OrthoCase & { photosVisible: boolean };
@@ -62,11 +65,12 @@ beforeAll(async () => {
   const hash = await hashPassword(password);
   async function addUser(label: string, role: string, partyId: number | null, permissions: unknown) {
     const username = `os${label}${stamp}`;
-    await db.query(
+    const inserted = await db.query<{ id: number }>(
       `INSERT INTO users (username, display_name, password_hash, role, party_id, permissions)
-       VALUES ($1, $1, $2, $3, $4, $5)`, [username, hash, role, partyId, JSON.stringify(permissions)],
+       VALUES ($1, $1, $2, $3, $4, $5) RETURNING id`, [username, hash, role, partyId, JSON.stringify(permissions)],
     );
-    return loginStaff(username, password);
+    const session = await loginStaff(username, password);
+    return { ...session, userId: inserted.rows[0].id };
   }
   // Separate users prevent rights mutations from affecting the suite's shared doctors.
   noImages = await addUser("noimg", "doctor", partyA, { ...DEFAULT_DOCTOR_PERMISSIONS, canViewXrays: false });
@@ -75,8 +79,39 @@ beforeAll(async () => {
     ...DEFAULT_DOCTOR_PERMISSIONS, canViewAllPatients: true, canViewXrays: false,
   });
   assistant = await addUser("assist", "assistant", null, {});
+  const recPhoto = await addUser("recimg", "reception", null, {});
+  receptionWithPhotos = recPhoto;
+  const existingPolicy = await db.query<{ value: string }>(
+    `SELECT value FROM settings WHERE key = $1 LIMIT 1`, [ORTHO_PRIVACY_SETTING_KEY],
+  );
+  previousOrthoPolicy = existingPolicy.rows[0]?.value ?? null;
+  const ownerRow = await db.query<{ id: number }>(
+    `SELECT id FROM users WHERE role = 'admin' AND is_active = TRUE ORDER BY id ASC LIMIT 1`,
+  );
+  const syntheticPolicy = buildDefaultOrthoPrivacyPolicy(ownerRow.rows[0]?.id ?? null);
+  syntheticPolicy.rules.push({
+    id: `syn-rec-photo-${stamp}`,
+    effect: "allow",
+    target: { userIds: [recPhoto.userId] },
+    permissions: ["photos.view"],
+    fields: ["previousPhotos"],
+  });
+  await db.query(
+    `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, NOW())
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+    [ORTHO_PRIVACY_SETTING_KEY, JSON.stringify(syntheticPolicy)],
+  );
 }, 120_000);
-afterAll(async () => { await db?.end(); });
+afterAll(async () => {
+  if (db) {
+    if (previousOrthoPolicy === null) {
+      await db.query(`DELETE FROM settings WHERE key = $1`, [ORTHO_PRIVACY_SETTING_KEY]).catch(() => undefined);
+    } else {
+      await db.query(`UPDATE settings SET value = $2, updated_at = NOW() WHERE key = $1`, [ORTHO_PRIVACY_SETTING_KEY, previousOrthoPolicy]).catch(() => undefined);
+    }
+    await db.end();
+  }
+});
 
 describe("ortho list patient and image isolation over real HTTP", () => {
   it("returns only the doctor's patient cases when patientId is omitted", async () => {
@@ -113,14 +148,70 @@ describe("ortho list patient and image isolation over real HTTP", () => {
     expect(response.status).toBe(400);
   });
 
-  it.each(["admin", "reception"] as const)("preserves %s list and direct metadata access", async (who) => {
-    const body = await listAs(h.sessions[who]);
-    expect(body.cases.map((row) => row.id)).toEqual(expect.arrayContaining([caseA, caseB]));
-    const response = await authedGet(`/api/ortho/${caseB}`, h.sessions[who]);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ photosVisible: true,
+  it("preserves admin full access and default-deny reception metadata access without photos", async () => {
+    const adminBody = await listAs(h.sessions.admin);
+    expect(adminBody.cases.map((row) => row.id)).toEqual(expect.arrayContaining([caseA, caseB]));
+    const adminCase = await authedGet(`/api/ortho/${caseB}`, h.sessions.admin);
+    expect(adminCase.status).toBe(200);
+    expect(await adminCase.json()).toMatchObject({
+      photosVisible: true,
       adjustments: [expect.objectContaining({ photos: [expect.objectContaining({ id: photoB })] })],
     });
+
+    const receptionBody = await listAs(h.sessions.reception);
+    expect(receptionBody.cases.map((row) => row.id)).toEqual(expect.arrayContaining([caseA, caseB]));
+    expect(receptionBody.cases.find((row) => row.id === caseB)).toMatchObject({
+      photosVisible: false,
+      adjustments: [expect.objectContaining({ photos: [] })],
+    });
+    const receptionCase = await authedGet(`/api/ortho/${caseB}`, h.sessions.reception);
+    expect(receptionCase.status).toBe(200);
+    expect(await receptionCase.json()).toMatchObject({
+      photosVisible: false,
+      adjustments: [expect.objectContaining({ photos: [] })],
+    });
+    expect((await authedGet(`/api/documents/${photoB}`, h.sessions.reception)).status).toBe(403);
+  });
+
+  it("hard-blocks reception photo visibility and download even under an explicit allow policy rule while returning confirmation-only on upload", async () => {
+    const grantedBody = await listAs(receptionWithPhotos);
+    expect(grantedBody.cases.map((row) => row.id)).toEqual(expect.arrayContaining([caseA, caseB]));
+    expect(grantedBody.cases.find((row) => row.id === caseB)).toMatchObject({
+      photosVisible: false,
+      adjustments: [expect.objectContaining({ photos: [] })],
+    });
+    expect(JSON.stringify(grantedBody)).not.toContain("Synthetic private image B note");
+
+    const grantedCase = await authedGet(`/api/ortho/${caseB}`, receptionWithPhotos);
+    expect(grantedCase.status).toBe(200);
+    expect(await grantedCase.json()).toMatchObject({
+      photosVisible: false,
+      adjustments: [expect.objectContaining({ photos: [] })],
+    });
+    expect((await authedGet(`/api/documents/${photoB}`, receptionWithPhotos)).status).toBe(403);
+
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0ioAAAAASUVORK5CYII=",
+      "base64",
+    );
+    const form = new FormData();
+    form.set("file", new Blob([new Uint8Array(png)], { type: "image/png" }), "rec-blind-upload.png");
+    form.set("kind", "photo");
+    form.set("title", `Synthetic reception blind upload ${stamp}`);
+    form.set("orthoCaseId", String(caseB));
+    form.set("photoStage", "progress");
+    const uploadRes = await fetch(`${baseUrl}/api/patients/${patientB}/documents`, {
+      method: "POST",
+      headers: {
+        Cookie: receptionWithPhotos.cookie,
+        Origin: baseUrl,
+        "Sec-Fetch-Site": "same-origin",
+      },
+      body: form,
+      redirect: "manual",
+    });
+    expect(uploadRes.status).toBe(201);
+    expect(await uploadRes.json()).toEqual({ ok: true });
   });
 
   it("preserves the explicit all-patient grant even without a linked doctor party", async () => {

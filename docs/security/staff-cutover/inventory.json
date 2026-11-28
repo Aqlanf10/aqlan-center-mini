@@ -4,7 +4,7 @@
   "readiness": "NOT_READY",
   "readinessMeaning": "Source inventory only; no full marker-bearing clinic journey or cutover decision exists. Presence of new symbols never promotes readiness.",
   "scope": "All explicit app route HTTP exports and matrix entries; all page/layout entries in JS, JSX, TS and TSX. Unsupported entry filenames are reported as unknown source issues. Rows and lexical references do not prove semantic workflow coverage. Framework implicit HEAD/OPTIONS and static assets are not independent workflows. AI/Dot listed for coverage only, excluded from implementation.",
-  "sourceDigest": "8b183029791bdef2336809ddfa320c03910e64ef1718ced3f5038d0e5c2db890",
+  "sourceDigest": "1cf328d58cdd04eee69ce62e895c0b8e6767fae36420daca7b9876a4ae0c7834",
   "runtimeActions": [
     "staff.view",
     "staff.permissions.edit",
@@ -928,11 +928,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 50
         },
         {
           "symbol": "requireSession",
-          "line": 109
+          "line": 127
         }
       ]
     },
@@ -1060,11 +1060,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 100
+          "line": 97
         },
         {
           "symbol": "requireSession",
-          "line": 159
+          "line": 156
         },
         {
           "symbol": "findUserByUsername",
@@ -1072,7 +1072,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 35
+          "line": 32
         }
       ]
     },
@@ -2166,15 +2166,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 40
+          "line": 41
         },
         {
           "symbol": "requireSession",
-          "line": 102
+          "line": 106
         },
         {
           "symbol": "requireSession",
-          "line": 226
+          "line": 233
         },
         {
           "symbol": "findUserByUsername",
@@ -2182,7 +2182,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 127
+          "line": 134
         }
       ]
     },
@@ -2298,7 +2298,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 123
+          "line": 124
         }
       ]
     },
@@ -2490,11 +2490,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 53
+          "line": 55
         },
         {
           "symbol": "requireSession",
-          "line": 98
+          "line": 120
         }
       ]
     },
@@ -2572,11 +2572,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 31
+          "line": 29
         }
       ]
     },
@@ -2837,35 +2837,35 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 21
         },
         {
           "symbol": "requireSession",
-          "line": 42
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 79
+          "line": 76
         },
         {
           "symbol": "requireSession",
-          "line": 148
+          "line": 121
         },
         {
           "symbol": "requireSession",
-          "line": 265
+          "line": 238
         },
         {
           "symbol": "findUserByUsername",
-          "line": 12
+          "line": 10
         },
         {
           "symbol": "findUserByUsername",
-          "line": 49
+          "line": 47
         },
         {
           "symbol": "findUserByUsername",
-          "line": 157
+          "line": 130
         }
       ]
     },
@@ -3939,11 +3939,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 140
+          "line": 119
         },
         {
           "symbol": "requireSession",
-          "line": 188
+          "line": 157
         },
         {
           "symbol": "findUserByUsername",
@@ -4620,11 +4620,11 @@
       "evidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 33
+          "line": 32
         }
       ]
     },
@@ -5806,11 +5806,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 50
         },
         {
           "symbol": "requireSession",
-          "line": 109
+          "line": 127
         }
       ]
     },
@@ -5834,11 +5834,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 48
+          "line": 50
         },
         {
           "symbol": "requireSession",
-          "line": 109
+          "line": 127
         }
       ]
     },
@@ -5972,11 +5972,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 100
+          "line": 97
         },
         {
           "symbol": "requireSession",
-          "line": 159
+          "line": 156
         },
         {
           "symbol": "findUserByUsername",
@@ -5984,7 +5984,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 35
+          "line": 32
         }
       ]
     },
@@ -6014,11 +6014,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 100
+          "line": 97
         },
         {
           "symbol": "requireSession",
-          "line": 159
+          "line": 156
         },
         {
           "symbol": "findUserByUsername",
@@ -6026,7 +6026,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 35
+          "line": 32
         }
       ]
     },
@@ -6054,11 +6054,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 100
+          "line": 97
         },
         {
           "symbol": "requireSession",
-          "line": 159
+          "line": 156
         },
         {
           "symbol": "findUserByUsername",
@@ -6066,7 +6066,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 35
+          "line": 32
         }
       ]
     },
@@ -9481,7 +9481,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 123
+          "line": 124
         }
       ]
     },
@@ -9509,7 +9509,7 @@
         },
         {
           "symbol": "requireSession",
-          "line": 123
+          "line": 124
         }
       ]
     },
@@ -9533,15 +9533,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 40
+          "line": 41
         },
         {
           "symbol": "requireSession",
-          "line": 102
+          "line": 106
         },
         {
           "symbol": "requireSession",
-          "line": 226
+          "line": 233
         },
         {
           "symbol": "findUserByUsername",
@@ -9549,7 +9549,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 127
+          "line": 134
         }
       ]
     },
@@ -9573,15 +9573,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 40
+          "line": 41
         },
         {
           "symbol": "requireSession",
-          "line": 102
+          "line": 106
         },
         {
           "symbol": "requireSession",
-          "line": 226
+          "line": 233
         },
         {
           "symbol": "findUserByUsername",
@@ -9589,7 +9589,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 127
+          "line": 134
         }
       ]
     },
@@ -9613,15 +9613,15 @@
         },
         {
           "symbol": "requireSession",
-          "line": 40
+          "line": 41
         },
         {
           "symbol": "requireSession",
-          "line": 102
+          "line": 106
         },
         {
           "symbol": "requireSession",
-          "line": 226
+          "line": 233
         },
         {
           "symbol": "findUserByUsername",
@@ -9629,7 +9629,7 @@
         },
         {
           "symbol": "findUserByUsername",
-          "line": 127
+          "line": 134
         }
       ]
     },
@@ -10266,35 +10266,35 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 21
         },
         {
           "symbol": "requireSession",
-          "line": 42
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 79
+          "line": 76
         },
         {
           "symbol": "requireSession",
-          "line": 148
+          "line": 121
         },
         {
           "symbol": "requireSession",
-          "line": 265
+          "line": 238
         },
         {
           "symbol": "findUserByUsername",
-          "line": 12
+          "line": 10
         },
         {
           "symbol": "findUserByUsername",
-          "line": 49
+          "line": 47
         },
         {
           "symbol": "findUserByUsername",
-          "line": 157
+          "line": 130
         }
       ]
     },
@@ -10315,35 +10315,35 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 21
         },
         {
           "symbol": "requireSession",
-          "line": 42
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 79
+          "line": 76
         },
         {
           "symbol": "requireSession",
-          "line": 148
+          "line": 121
         },
         {
           "symbol": "requireSession",
-          "line": 265
+          "line": 238
         },
         {
           "symbol": "findUserByUsername",
-          "line": 12
+          "line": 10
         },
         {
           "symbol": "findUserByUsername",
-          "line": 49
+          "line": 47
         },
         {
           "symbol": "findUserByUsername",
-          "line": 157
+          "line": 130
         }
       ]
     },
@@ -10363,35 +10363,35 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 23
+          "line": 21
         },
         {
           "symbol": "requireSession",
-          "line": 42
+          "line": 40
         },
         {
           "symbol": "requireSession",
-          "line": 79
+          "line": 76
         },
         {
           "symbol": "requireSession",
-          "line": 148
+          "line": 121
         },
         {
           "symbol": "requireSession",
-          "line": 265
+          "line": 238
         },
         {
           "symbol": "findUserByUsername",
-          "line": 12
+          "line": 10
         },
         {
           "symbol": "findUserByUsername",
-          "line": 49
+          "line": 47
         },
         {
           "symbol": "findUserByUsername",
-          "line": 157
+          "line": 130
         }
       ]
     },
@@ -10783,11 +10783,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 53
+          "line": 55
         },
         {
           "symbol": "requireSession",
-          "line": 98
+          "line": 120
         }
       ]
     },
@@ -10811,11 +10811,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 53
+          "line": 55
         },
         {
           "symbol": "requireSession",
-          "line": 98
+          "line": 120
         }
       ]
     },
@@ -11094,11 +11094,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 12
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 31
+          "line": 29
         }
       ]
     },
@@ -14728,11 +14728,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 140
+          "line": 119
         },
         {
           "symbol": "requireSession",
-          "line": 188
+          "line": 157
         },
         {
           "symbol": "findUserByUsername",
@@ -14768,11 +14768,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 140
+          "line": 119
         },
         {
           "symbol": "requireSession",
-          "line": 188
+          "line": 157
         },
         {
           "symbol": "findUserByUsername",
@@ -14808,11 +14808,11 @@
         },
         {
           "symbol": "requireSession",
-          "line": 140
+          "line": 119
         },
         {
           "symbol": "requireSession",
-          "line": 188
+          "line": 157
         },
         {
           "symbol": "findUserByUsername",
@@ -16542,11 +16542,11 @@
       "directHelperEvidence": [
         {
           "symbol": "requireSession",
-          "line": 11
+          "line": 10
         },
         {
           "symbol": "requireSession",
-          "line": 33
+          "line": 32
         }
       ]
     },

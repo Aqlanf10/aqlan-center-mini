@@ -172,7 +172,17 @@ export async function POST(
     return NextResponse.json({ message: "ملف المريض غير موجود." }, { status: 404, headers: NO_STORE_HEADERS });
   }
 
-  const rawRecord = await loadOrthoWorkspaceRecord(patientId, orthoCaseId);
+  const settings = await getSettingsSafe().catch(() => null);
+  const clinicName = settings?.["clinic.name"]?.trim() || "مركز الدكتور عقلان";
+  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
+  const allCases = await listPatientOrthoCases(patientId, today).catch(() => []);
+  const activeCase =
+    (orthoCaseId
+      ? allCases.find((c) => c.id === orthoCaseId)
+      : allCases.find((c) => c.status === "active") ?? allCases[0]) ?? null;
+  const cases = activeCase ? [activeCase] : [];
+  const effectiveCaseId = activeCase?.id ?? orthoCaseId;
+  const rawRecord = await loadOrthoWorkspaceRecord(patientId, effectiveCaseId);
   const { filtered } = filterWorkspaceByPrivacy(rawRecord, evalCreate.access);
 
   // Charter §13 / TD-08: Educational anonymization consent guard is mandatory for ALL users (including Owner — no bypass!)
@@ -186,11 +196,6 @@ export async function POST(
     );
   }
 
-  const settings = await getSettingsSafe().catch(() => null);
-  const clinicName = settings?.["clinic.name"]?.trim() || "مركز الدكتور عقلان";
-  const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const allCases = await listPatientOrthoCases(patientId, today).catch(() => []);
-  const cases = orthoCaseId ? allCases.filter((c) => c.id === orthoCaseId) : allCases;
   const oc = (filtered.orthoCoreCase && typeof filtered.orthoCoreCase === "object"
     ? filtered.orthoCoreCase
     : null) as Record<string, unknown> | null;
@@ -246,9 +251,11 @@ export async function POST(
 
   const mediaAssets: PresentationMediaAsset[] = [];
   const canEmbedPhotos =
-    evalCreate.access.permissions["photos.view"] && evalCreate.access.fields.previousPhotos;
+    session.role !== "reception" &&
+    evalCreate.access.permissions["photos.view"] &&
+    evalCreate.access.fields.previousPhotos;
 
-  if (canEmbedPhotos && format === "pptx") {
+  if (canEmbedPhotos && format === "pptx" && activeCase) {
     const docs = await listPatientDocuments(patientId).catch(() => []);
     const selectedSet =
       Array.isArray(body.selectedMediaIds) && body.selectedMediaIds.length > 0
@@ -262,7 +269,7 @@ export async function POST(
 
     const imageDocs = docs
       .filter((d) => d.isImage && !d.removedAt && !derivedDocIdsToSkipStandalone.has(d.id))
-      .filter((d) => (orthoCaseId ? !d.orthoCaseId || d.orthoCaseId === orthoCaseId : true))
+      .filter((d) => d.orthoCaseId === activeCase.id)
       .filter((d) => {
         if (!selectedSet) return true;
         const meta = ocMediaByDocId.get(d.id);

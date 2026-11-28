@@ -26,6 +26,7 @@ import {
   applyOrthoCoreCaseToWorkspace,
   buildClinicSettingsForOrthoCore,
   buildOrthoCorePatientCase,
+  buildPreviousCasesMedia,
   type LiveOrthoCaseSummary,
   type LivePatientDocument,
 } from "./orthocore/utils/caseAdapter";
@@ -64,7 +65,6 @@ export function AdvancedOrthoWorkspace({
   patientId,
   patientName,
   patientCode,
-  hasActiveOrthoCase,
   context,
   onContextChange,
   onClinicalChange,
@@ -84,14 +84,15 @@ export function AdvancedOrthoWorkspace({
       const q = new URLSearchParams(window.location.search).get("orthoTab") as OrthoWorkspaceTabId | null;
       if (q && ORTHO_WORKSPACE_TABS.some((t) => t.id === q)) return q;
     }
-    return hasActiveOrthoCase ? "sessions" : "overview";
+    return "sessions";
   });
 
   const [record, setRecord] = useState<OrthoWorkspaceRecord>(() =>
     createDefaultOrthoWorkspace(patientId),
   );
   const [liveDocs, setLiveDocs] = useState<LivePatientDocument[]>([]);
-  const [liveCase, setLiveCase] = useState<LiveOrthoCaseSummary | null>(null);
+  const [liveCases, setLiveCases] = useState<LiveOrthoCaseSummary[]>([]);
+  const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
   const [savingState, setSavingState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -108,19 +109,32 @@ export function AdvancedOrthoWorkspace({
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestRecordRef = useRef<OrthoWorkspaceRecord>(record);
 
+  const liveCase: LiveOrthoCaseSummary | null = useMemo(() => {
+    if (selectedCaseId !== null) {
+      const found = liveCases.find((c) => c.id === selectedCaseId);
+      if (found) return found;
+    }
+    return liveCases.find((c) => c.status === "active") ?? liveCases[0] ?? null;
+  }, [liveCases, selectedCaseId]);
+
   useEffect(() => {
     setActiveOrthoCorePatientId(patientId, liveCase?.id ?? null);
   }, [patientId, liveCase?.id]);
 
+  const needsExtendedWorkspace = activeTab !== "sessions" || printState.open || aiDrawerOpen;
+
   const loadWorkspaceAndLiveContext = useCallback(async () => {
-    if (perms.loading) return;
+    if (!needsExtendedWorkspace || perms.loading) return;
     if (!perms.moduleVisible || !perms.can("records.read")) {
       setLoadingWorkspace(false);
       return;
     }
     setLoadingWorkspace(true);
     try {
-      const canSeePhotos = perms.can("photos.view") && perms.canField("previousPhotos");
+      const canSeePhotos =
+        session?.role !== "reception" &&
+        perms.can("photos.view") &&
+        perms.canField("previousPhotos");
       const [wsRes, orthoRes, docsRes] = await Promise.all([
         fetch(`/api/ortho/workspace/${patientId}`, { cache: "no-store" }),
         fetch(`/api/ortho?patientId=${patientId}`, { cache: "no-store" }),
@@ -139,8 +153,13 @@ export function AdvancedOrthoWorkspace({
 
       if (orthoRes.ok) {
         const orthoData = (await orthoRes.json()) as { cases?: LiveOrthoCaseSummary[] };
-        const active = orthoData.cases?.find((c) => c.status === "active") ?? orthoData.cases?.[0] ?? null;
-        setLiveCase(active);
+        const fetchedCases = Array.isArray(orthoData.cases) ? orthoData.cases : [];
+        setLiveCases(fetchedCases);
+        setSelectedCaseId((prev) => {
+          if (prev !== null && fetchedCases.some((c) => c.id === prev)) return prev;
+          const active = fetchedCases.find((c) => c.status === "active") ?? fetchedCases[0] ?? null;
+          return active?.id ?? null;
+        });
       }
 
       if (docsRes && docsRes.ok) {
@@ -157,13 +176,13 @@ export function AdvancedOrthoWorkspace({
     } finally {
       setLoadingWorkspace(false);
     }
-  }, [patientId, perms.loading, perms.moduleVisible, perms.can, perms.canField]);
+  }, [needsExtendedWorkspace, patientId, perms, session?.role]);
 
   useEffect(() => {
     void loadWorkspaceAndLiveContext();
   }, [loadWorkspaceAndLiveContext]);
 
-  const persistWorkspace = async (next: OrthoWorkspaceRecord) => {
+  const persistWorkspace = useCallback(async (next: OrthoWorkspaceRecord) => {
     setSavingState("saving");
     setSaveError(null);
     try {
@@ -193,7 +212,7 @@ export function AdvancedOrthoWorkspace({
       setSavingState("error");
       setSaveError("تعذّر الاتصال بالخادم لحفظ ملف التقويم.");
     }
-  };
+  }, [patientId]);
 
   useEffect(() => {
     return () => {
@@ -201,7 +220,10 @@ export function AdvancedOrthoWorkspace({
     };
   }, []);
 
-  const canViewPhotos = perms.can("photos.view") && perms.canField("previousPhotos");
+  const canViewPhotos =
+    session?.role !== "reception" &&
+    perms.can("photos.view") &&
+    perms.canField("previousPhotos");
   const clinicSettings = useMemo(() => buildClinicSettingsForOrthoCore(clinicName), [clinicName]);
 
   const orthoCoreDraft: PatientCase = useMemo(
@@ -216,6 +238,17 @@ export function AdvancedOrthoWorkspace({
         canViewPhotos,
       }),
     [patientId, patientName, patientCode, record, liveDocs, liveCase, canViewPhotos],
+  );
+
+  const previousCasesMedia = useMemo(
+    () =>
+      buildPreviousCasesMedia({
+        liveDocs,
+        liveCases,
+        activeCaseId: liveCase?.id ?? null,
+        canViewPhotos,
+      }),
+    [liveDocs, liveCases, liveCase?.id, canViewPhotos],
   );
 
   const latestCaseRef = useRef<PatientCase>(orthoCoreDraft);
@@ -291,11 +324,16 @@ export function AdvancedOrthoWorkspace({
   );
 
   const visibleTabs = useMemo(() => {
+    if (perms.loading) {
+      return ORTHO_WORKSPACE_TABS.filter((t) => t.id === "sessions");
+    }
     if (!perms.moduleVisible) return [];
     if (!perms.can("records.read") && perms.can("records.blind_create")) {
       return ORTHO_WORKSPACE_TABS.filter((t) => t.id === "sessions");
     }
-    return ORTHO_WORKSPACE_TABS.filter((t) => perms.canSection(t.sectionKey));
+    return ORTHO_WORKSPACE_TABS.filter(
+      (t) => perms.canSection(t.sectionKey) || (t.id === "sessions" && perms.can("records.read")),
+    );
   }, [perms]);
 
   useEffect(() => {
@@ -304,7 +342,7 @@ export function AdvancedOrthoWorkspace({
     }
   }, [perms.loading, visibleTabs, activeTab]);
 
-  if (perms.loading) {
+  if (perms.loading && activeTab !== "sessions") {
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-500">
         جارٍ التحقق من صلاحيات وحدة التقويم…
@@ -312,7 +350,7 @@ export function AdvancedOrthoWorkspace({
     );
   }
 
-  if (!perms.moduleVisible) {
+  if (!perms.loading && !perms.moduleVisible) {
     return (
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-xs text-amber-900 flex items-center gap-2">
         <ShieldAlert className="h-4 w-4 shrink-0" />
@@ -392,6 +430,28 @@ export function AdvancedOrthoWorkspace({
 
             {/* Exact OrthoCore Action Buttons */}
             <div className="flex flex-wrap items-center gap-2">
+              {!isBlindOnly && liveCases.length > 1 ? (
+                <label className="inline-flex items-center gap-1.5 text-xs text-navy-700">
+                  <span className="font-semibold">{tr(lang, "الحالة:", "Case:")}</span>
+                  <select
+                    data-testid="ortho-case-switcher"
+                    value={liveCase?.id ?? ""}
+                    onChange={(e) => {
+                      const v = Number(e.target.value);
+                      if (Number.isInteger(v) && v > 0) setSelectedCaseId(v);
+                    }}
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-navy-900"
+                  >
+                    {liveCases.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        #{c.id} · {c.status === "active" ? tr(lang, "نشطة", "Active") : tr(lang, "سابقة", "Previous")}
+                        {c.startDate ? ` (${c.startDate})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+
               {!isBlindOnly ? (
                 <span className="text-xs text-navy-500 font-mono">
                   {savingState === "saving"
@@ -519,6 +579,8 @@ export function AdvancedOrthoWorkspace({
                 lang={lang}
                 role={orthoRole}
                 actorName={actorName}
+                activeCaseId={liveCase?.id ?? null}
+                previousCasesMedia={previousCasesMedia}
                 onChange={handleOrthoCoreUpdate}
               />
             )}
@@ -554,14 +616,14 @@ export function AdvancedOrthoWorkspace({
             )}
 
             {/* Tab 8: Native AQLAN Daily Tightening Workflow + Package 2 Live Camera + Follow-up Doctor */}
-            {activeTab === "sessions" && (perms.canSection("sessions") || isBlindOnly) && (
+            {activeTab === "sessions" && (perms.loading || perms.canSection("sessions") || perms.can("records.read") || isBlindOnly) && (
               <PatientOrtho
                 patientId={patientId}
                 context={context}
                 onContextChange={onContextChange}
                 onClinicalChange={() => {
                   onClinicalChange?.();
-                  void loadWorkspaceAndLiveContext();
+                  if (needsExtendedWorkspace) void loadWorkspaceAndLiveContext();
                 }}
                 onNavigationGuardChange={onNavigationGuardChange}
                 onOpenTreatmentEntry={onOpenTreatmentEntry}

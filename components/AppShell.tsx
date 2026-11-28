@@ -309,7 +309,8 @@ export function AppShell({ children, clinicTimeZone }: { children: React.ReactNo
         {/* بانر الرسائل العاجلة — ألم مريض لا ينتظر دور الشارة */}
         {showUrgentBanner && (
           <div
-            role="alert"
+            role="region"
+            aria-label="تنبيه الرسائل العاجلة"
             className="flex flex-wrap items-center gap-2.5 border-b border-danger-700 bg-danger-600 px-4 py-2 text-white sm:gap-3 print:hidden"
           >
             <span className="relative flex h-5 w-5 shrink-0 items-center justify-center" aria-hidden="true">

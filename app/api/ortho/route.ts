@@ -17,7 +17,7 @@ import {
   NO_STORE_HEADERS,
   orthoForbiddenResponse,
 } from "@/lib/ortho-privacy-server";
-import { resolveOrthoAccess } from "@/lib/ortho-privacy";
+import { isOrthoMediaEligibleRole, resolveOrthoAccess } from "@/lib/ortho-privacy";
 
 export const dynamic = "force-dynamic";
 
@@ -97,6 +97,7 @@ export async function GET(request: Request) {
         if (verdict.allowed) {
           const legacyXray = await canAccessPatient(session, id, "canViewXrays");
           const canSeePhotos = Boolean(
+            isOrthoMediaEligibleRole(session.role) &&
             legacyXray &&
             resolved.permissions["photos.view"] &&
             resolved.fields.previousPhotos,

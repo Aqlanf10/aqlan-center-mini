@@ -82,27 +82,6 @@ export async function GET() {
   const authorized = isAdmin(session.role);
   try {
     const shift = await getOpenShift();
-    if (session.role === "reception") {
-      const receptionOpen = shift
-        ? {
-            id: shift.id,
-            status: shift.status,
-            openedBy: shift.openedBy,
-            openedAt: shift.openedAt,
-            openingReviews: (await listOpeningReviews({ shiftId: shift.id })).map((review) =>
-              projectOpeningReview(review, false),
-            ),
-          }
-        : null;
-      return NextResponse.json(
-        {
-          clinicTimeZone: CLINIC_TIME_ZONE,
-          open: receptionOpen,
-          recent: await listShiftsForViewer({ authorized: false }, 15),
-        },
-        { headers: { "Cache-Control": "private, no-store" } },
-      );
-    }
     // 0129: the open shift's opening differences, and the clinic's pending count (never hidden before the cutover).
     const open = shift ? { ...shift, openingReviews: (await listOpeningReviews({ shiftId: shift.id })).map(review => projectOpeningReview(review, authorized)) } : null;
     const pendingOpeningReviews = await pendingOpeningReviewCount();
@@ -165,18 +144,8 @@ export async function POST(request: Request) {
       details: { الافتتاحي: shift.opening, ...openingAuditDetails(shift) },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(
-      session.role === "reception"
-        ? {
-            id: shift.id,
-            status: shift.status,
-            openingReviews: (shift.openingReviews ?? []).map((review) =>
-              projectOpeningReview(review, false),
-            ),
-          }
-        : { ...shift, openingReviews: (shift.openingReviews ?? []).map(review => projectOpeningReview(review, isAdmin(session.role))) },
-      { status: 201 },
-    );
+    return NextResponse.json({ ...shift, openingReviews: (shift.openingReviews ?? []).map(review => projectOpeningReview(review, isAdmin(session.role))) },
+      { status: 201 });
   } catch {
     return NextResponse.json({ message: "تعذّر فتح الوردية." }, { status: 500 });
   }
@@ -215,12 +184,6 @@ export async function PATCH(request: Request) {
     }
     if (result.reason === "difference_reason_required" && result.difference) {
       /* (P1-3) الجرد أعمى: الفرق يُكشف بعد إدخال المعدود لا قبله، ولا يُقفَل بلا سبب. */
-      if (session.role === "reception") {
-        return NextResponse.json(
-          { code: "difference_reason_required", message: "راجع العدّ وأدخل سبب الفرق لإقفال الوردية." },
-          { status: 409 },
-        );
-      }
       const parts = CURRENCIES
         .filter((currency) => result.difference![currency] !== 0)
         .map((currency) => {
@@ -248,7 +211,7 @@ export async function PATCH(request: Request) {
       },
       actor: session.username, actorRole: session.role,
     });
-    return NextResponse.json(session.role === "reception" ? { id } : result.shift);
+    return NextResponse.json(result.shift);
   } catch {
     return NextResponse.json({ message: "تعذّر إغلاق الوردية." }, { status: 500 });
   }

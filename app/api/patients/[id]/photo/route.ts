@@ -31,7 +31,7 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   }
   const session = await requireSession();
   if (!session) return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
-  if (session.role === "reception" || isRestrictedRole(session.role)) {
+  if (isRestrictedRole(session.role)) {
     return NextResponse.json({ message: "تعديل صورة المريض ليس من صلاحيتك." }, { status: 403 });
   }
   const patientId = Number((await context.params).id);

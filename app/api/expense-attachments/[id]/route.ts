@@ -15,8 +15,8 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
   }
-  if (session.role === "reception" || !canViewMoney(session.role)) {
-    return NextResponse.json({ message: "المصروفات ومرفقاتها للإدارة والمحاسبة فقط." }, { status: 403 });
+  if (!canViewMoney(session.role)) {
+    return NextResponse.json({ message: "الصندوق والفواتير للإدارة والاستقبال." }, { status: 403 });
   }
   const { id: rawId } = await context.params;
   const id = Number(rawId);

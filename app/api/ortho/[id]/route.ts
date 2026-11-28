@@ -11,6 +11,7 @@ import { PHASE_LABEL, RETAINER_LABEL } from "@/lib/ortho";
 import { clinicDateString } from "@/lib/schedule";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { isOrthoMediaEligibleRole } from "@/lib/ortho-privacy";
 import { evaluateOrthoPermission, NO_STORE_HEADERS, orthoForbiddenResponse } from "@/lib/ortho-privacy-server";
 
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
@@ -39,6 +40,9 @@ const forbidden = (msg = "غير مصرّح لك بالوصول لهذه الح�
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
+  if (!["admin", "reception", "doctor"].includes(session.role)) {
+    return forbidden("غير مصرّح لك بالوصول لهذه الحالة.");
+  }
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
@@ -101,6 +105,9 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   }
   const session = await requireSession();
   if (!session) return denied();
+  if (!["admin", "reception", "doctor"].includes(session.role)) {
+    return forbidden("غير مصرّح لك بالوصول لهذه الحالة.");
+  }
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
 
@@ -225,6 +232,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const session = await requireSession();
   if (!session) return denied();
+  if (!["admin", "reception", "doctor"].includes(session.role)) {
+    return forbidden("غير مصرّح لك بالوصول لهذه الحالة.");
+  }
   const caseId = await idFrom(context);
   if (!caseId) return NextResponse.json({ message: "رقم الحالة غير صالح." }, { status: 400 });
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
@@ -243,6 +253,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const legacyXray = await canAccessPatient(session, found.patientId, "canViewXrays");
   const photosVisible = Boolean(
+    isOrthoMediaEligibleRole(session.role) &&
     legacyXray &&
     readGate.access?.permissions["photos.view"] &&
     readGate.access?.fields.previousPhotos,

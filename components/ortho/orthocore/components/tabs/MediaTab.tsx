@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react';
 import { ClinicSettings, Language, MediaKind, MediaRecord, PatientCase, RecordStage, UserRole } from '../../types/ortho';
+import type { PreviousCaseMediaGroup } from '../../utils/caseAdapter';
 import { REQUIRED_T0_VIEWS, VIEW_TYPE_LABELS, tr } from '../../i18n/translations';
 import { AiMediaReview, api } from '../../services/api';
 import { PhotoEditorModal } from '../PhotoEditorModal';
@@ -31,10 +32,21 @@ interface MediaTabProps {
   lang: Language;
   role: UserRole;
   actorName: string;
+  activeCaseId?: number | null;
+  previousCasesMedia?: PreviousCaseMediaGroup[];
   onChange: (next: PatientCase, timelineMsg?: { ar: string; en: string }) => void;
 }
 
-export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, role, actorName, onChange }) => {
+export const MediaTab: React.FC<MediaTabProps> = ({
+  patient,
+  settings,
+  lang,
+  role,
+  actorName,
+  activeCaseId = null,
+  previousCasesMedia = [],
+  onChange,
+}) => {
   const [stageFilter, setStageFilter] = useState<'ALL' | RecordStage>('ALL');
   const [uploadStage, setUploadStage] = useState<RecordStage>('T0');
   const [uploadView, setUploadView] = useState<string>('intraoral_right');
@@ -124,40 +136,46 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
           title: displayTitle,
           kind: detectedKind === 'radiograph' || detectedKind === 'dicom' ? 'xray' : detectedKind === 'document' ? 'other' : 'photo',
           takenOn: captureDate,
+          orthoCaseId: activeCaseId ?? undefined,
           photoStage: uploadStage,
           photoView: uploadView,
           note: sourceNote,
         });
-        added.push({
-          id: uploaded.docId ? `doc-${uploaded.docId}` : `med-${Date.now()}-${i}`,
-          title: displayTitle,
-          mediaKind: detectedKind,
-          stage: uploadStage,
-          viewType: uploadView,
-          captureDate,
-          uploadDate: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
-          source: sourceNote,
-          notes: '',
-          originalUrl: uploaded.url,
-          mimeType: uploaded.mimeType,
-          calibration: { isCalibrated: false, pixelsPerMm: null, source: tr(lang, 'غير معاير', 'Uncalibrated'), unit: 'mm' },
-          editorState: {
-            rotationDeg: 0,
-            tiltDeg: 0,
-            brightness: 100,
-            contrast: 100,
-            anonymizeBar: { enabled: false, yPct: 24, hPct: 10 },
-            annotations: [],
-          },
-        });
+        if (uploaded.url) {
+          added.push({
+            id: uploaded.docId ? `doc-${uploaded.docId}` : `med-${Date.now()}-${i}`,
+            orthoCaseId: activeCaseId ?? null,
+            title: displayTitle,
+            mediaKind: detectedKind,
+            stage: uploadStage,
+            viewType: uploadView,
+            captureDate,
+            uploadDate: clinicDateString(new Date(), CLINIC_ZONE_FALLBACK),
+            source: sourceNote,
+            notes: '',
+            originalUrl: uploaded.url,
+            mimeType: uploaded.mimeType,
+            calibration: { isCalibrated: false, pixelsPerMm: null, source: tr(lang, 'غير معاير', 'Uncalibrated'), unit: 'mm' },
+            editorState: {
+              rotationDeg: 0,
+              tiltDeg: 0,
+              brightness: 100,
+              contrast: 100,
+              anonymizeBar: { enabled: false, yPct: 24, hPct: 10 },
+              annotations: [],
+            },
+          });
+        }
       }
-      onChange(
-        { ...patient, media: [...added, ...patient.media] },
-        {
-          ar: `رفع ${added.length} سجل/صور تشخيصية (${uploadStage})`,
-          en: `Uploaded ${added.length} diagnostic record(s) (${uploadStage})`,
-        },
-      );
+      if (added.length > 0) {
+        onChange(
+          { ...patient, media: [...added, ...patient.media] },
+          {
+            ar: `رفع ${added.length} سجل/صور تشخيصية (${uploadStage})`,
+            en: `Uploaded ${added.length} diagnostic record(s) (${uploadStage})`,
+          },
+        );
+      }
     } finally {
       setUploading(false);
     }
@@ -499,6 +517,62 @@ export const MediaTab: React.FC<MediaTabProps> = ({ patient, settings, lang, rol
           </div>
         )}
       </div>
+
+      {/* Read-only Archived Previous Cases Media (Strictly Separated from Current Case) */}
+      {role !== 'reception' && previousCasesMedia.length > 0 && (
+        <details
+          data-testid="ortho-previous-cases-media"
+          className="bg-slate-50 border border-slate-200 rounded-xl p-4"
+        >
+          <summary className="cursor-pointer text-xs font-bold text-slate-800 select-none">
+            {tr(
+              lang,
+              `أرشيف صور الحالات التقويمية السابقة (للاطلاع فقط — مفصولة عن الحالة الحالية) · ${previousCasesMedia.reduce((n, g) => n + g.media.length, 0)} صورة`,
+              `Previous Orthodontic Cases Media Archive (Read-only — Isolated from Current Case) · ${previousCasesMedia.reduce((n, g) => n + g.media.length, 0)} item(s)`,
+            )}
+          </summary>
+          <div className="mt-3 space-y-4">
+            {previousCasesMedia.map((group) => (
+              <div key={group.orthoCaseId} className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-bold text-slate-800">
+                    {tr(lang, `الحالة السابقة #${group.orthoCaseId}`, `Previous Case #${group.orthoCaseId}`)}
+                    {group.startDate ? ` · ${group.startDate}` : ''}
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px]">
+                    {group.status === 'completed'
+                      ? tr(lang, 'مكتملة', 'Completed')
+                      : group.status === 'discontinued'
+                        ? tr(lang, 'متوقفة', 'Discontinued')
+                        : tr(lang, 'حالة أخرى', 'Other Case')}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                  {group.media.map((m) => (
+                    <a
+                      key={m.id}
+                      href={m.originalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group block rounded-lg border border-slate-200 overflow-hidden bg-slate-100"
+                    >
+                      <img
+                        src={m.originalUrl}
+                        alt={m.title}
+                        className="h-20 w-full object-cover"
+                        loading="lazy"
+                      />
+                      <div className="p-1.5 text-[10px] text-slate-700 truncate font-medium">
+                        {m.stage} · {m.captureDate}
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
 
       {/* Specialized Modals */}
       <PhotoEditorModal

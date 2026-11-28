@@ -61,7 +61,6 @@ import { CLINIC_BASE_CURRENCY, CURRENCY_LABEL, formatMoney, type Currency } from
 import { nextStep } from "@/lib/workflow";
 import { useSession } from "@/components/SessionProvider";
 import { CanonicalPatientProfile } from "@/components/patient/CanonicalPatientProfile";
-import { ReceptionWorkspace } from "./ReceptionWorkspace";
 import { useSetting } from "@/components/SettingsProvider";
 import { isAdmin, canViewMoney, canHandleMoney } from "@/lib/roles";
 import { readPatientAccountHeader } from "@/lib/patient-account-header";
@@ -130,19 +129,6 @@ export default function PatientFilePage({ params, searchParams }: {
   // الهوية الموحّدة (M2): ملفٌّ من قراءةٍ واحدة مُسقطة؛ لا يُستدعى أي مسارٍ لم يُنقل بعد.
   if (session?.canonical === true) return <CanonicalPatientProfile key={id} patientId={id} />;
   const checkout = readCheckoutVisitRequest(query?.checkoutVisit);
-  if (session?.role === "reception") {
-    const numericId = Number(id);
-    const tab = typeof query?.tab === "string" ? query.tab : "";
-    return (
-      <ReceptionWorkspace
-        key={id}
-        id={Number.isSafeInteger(numericId) && numericId > 0 ? numericId : 0}
-        checkout={checkout}
-        accountTab={tab === "account"}
-        todayTab={tab === "today"}
-      />
-    );
-  }
   return <PatientFileWorkspace key={id} id={id} checkoutVisitRequest={checkout} />;
 }
 

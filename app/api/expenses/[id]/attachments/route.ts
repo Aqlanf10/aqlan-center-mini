@@ -32,7 +32,7 @@ const expenseIdFrom = async (context: { params: Promise<{ id: string }> }) => {
 export async function GET(_request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  if (session.role === "reception" || !canViewMoney(session.role)) return forbidden();
+  if (!canViewMoney(session.role)) return forbidden();
   const expenseId = await expenseIdFrom(context);
   if (!expenseId) return NextResponse.json({ message: "رقم السند غير صالح." }, { status: 400 });
   try {
@@ -45,7 +45,7 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   if (!session) return denied();
-  if (session.role === "reception" || !canHandleMoney(session.role)) return forbidden();
+  if (!canHandleMoney(session.role)) return forbidden();
   const expenseId = await expenseIdFrom(context);
   if (!expenseId) return NextResponse.json({ message: "رقم السند غير صالح." }, { status: 400 });
 

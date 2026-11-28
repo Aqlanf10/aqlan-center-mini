@@ -12,6 +12,8 @@ import { isAdmin } from "@/lib/roles";
 import { DEFAULT_MAX_BYTES, isDocumentKind, validateUpload } from "@/lib/storage";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { isOrthoMediaEligibleRole } from "@/lib/ortho-privacy";
+import { evaluateOrthoPermission, NO_STORE_HEADERS } from "@/lib/ortho-privacy-server";
 import { bodyErrorResponse, readBoundedFormData } from "@/lib/http-body";
 import { UPLOAD_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { contentMatchesMimeType, SIGNATURE_MISMATCH_MESSAGE } from "@/lib/magic-bytes";
@@ -52,14 +54,17 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
   }
   const session = await requireSession();
   if (!session) return denied();
-  if (session.role === "reception") {
-    return NextResponse.json(
-      { message: "يمكن للاستقبال رفع المستندات الخارجية فقط دون استعراض الصور السريرية." },
-      { status: 403, headers: { "Cache-Control": "private, no-store" } },
-    );
-  }
   const patientId = await patientIdFrom(context);
   if (!patientId) return NextResponse.json({ message: "رقم الملف غير صالح." }, { status: 400 });
+  const caseFilters = new URL(_request.url).searchParams.getAll("orthoCaseId");
+  const filterOrthoCaseId = caseFilters.length === 0 ? null : Number(caseFilters[0]);
+  if (
+    caseFilters.length > 1 ||
+    (filterOrthoCaseId !== null &&
+      (!/^[1-9]\d*$/.test(caseFilters[0]) || !Number.isSafeInteger(filterOrthoCaseId)))
+  ) {
+    return NextResponse.json({ message: "رقم حالة التقويم غير صالح." }, { status: 400, headers: NO_STORE_HEADERS });
+  }
 
   /* صلاحيات الوكيل المساعد + عزل V2: الطبيب بلا صلاحية الأشعة ممنوع، ومن يملكها
      لا يرى إلا أشعة مرضاه — الفحص في الخادم لا في الشاشة. */
@@ -69,14 +74,31 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   try {
     const storage = await storageStatus();
-    return NextResponse.json({
-      documents: await listPatientDocuments(patientId, isAdmin(session.role)),
-      // الشاشة تحتاج أن تعرف قبل أن يختار المستخدم ملفًّا — لا بعد أن يرفعه فيفشل.
-      storageReady: storage.ready,
-      storageMessage: storage.ready ? null : storage.message,
-    });
+    const allDocs = await listPatientDocuments(patientId, isAdmin(session.role));
+    const orthoPhotoGate = !isOrthoMediaEligibleRole(session.role)
+      ? { allowed: false }
+      : await evaluateOrthoPermission(
+          session,
+          { permission: "photos.view", field: "previousPhotos" },
+          { patientId, orthoCaseId: filterOrthoCaseId },
+        );
+    const visibleDocs = !isOrthoMediaEligibleRole(session.role) || !orthoPhotoGate.allowed
+      ? allDocs.filter((doc) => doc.orthoCaseId == null && doc.adjustmentId == null && doc.photoStage == null)
+      : allDocs;
+    const documents = filterOrthoCaseId !== null
+      ? visibleDocs.filter((doc) => doc.orthoCaseId === filterOrthoCaseId)
+      : visibleDocs;
+    return NextResponse.json(
+      {
+        documents,
+        // الشاشة تحتاج أن تعرف قبل أن يختار المستخدم ملفًّا — لا بعد أن يرفعه فيفشل.
+        storageReady: storage.ready,
+        storageMessage: storage.ready ? null : storage.message,
+      },
+      { headers: NO_STORE_HEADERS },
+    );
   } catch {
-    return NextResponse.json({ message: "تعذّر تحميل المستندات." }, { status: 500 });
+    return NextResponse.json({ message: "تعذّر تحميل المستندات." }, { status: 500, headers: NO_STORE_HEADERS });
   }
 }
 
@@ -123,15 +145,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  if (session.role === "reception") {
-    const allowed = new Set(["file", "kind", "title", "takenOn"]);
-    if (
-      Array.from(form.keys()).some((key) => !allowed.has(key) || form.getAll(key).length !== 1) ||
-      !["xray", "report", "other"].includes(String(form.get("kind")))
-    ) {
-      return NextResponse.json({ message: "اختر أشعة أو مستندًا خارجيًا." }, { status: 400 });
-    }
-  }
   const file = form.get("file");
   if (!(file instanceof File)) {
     return NextResponse.json({ message: "اختر ملفًّا." }, { status: 400 });
@@ -241,10 +254,17 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       actor: session.username,
       actorRole: session.role,
     });
-    return NextResponse.json(
-      session.role === "reception" ? { uploaded: true } : document,
-      { status: 201, headers: { "Cache-Control": "private, no-store" } },
-    );
+    const isOrthoUpload = Boolean(orthoCaseId != null || adjustmentId != null || photoStage != null);
+    const orthoUploadAccess = isOrthoUpload && session.role !== "reception"
+      ? (await evaluateOrthoPermission(session, { permission: "photos.view" }, { patientId, orthoCaseId })).access
+      : null;
+    if (
+      session.role === "reception" ||
+      Boolean(isOrthoUpload && (!orthoUploadAccess || !orthoUploadAccess.permissions["photos.view"]))
+    ) {
+      return NextResponse.json({ ok: true }, { status: 201, headers: NO_STORE_HEADERS });
+    }
+    return NextResponse.json(document, { status: 201, headers: NO_STORE_HEADERS });
   } catch (error) {
     if (error instanceof DocumentAssociationError) {
       return NextResponse.json({ message: error.message }, { status: 400 });

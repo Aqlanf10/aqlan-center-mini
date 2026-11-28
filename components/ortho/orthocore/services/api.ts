@@ -97,8 +97,19 @@ export const api = {
       method: "POST",
       body: form,
     });
-    const payload = (await res.json().catch(() => null)) as { id?: number; message?: string } | null;
-    if (!res.ok || !payload?.id) {
+    const payload = (await res.json().catch(() => null)) as { id?: number; ok?: boolean; message?: string } | null;
+    if (!res.ok) {
+      throw new Error(payload?.message || "تعذّر رفع الملف عبر خادم المركز المصادَق عليه.");
+    }
+    if (!payload?.id && payload?.ok === true) {
+      return {
+        url: "",
+        fileName: "",
+        mimeType: file.type || "application/octet-stream",
+        sizeBytes: file.size,
+      };
+    }
+    if (!payload?.id) {
       throw new Error(payload?.message || "تعذّر رفع الملف عبر خادم المركز المصادَق عليه.");
     }
     return {

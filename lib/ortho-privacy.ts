@@ -231,6 +231,11 @@ export function isOrthoFieldKey(value: unknown): value is OrthoFieldKey {
   return typeof value === "string" && FIELD_SET.has(value);
 }
 
+/** الاستقبال معزول عزلاً مطلقاً عن استعراض أو تنزيل صور التقويم ومراجعها حتى مع أي قاعدة سماح. */
+export function isOrthoMediaEligibleRole(role: string | null | undefined): boolean {
+  return role !== "reception";
+}
+
 /**
  * السياسة الافتراضية الآمنة عند التشغيل الأول:
  * - المالك/المدير (admin): كامل الصلاحيات.
@@ -765,6 +770,16 @@ export function resolveOrthoAccess(
   }
   for (const k of ORTHO_FIELDS) {
     fields[k] = allowField[k] && !denyField[k];
+  }
+
+  // عزل مطلق: الاستقبال لا يرى أو ينزّل أو يعدّل صور التقويم ولا مراجعها حتى مع وجود قاعدة سماح صريحة
+  if (subject.role === "reception") {
+    permissions["photos.view"] = false;
+    permissions["photos.edit"] = false;
+    permissions["photos.download"] = false;
+    sections["media"] = false;
+    sections["photo_analysis"] = false;
+    fields["previousPhotos"] = false;
   }
 
   return {

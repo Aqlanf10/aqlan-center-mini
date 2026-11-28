@@ -9,6 +9,8 @@ import { readFileByKey } from "@/lib/files";
 import { isAdmin } from "@/lib/roles";
 import { requireSession } from "@/lib/session";
 import { canAccessPatient } from "@/lib/patient-access";
+import { isOrthoMediaEligibleRole } from "@/lib/ortho-privacy";
+import { evaluateOrthoPermission, NO_STORE_HEADERS, orthoForbiddenResponse } from "@/lib/ortho-privacy-server";
 
 export const dynamic = "force-dynamic";
 
@@ -47,23 +49,40 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
   }
   const session = await requireSession();
   if (!session) return denied();
-  if (session.role === "reception") {
-    return NextResponse.json(
-      { message: "يمكن للاستقبال رفع المستندات الخارجية فقط دون عرض الصور السريرية." },
-      { status: 403, headers: { "Cache-Control": "private, no-store" } },
-    );
-  }
   const id = await idFrom(context);
   if (!id) return NextResponse.json({ message: "رقم المستند غير صالح." }, { status: 400 });
 
   try {
     const found = await getDocumentForDownload(id);
-    if (!found) return NextResponse.json({ message: "المستند غير موجود." }, { status: 404 });
+    if (!found) return NextResponse.json({ message: "المستند غير موجود." }, { status: 404, headers: NO_STORE_HEADERS });
     if (!(await canAccessPatient(session, found.document.patientId, "canViewXrays"))) {
-      return NextResponse.json({ message: "غير مصرّح لك بعرض هذا المستند." }, { status: 403 });
+      return NextResponse.json({ message: "غير مصرّح لك بعرض هذا المستند." }, { status: 403, headers: NO_STORE_HEADERS });
+    }
+    const download = new URL(request.url).searchParams.get("download") === "1";
+    const isOrthoMedia = Boolean(
+      found.document.orthoCaseId != null ||
+      found.document.adjustmentId != null ||
+      found.document.photoStage != null,
+    );
+    if (isOrthoMedia) {
+      if (!isOrthoMediaEligibleRole(session.role)) {
+        return orthoForbiddenResponse(
+          download ? "غير مصرّح لك بتنزيل صور وأشعة التقويم." : "غير مصرّح لك بعرض صور وأشعة التقويم.",
+        );
+      }
+      const mediaGate = await evaluateOrthoPermission(
+        session,
+        { permission: download ? "photos.download" : "photos.view" },
+        { patientId: found.document.patientId, orthoCaseId: found.document.orthoCaseId ?? null },
+      );
+      if (!mediaGate.allowed) {
+        return orthoForbiddenResponse(
+          download ? "غير مصرّح لك بتنزيل صور وأشعة التقويم." : "غير مصرّح لك بعرض صور وأشعة التقويم.",
+        );
+      }
     }
     if (found.document.removedAt && !isAdmin(session.role)) {
-      return NextResponse.json({ message: "المستند مخفيّ." }, { status: 404 });
+      return NextResponse.json({ message: "المستند مخفيّ." }, { status: 404, headers: NO_STORE_HEADERS });
     }
 
     const bytes = await readFileByKey(found.storageKey);
@@ -72,11 +91,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       // صفحةٍ فارغة تجعل الطبيب يظنّ أن الأشعة لم تُرفع أصلًا.
       return NextResponse.json(
         { message: "وصف المستند موجود وملفّه مفقود من التخزين. راجع القرص الملحق." },
-        { status: 410 },
+        { status: 410, headers: NO_STORE_HEADERS },
       );
     }
 
-    const download = new URL(request.url).searchParams.get("download") === "1";
     const name = encodeURIComponent(found.document.title);
     return new NextResponse(new Uint8Array(bytes), {
       headers: {

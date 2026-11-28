@@ -107,6 +107,8 @@ function PatientDocumentsForPatient({
   const cameraInput = useRef<HTMLInputElement>(null);
   const [photoStage, setPhotoStage] = useState<PhotoStage>("progress");
   const [photoView, setPhotoView] = useState<PhotoView | "">("");
+  const [uploadNotice, setUploadNotice] = useState<string | null>(null);
+  const isReception = session?.role === "reception";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -134,11 +136,12 @@ function PatientDocumentsForPatient({
     if (!file || busy) return;
     setBusy(true);
     setError(null);
+    setUploadNotice(null);
     try {
       const form = new FormData();
       form.set("file", file);
       form.set("kind", kind);
-      form.set("title", title.trim() || file.name);
+      form.set("title", title.trim() || (isReception ? KIND_LABEL[kind] : file.name));
       form.set("takenOn", takenOn);
       form.set("requestKey", uploadKey.current);
       if (kind === "photo") {
@@ -152,6 +155,7 @@ function PatientDocumentsForPatient({
       setTitle("");
       setPicked(null);
       setPhotoView("");
+      if (isReception) setUploadNotice("تم رفع الملف بنجاح.");
       if (fileInput.current) fileInput.current.value = "";
       if (cameraInput.current) cameraInput.current.value = "";
       await load();
@@ -212,6 +216,9 @@ function PatientDocumentsForPatient({
     <div>
       {error ? (
         <p role="alert" className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>
+      ) : null}
+      {uploadNotice ? (
+        <p role="status" className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800">{uploadNotice}</p>
       ) : null}
 
       {/*
@@ -348,7 +355,7 @@ function PatientDocumentsForPatient({
             📷 التقاط صورة الآن
           </button>
           <span className="min-w-0 flex-1 truncate text-[11px] text-slate-500">
-            {picked?.name ?? "لم يُختَر ملف بعد — صورة أو PDF"}
+            {picked ? (isReception ? "تم تحديد ملف للرفع" : picked.name) : "لم يُختَر ملف بعد — صورة أو PDF"}
           </span>
           <button type="submit" disabled={busy || !ready || !picked}
             className="rounded-lg bg-navy-800 px-4 py-1.5 text-xs font-extrabold text-white disabled:opacity-40">

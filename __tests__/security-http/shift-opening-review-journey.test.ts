@@ -29,12 +29,14 @@ const STATE_ONLY = ["currency", "id", "shiftId", "state"];
 
 it("HTTP: one-step opening, a sealed previous close, state-only answers, and the exact grant for review and correction", async () => {
   const operator = await journey.login("operator");
-  const first = await (await shiftsApi(operator.cookie, "POST", { opening: { YER: "4321" } })).json();
-  expect((await shiftsApi(operator.cookie, "PATCH", { id: first.id, counted: { YER: "4321" } })).status).toBe(200);
+  // Keep the permitted historical opening distinct from the sealed closing count:
+  // otherwise the full-response non-disclosure assertion finds the opening itself.
+  const first = await (await shiftsApi(operator.cookie, "POST", { opening: { YER: "4000" } })).json();
+  expect((await shiftsApi(operator.cookie, "PATCH", { id: first.id, counted: { YER: "4321" }, differenceReason: "فرق اصطناعي مثبت عند الإقفال" })).status).toBe(200);
   // Before the next count is fixed: the operator's feed never carries the previous close's count.
   const before = await (await journey.api("/api/shifts", operator.cookie)).json();
   expect(before.open).toBeNull();
-  expect(before.recent[0]).toMatchObject({ id: first.id, counted: null, expected: null, difference: null, sealed: true });
+  expect(before.recent[0]).toMatchObject({ id: first.id, opening: { YER: 4000, SAR: 0, USD: 0 }, counted: null, expected: null, difference: null, sealed: true });
   expect(JSON.stringify(before)).not.toMatch(PREVIOUS);
   const owned = await (await journey.api("/api/shifts", (await journey.login("owner")).cookie)).json();
   expect(owned.recent[0]).toMatchObject({ id: first.id, counted: { YER: 4321, SAR: 0, USD: 0 } });

@@ -38,25 +38,21 @@
   "role !== \"doctor\""
  ],
  "/api/documents/[id]": [
-  "isAdmin(",
-  "role === \"reception\""
+  "isAdmin("
  ],
  "/api/executive": [
   "isAdmin(",
   "role === \"doctor\""
  ],
  "/api/expense-attachments/[id]": [
-  "canViewMoney(",
-  "role === \"reception\""
+  "canViewMoney("
  ],
  "/api/expenses": [
   "canViewMoney(",
-  "role === \"doctor\"",
-  "role === \"reception\""
+  "role === \"doctor\""
  ],
  "/api/expenses/[id]/attachments": [
-  "canViewMoney(",
-  "role === \"reception\""
+  "canViewMoney("
  ],
  "/api/export": [
   "isAdmin("
@@ -137,11 +133,6 @@
   "permissions?.canViewAllPatients",
   "role === \"doctor\""
  ],
- "/api/patients/[id]": [
-  "role !== \"admin\"",
-  "role !== \"doctor\"",
-  "role === \"assistant\""
- ],
  "/api/patients/[id]/arrival-panel": [
   "canHandleMoney(",
   "financeAccess",
@@ -149,8 +140,7 @@
   "role === \"doctor\""
  ],
  "/api/patients/[id]/documents": [
-  "isAdmin(",
-  "role === \"reception\""
+  "isAdmin("
  ],
  "/api/patients/[id]/historical-documents": [
   "role===\"doctor\""
@@ -270,8 +260,7 @@
   "canViewMoney(",
   "isAdmin(",
   "permissions?.canViewCashDrawer",
-  "role === \"doctor\"",
-  "role === \"reception\""
+  "role === \"doctor\""
  ],
  "/api/users": [
   "isAdmin("
