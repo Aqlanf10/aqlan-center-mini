@@ -109,6 +109,22 @@ describe("synthetic assistant mode matrix", () => {
       vi.unstubAllEnvs();
     }
   });
+  it.each(["live_database", "pending_confirmation"] as const)("preserves authoritative local results despite a generic external-eligible intent: %s", async mode => {
+    const local = {
+      answer: "SYNTHETIC_LOCAL_RESULT", intent: "general_clinical", toolsUsed: [],
+      sourceType: mode === "live_database" ? "live_database" : "internal_engine",
+      model: "synthetic-local",
+      ...(mode === "pending_confirmation" ? { confirmation: { token: "synthetic-signed-preview", tool: "book_appointment" } } : {}),
+    };
+    m.process.mockResolvedValue(local);
+    const response = await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ...local, reply: local.answer });
+    expect(m.process).toHaveBeenCalledOnce();
+    expect(m.names).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+    expect(m.execute).not.toHaveBeenCalled();
+  });
   it("fails closed without cloud egress when local classification fails", async () => {
     m.process.mockRejectedValue(new Error("SYNTHETIC_PRIVATE_ENGINE_ERROR"));
     const response = await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }));
