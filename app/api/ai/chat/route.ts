@@ -149,13 +149,20 @@ async function handlePost(request: Request) {
     return NextResponse.json({ message: "سجل المحادثة غير صالح." }, { status: 400 });
   }
   if (Array.isArray(source.messages) && source.messages.length > 0) {
-    for (const m of source.messages) {
+    for (const [index, m] of source.messages.entries()) {
       // Never silently discard a malformed turn and replay an earlier user request.
       if (!m || typeof m !== "object" || Array.isArray(m)) {
         return NextResponse.json({ message: "رسالة المحادثة غير صالحة." }, { status: 400 });
       }
       const item = m as Record<string, unknown>;
-      if (item.role === "system") continue; // برومبت نظام من العميل: مهمل
+      if (item.role === "system") {
+        // Ignore client system prompts, but never let a trailing ignored turn
+        // reactivate an earlier user instruction.
+        if (index === source.messages.length - 1) {
+          return NextResponse.json({ message: "اكتب رسالتك أو استفسارك أولاً." }, { status: 400 });
+        }
+        continue;
+      }
       if (item.role !== "user" && item.role !== "assistant") {
         return NextResponse.json({ message: "دور رسالة المحادثة غير صالح." }, { status: 400 });
       }
