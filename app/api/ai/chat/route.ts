@@ -260,11 +260,20 @@ export async function POST(request: Request) {
   const latestUserMsg = last.content;
 
   // تنفيذ المعالجة عبر محرك الاستعلامات الداخلي الموحد
-  let response: StructuredAiResponse = await processAssistantQuery(
-    latestUserMsg,
-    assistantContext,
-    incomingMessages,
-  );
+  let response: StructuredAiResponse;
+  try {
+    response = await processAssistantQuery(
+      latestUserMsg,
+      assistantContext,
+      incomingMessages,
+    );
+  } catch {
+    // Without a trusted local result, we cannot classify the request for cloud egress.
+    return NextResponse.json(
+      { message: "تعذّرت معالجة الطلب داخل المركز. أعد المحاولة لاحقًا." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
 
   /* سياق مريضٍ مسموم أُسقط: يُعلَن للمستخدم لا يُمرَّر بصمت (P0.5). */
   if (droppedPatientContext) {
