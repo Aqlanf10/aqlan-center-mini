@@ -24,6 +24,7 @@ import { syncAutoProblems } from '../../utils/problemExtractor';
 import { api } from '../../services/api';
 
 interface ReportsTabProps {
+  orthoCaseId: number | null;
   patient: PatientCase;
   settings: ClinicSettings;
   lang: Language;
@@ -89,6 +90,7 @@ function buildReportText(patient: PatientCase, settings: ClinicSettings, type: R
 }
 
 export const ReportsTab: React.FC<ReportsTabProps> = ({
+  orthoCaseId,
   patient,
   settings,
   lang,
@@ -211,6 +213,7 @@ export const ReportsTab: React.FC<ReportsTabProps> = ({
     setExportingPptx(true);
     try {
       await exportCaseToPowerPoint({
+        orthoCaseId,
         patient,
         settings,
         lang: pptxLang,

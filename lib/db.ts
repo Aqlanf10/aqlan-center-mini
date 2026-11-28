@@ -14889,9 +14889,10 @@ export async function settleLabOrdersBatch(input: {
 // ─── تقرير العمولات ──────────────────────────────────────────────────────────
 
 import {
-  allocateInvoiceDiscount, buildCaseOverrideResolver, commissionForPatientAtEventTime, discountGroupKey, effectiveDoctorShares, resolvePolicyForShare, summarizeCommissions,
+  allocateInvoiceDiscount, buildCaseOverrideResolver, commissionForPatientAtEventTime, discountGroupKey, effectiveDoctorShares, resolvePolicyForShare, shareBase, summarizeCommissions,
   type CommissionDetailLine, type CommissionInvoice, type DoctorShareItem, type ServiceRateFinding,
 } from "./commission";
+import { serviceMaterialRateAsOf, type ServiceMaterialRateEvent } from "./service-material-rates";
 import { FULL_RATE_BP } from "./materialRate";
 import { invoiceNet } from "./money";
 export interface CommissionRow {
@@ -15462,6 +15463,8 @@ export async function commissionReport(
    *     يُنسب لفاتورة ولا عمولة عليه.
    */
   const rateTimeline = await materialRateTimeline(pool);
+  const serviceRates = await serviceMaterialRateTimeline(pool);
+  const serviceRateAt = (serviceId: number, atIso: string) => serviceMaterialRateAsOf(serviceRates, serviceId, atIso);
   const coveredByDoctorRate = new Map<number, Map<Currency, Map<string | null, Map<number | null, number>>>>();
   for (const [patientId, invoices] of byPatient) {
     const payments = paymentsByPatient.get(patientId) ?? [];
@@ -15560,6 +15563,7 @@ export async function commissionReport(
         overrideAt,
         participationAt,
         materialRateAt: (category, atIso) => materialRateAsOf(rateTimeline, category, atIso),
+        serviceMaterialRateAt: serviceRateAt,
         onUnderReview: detail ? (line) => (detail.underReviewParticipations ??= []).push({ ...line, patientId }) : undefined,
         sink: detail ? (line) => detail.lines.push({ ...line, invoiceCreatedAt: new Date(line.invoiceCreatedAt).toISOString(), patientId }) : undefined,
       },
@@ -15573,18 +15577,19 @@ export async function commissionReport(
       if (!invoice || !inRange(invoice.id) || invoice.netMinor <= 0) continue;
       for (const share of effectiveDoctorShares(invoice, participationAt)) {
         if (share.materialConsumptionExempt === true) continue;
-        /* (F-4) حصةٌ خُصمت تكلفة موادّها الفعلية بسياسة وقت هذه الدفعة لا تُقدَّر
-           موادّها بنسبة التخصص مرّةً ثانية — لا خصمٌ مزدوج لموادّ عملٍ واحد. */
-        if (share.materialCostMinor && share.materialCostMinor > 0) {
-          const policy = policyAt(share.doctorId, chunk.sourceTime);
-          if (policy && resolvePolicyForShare(policy, chunk.sourceTime, share).deductMaterials) continue;
-        }
+        const policy = policyAt(share.doctorId, chunk.sourceTime);
+        if (!policy) continue;
+        const resolved = resolvePolicyForShare(policy, chunk.sourceTime, share,
+          share.caseId || share.planId ? overrideAt(share.doctorId, share, chunk.sourceTime) : undefined);
+        // Actual materials already deducted by this policy are not estimated again.
+        if (resolved.deductMaterials && (share.materialCostMinor ?? 0) > 0) continue;
         const category = share.category ?? null;
-        const rateBp = category === null ? null : materialRateAsOf(rateTimeline, category, chunk.sourceTime);
+        const serviceRate = share.serviceId == null ? null : serviceRateAt(share.serviceId, chunk.sourceTime);
+        const rateBp = serviceRate ?? (category === null ? null : materialRateAsOf(rateTimeline, category, chunk.sourceTime));
         const byCurrency = coveredByDoctorRate.get(share.doctorId) ?? new Map<Currency, Map<string | null, Map<number | null, number>>>();
         const byCategory = byCurrency.get(invoice.currency) ?? new Map<string | null, Map<number | null, number>>();
         const byRate = byCategory.get(category) ?? new Map<number | null, number>();
-        byRate.set(rateBp, (byRate.get(rateBp) ?? 0) + Math.round((share.amountMinor * chunk.amount) / invoice.netMinor));
+        byRate.set(rateBp, (byRate.get(rateBp) ?? 0) + Math.round((Math.max(0, shareBase(share, resolved)) * chunk.amount) / invoice.netMinor));
         byCategory.set(category, byRate);
         byCurrency.set(invoice.currency, byCategory);
         coveredByDoctorRate.set(share.doctorId, byCurrency);
@@ -15659,6 +15664,29 @@ export async function commissionReport(
   }
 }
 
+
+/** The proposed storage is intentionally absent until its separate migration is approved. */
+export async function serviceMaterialRateStorageAvailable(runner: Pick<DbClient, "query">): Promise<boolean> {
+  const { rows } = await runner.query<{ available: boolean }>(
+    "SELECT to_regclass('public.service_material_rate_history') IS NOT NULL AS available",
+  );
+  return rows[0]?.available === true;
+}
+
+async function serviceMaterialRateTimeline(runner: Pick<DbClient, "query">): Promise<Map<number, ServiceMaterialRateEvent[]>> {
+  const history = new Map<number, ServiceMaterialRateEvent[]>();
+  if (!await serviceMaterialRateStorageAvailable(runner)) return history;
+  const { rows } = await runner.query<{ service_id: number; rate_bp: number | null; ts: Date; us: string }>(
+    `SELECT service_id, rate_bp, effective_from AS ts, to_char(effective_from, 'US') AS us
+       FROM public.service_material_rate_history ORDER BY service_id, effective_from, id`,
+  );
+  for (const row of rows) {
+    const timeline = history.get(row.service_id) ?? [];
+    timeline.push({ effectiveFrom: commissionTimeKey(commissionTimestampIso(row.ts, row.us)), rateBp: row.rate_bp });
+    history.set(row.service_id, timeline);
+  }
+  return history;
+}
 
 /** (P1-FIX-6) سجل النسب كخط زمني لكل فئة — للقراءة وقت الحدث في تقرير العمولة. */
 export async function materialRateTimeline(queryRunner?:Pick<DbClient,"query">): Promise<Map<string, Array<{ effectiveFrom: number; rateBp: number }>>> {

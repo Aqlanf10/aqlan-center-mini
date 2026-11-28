@@ -605,11 +605,20 @@ function clampPercent(value: number): number {
 }
 
 /** أساس الاحتساب بعد الخصومات — لا يقلّ عن صفر، والمختبر مرّةً واحدة في البند. */
-function shareBase(share: DoctorShareItem, policy: Pick<ResolvedPolicy, "deductLab" | "deductMaterials">): number {
+export function shareBase(share: DoctorShareItem, policy: Pick<ResolvedPolicy, "deductLab" | "deductMaterials">): number {
   let base = share.amountMinor;
   if (policy.deductLab && share.labCostMinor) base = Math.max(0, base - share.labCostMinor);
   if (policy.deductMaterials && share.materialCostMinor) base = Math.max(0, base - share.materialCostMinor);
   return base;
+}
+
+/** Apply estimated material consumption only to the remaining commission base. */
+export function materialRateCostForShare(
+  share: DoctorShareItem,
+  policy: Pick<ResolvedPolicy, "deductLab" | "deductMaterials">,
+  rateBp: number,
+): number {
+  return Math.round((Math.max(0, shareBase(share, policy)) * rateBp) / 10_000);
 }
 
 /** (COMM-DETAIL-1) جزءٌ من المستحق على التحصيل بنسبةٍ واحدة — لشرح سطر التفصيل. */
@@ -670,6 +679,7 @@ export interface CommissionEngineOptions {
   onUnderReview?: (line: ParticipationUnderReviewShare) => void;
   /** (Charter §17 / TD-10) Resolves specialty material consumption rate (basis points) at payment event time so consumption is deducted from the commission base BEFORE multiplying by the doctor's commission percentage. */
   materialRateAt?: (category: string, atIso: string) => number | null;
+  serviceMaterialRateAt?: (serviceId: number, atIso: string) => number | null;
 }
 
 /**
@@ -696,8 +706,8 @@ export function commissionForPatientAtEventTime(
   options: CommissionEngineOptions = {},
 ): Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number; netEarnedAfterMaterialRateMinor?: number }>> {
   const result = new Map<number, Record<Currency, { accruedMinor: number; earnedMinor: number; netEarnedAfterMaterialRateMinor?: number }>>();
-  const { overrideAt, sink, participationAt, onUnderReview, materialRateAt } = options;
-  const includeMaterialRateNet = typeof materialRateAt === "function";
+  const { overrideAt, sink, participationAt, onUnderReview, materialRateAt, serviceMaterialRateAt } = options;
+  const includeMaterialRateNet = materialRateAt != null || serviceMaterialRateAt != null;
   const bump = (doctorId: number, currency: Currency, accrued: number, earned: number, netEarnedAfterRate: number) => {
     const byCurrency = result.get(doctorId) ?? (includeMaterialRateNet
       ? {
@@ -719,11 +729,10 @@ export function commissionForPatientAtEventTime(
     result.set(doctorId, byCurrency);
   };
   const resolveShareMaterialRateBp = (share: DoctorShareItem, policy: ResolvedPolicy, atIso: string): number | null => {
-    if (!materialRateAt) return null;
     if (share.materialConsumptionExempt === true) return null;
     if (policy.deductMaterials && share.materialCostMinor && share.materialCostMinor > 0) return null;
-    if (!share.category) return null;
-    return materialRateAt(share.category, atIso);
+    const serviceRate = share.serviceId == null ? null : serviceMaterialRateAt?.(share.serviceId, atIso);
+    return serviceRate ?? (share.category ? materialRateAt?.(share.category, atIso) ?? null : null);
   };
   const overrideFor = (doctorId: number, share: DoctorShareItem, atIso: string) =>
     overrideAt && (share.caseId || share.planId) ? overrideAt(doctorId, share, atIso) : undefined;
@@ -766,7 +775,7 @@ export function commissionForPatientAtEventTime(
         earned = accrued;
         const invRateBp = resolveShareMaterialRateBp(share, atInvoice, invoice.createdAt);
         if (invRateBp !== null && invRateBp > 0) {
-          const invConsumption = Math.round((Math.max(0, share.amountMinor) * invRateBp) / 10_000);
+          const invConsumption = materialRateCostForShare(share, atInvoice, invRateBp);
           const invNetBase = Math.max(0, shareBase(share, atInvoice) - invConsumption);
           netEarnedAfterRate = Math.round((invNetBase * atInvoice.percent) / 100);
         } else {
@@ -813,7 +822,7 @@ export function commissionForPatientAtEventTime(
           if (netGroup.policy.percent <= 0) continue;
           const consumptionOnShare =
             netGroup.rateBp !== null && netGroup.rateBp > 0
-              ? Math.round((Math.max(0, share.amountMinor) * netGroup.rateBp) / 10_000)
+              ? materialRateCostForShare(share, netGroup.policy, netGroup.rateBp)
               : 0;
           const baseAfterMaterialRate = Math.max(0, shareBase(share, netGroup.policy) - consumptionOnShare);
           const groupNetAccrued = Math.round((baseAfterMaterialRate * netGroup.policy.percent) / 100);

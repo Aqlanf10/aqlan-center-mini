@@ -205,6 +205,7 @@ export async function exportCaseToPowerPoint(opts: {
   anonymize?: boolean;
   excludeInternalNotes?: boolean;
   selectedMediaIds?: string[];
+  orthoCaseId: number | null;
 }): Promise<void> {
   const numericId = Number(String(opts.patient.id).replace(/\D/g, "")) || 0;
   if (numericId <= 0) {
@@ -212,17 +213,18 @@ export async function exportCaseToPowerPoint(opts: {
   }
 
   const selectedSlideIds = opts.slides.filter((s) => s.enabled).map((s) => s.id);
-  const tracedOverlays = await buildClientTracedOverlays(
+  const tracedOverlays = opts.selectedMediaIds === undefined ? await buildClientTracedOverlays(
     opts.patient,
     opts.lang,
     opts.anonymize === true,
-  );
+  ) : undefined;
 
   const res = await fetch(`/api/ortho/presentation/${numericId}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       format: "pptx",
+      orthoCaseId: opts.orthoCaseId,
       anonymize: opts.anonymize === true,
       lang: opts.lang,
       selectedSlideIds,

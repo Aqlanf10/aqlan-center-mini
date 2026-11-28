@@ -9,6 +9,7 @@ import {
 import {
   filterWorkspaceByPrivacy,
   loadOrthoWorkspaceRecord,
+  orthoWorkspaceCaseBelongsToPatient,
   saveOrthoWorkspaceRecord,
 } from "@/lib/ortho-workspace-store";
 import type { OrthoWorkspaceRecord } from "@/lib/ortho-workspace-types";
@@ -22,8 +23,19 @@ function parsePatientId(raw: string): number | null {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
+const invalidCase = () => NextResponse.json({ message: "معرّف حالة التقويم غير صالح." }, { status: 400, headers: NO_STORE_HEADERS });
+const missingCase = () => NextResponse.json({ message: "حالة التقويم غير موجودة لهذا المريض." }, { status: 404, headers: NO_STORE_HEADERS });
+
+function scopeOf(request: NextRequest): number | null | undefined {
+  const values = new URL(request.url).searchParams.getAll("orthoCaseId");
+  if (values.length === 0) return null;
+  return values.length === 1 && /^[1-9][0-9]*$/.test(values[0])
+    ? parsePatientId(values[0]) ?? undefined
+    : undefined;
+}
+
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ patientId: string }> },
 ) {
   const session = await requireSession();
@@ -39,10 +51,12 @@ export async function GET(
     return orthoForbiddenResponse("غير مصرّح لك بالوصول إلى ملف هذا المريض.");
   }
 
+  const orthoCaseId = scopeOf(req);
+  if (orthoCaseId === undefined) return invalidCase();
   const evalRes = await evaluateOrthoPermission(
     session,
     { permission: "records.read" },
-    { patientId },
+    { patientId, orthoCaseId },
   );
   if (!evalRes.allowed || !evalRes.access) {
     await recordAudit({
@@ -59,7 +73,8 @@ export async function GET(
     });
   }
 
-  const record = await loadOrthoWorkspaceRecord(patientId);
+  if (orthoCaseId !== null && !await orthoWorkspaceCaseBelongsToPatient(patientId, orthoCaseId)) return missingCase();
+  const record = await loadOrthoWorkspaceRecord(patientId, orthoCaseId);
   const { filtered, hiddenSections } = filterWorkspaceByPrivacy(record, evalRes.access);
 
   return NextResponse.json(
@@ -94,6 +109,9 @@ export async function PUT(
     return orthoForbiddenResponse("غير مصرّح لك بتعديل ملف هذا المريض.");
   }
 
+  const orthoCaseId = scopeOf(req);
+  if (orthoCaseId === undefined) return invalidCase();
+
   let parsedBody: { workspace?: Partial<OrthoWorkspaceRecord>; expectedRevision?: number };
   try {
     parsedBody = await readJsonBody<{
@@ -111,10 +129,12 @@ export async function PUT(
     return NextResponse.json({ message: "بيانات مساحة العمل غير صالحة." }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
+  if (incoming.orthoCaseId !== undefined && incoming.orthoCaseId !== orthoCaseId) return invalidCase();
+
   const evalRes = await evaluateOrthoPermission(
     session,
     { anyOfPermissions: ["records.edit", "records.blind_create"] },
-    { patientId },
+    { patientId, orthoCaseId },
   );
   if (!evalRes.allowed || !evalRes.access) {
     await recordAudit({
@@ -131,7 +151,8 @@ export async function PUT(
     });
   }
 
-  const current = await loadOrthoWorkspaceRecord(patientId);
+  if (orthoCaseId !== null && !await orthoWorkspaceCaseBelongsToPatient(patientId, orthoCaseId)) return missingCase();
+  const current = await loadOrthoWorkspaceRecord(patientId, orthoCaseId);
   const perms = evalRes.access.permissions;
 
   // Enforce approval-specific permissions server-side
@@ -186,6 +207,14 @@ export async function PUT(
     delete sanitizedIncoming.diagnosisSummary;
     delete sanitizedIncoming.treatmentPlan;
     delete sanitizedIncoming.retention;
+    delete sanitizedIncoming.orthoCoreCase;
+  } else if (sanitizedIncoming.orthoCoreCase && typeof sanitizedIncoming.orthoCoreCase === "object"
+    && (!perms["photos.view"] || !perms["photos.edit"] || !evalRes.access.fields.previousPhotos || !evalRes.access.sections.media)) {
+    const previous = current.orthoCoreCase as Record<string, unknown> | undefined;
+    sanitizedIncoming.orthoCoreCase = {
+      ...sanitizedIncoming.orthoCoreCase,
+      media: previous?.media,
+    };
   }
 
   const saved = await saveOrthoWorkspaceRecord(
@@ -193,6 +222,7 @@ export async function PUT(
     sanitizedIncoming,
     session.username,
     parsedBody?.expectedRevision,
+    { orthoCaseId, actorRole: session.role, blindCreate: !perms["records.read"] },
   );
   if (!saved.ok) {
     return NextResponse.json(

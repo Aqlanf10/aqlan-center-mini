@@ -31,14 +31,14 @@ describe("source-only patient numbering policy; multi-letter prefixes & portal b
     expect(parseCanonicalPatientNumber("BRW-07429")).toEqual({ prefix: "BRW", number: 7429n });
   });
 
-  it.each(["0", "-1", "+1", "1.1", "1e3", "01", "١٢", "9007199254740993.0", "9223372036854775808"])(
+  it.each(["0", "-1", "+1", "1.1", "1e3", "01", "١٫٢", "١e٢", "０１", "9007199254740993.0", "9223372036854775808"])(
     "rejects invalid numeric input %s",
     (n) => {
       expect(parseNumberingRequest("A", n)).toBeNull();
     },
   );
 
-  it.each(["ABCDEFG", "A1", "BRW1", "Å", "Ａ", "ا", "", "A-", "BR-W"])(
+  it.each(["ABCDEFG", "A1", "BRW1", "ß", "ſ", "ı", "Å", "Ａ", "ا", "", "A-", "BR-W"])(
     "rejects invalid prefix %s",
     (p) => expect(parseNumberingRequest(p, "1")).toBeNull(),
   );
@@ -49,6 +49,13 @@ describe("source-only patient numbering policy; multi-letter prefixes & portal b
     // BRW + "-" + 16 digits = 20 chars (allowed); 17 digits = 21 chars (rejected)
     expect(parseNumberingRequest("BRW", "9999999999999999")).toEqual({ prefix: "BRW", next: "9999999999999999" });
     expect(parseNumberingRequest("BRW", "99999999999999999")).toBeNull();
+  });
+
+  it("accepts an owner-selected clean P series below the legacy default without allowing reuse", () => {
+    expect(parseNumberingRequest("brw", "١٥٠٠")).toEqual({ prefix: "BRW", next: "1500" });
+    expect(plan("۱۵۰۰", fresh("P"))).toMatchObject({ ok: true, next: "1500", preview: "P-01500" });
+    expect(plan("1500", { ...fresh("P"), allocatedThrough: 1500n })).toMatchObject({ ok: false, reason: "would-reuse-or-rewind" });
+    expect(plan("1500", { ...fresh("P"), historicalThrough: 1700n })).toMatchObject({ ok: false, reason: "would-reuse-or-rewind" });
   });
 
   it("preserves legacy P allocated high-water despite deleted rows", () => {

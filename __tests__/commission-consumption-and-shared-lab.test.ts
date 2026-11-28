@@ -39,7 +39,7 @@ describe("Charter §17, §18 & §16: Commission Consumption Base Math, Per-Servi
     await resetPoolForTesting();
   });
 
-  it("Charter §17 exact formula: 10,000 collected, 2,000 lab, 20% consumption (2,000), 40% doctor rate => 2,400 YER (never 1,200 YER)", async () => {
+  it("Charter §17 exact formula: 10,000 collected, 2,000 lab, 20% of the remainder (1,600), 40% doctor rate => 2,560 YER", async () => {
     // Pure engine proof first
     const inv: CommissionInvoice = {
       id: 9001,
@@ -66,8 +66,14 @@ describe("Charter §17, §18 & §16: Commission Consumption Base Math, Per-Servi
     expect(engineMap.get(501)?.YER).toEqual({
       accruedMinor: 3_200, // (10,000 - 2,000) * 40%
       earnedMinor: 3_200,
-      netEarnedAfterMaterialRateMinor: 2_400, // (10,000 - 2,000 - 2,000) * 40% = 2,400
+      netEarnedAfterMaterialRateMinor: 2_560, // (10,000 - 2,000) × 80% × 40%
     });
+
+    const half = commissionForPatientAtEventTime(
+      [inv], [{ invoiceId: 9001, amount: 5_000, sourceTime: "2026-09-15T11:00:00Z" }],
+      () => ({ percent: 40, config: null }), undefined, { materialRateAt: () => 2000 },
+    );
+    expect(half.get(501)?.YER.netEarnedAfterMaterialRateMinor).toBe(1_280);
 
     // End-to-end database commissionReport proof
     await getPool().query(
@@ -81,19 +87,19 @@ describe("Charter §17, §18 & §16: Commission Consumption Base Math, Per-Servi
 
     const { rows: [doctor] } = await getPool().query<{ id: number }>(
       `INSERT INTO parties (name, kind, commission_percent, is_active)
-       VALUES ('د. اختبار معادلة 2400', 'doctor', 40, TRUE) RETURNING id`,
+       VALUES ('د. اختبار معادلة 2560', 'doctor', 40, TRUE) RETURNING id`,
     );
     const { rows: [lab] } = await getPool().query<{ id: number }>(
       `INSERT INTO parties (name, kind, currency, is_active)
-       VALUES ('مختبر اختبار 2400', 'lab', 'YER', TRUE) RETURNING id`,
+       VALUES ('مختبر اختبار 2560', 'lab', 'YER', TRUE) RETURNING id`,
     );
     const { rows: [service] } = await getPool().query<{ id: number }>(
       `INSERT INTO services (name, category, price_minor, is_active)
-       VALUES ('تاج خزفي معادلة 2400', 'تركيبات_اختبار_17', 10000, TRUE) RETURNING id`,
+       VALUES ('تاج خزفي معادلة 2560', 'تركيبات_اختبار_17', 10000, TRUE) RETURNING id`,
     );
     const { rows: [patient] } = await getPool().query<{ id: number }>(
       `INSERT INTO patients (patient_number, full_name)
-       VALUES ('P-99701', 'مريض اختبار معادلة 2400') RETURNING id`,
+       VALUES ('P-99701', 'مريض اختبار معادلة 2560') RETURNING id`,
     );
     const { rows: [invoice] } = await getPool().query<{ id: number }>(
       `INSERT INTO invoices (invoice_number, patient_id, total_minor, discount_minor, base_currency, created_by, created_at)
@@ -108,13 +114,13 @@ describe("Charter §17, §18 & §16: Commission Consumption Base Math, Per-Servi
     );
     const { rows: [visit] } = await getPool().query<{ id: number }>(
       `INSERT INTO visits (patient_id, patient_name, doctor_id, invoice_id, status, arrived_at)
-       VALUES ($1, 'مريض اختبار معادلة 2400', $2, $3, 'done', ($4::date + TIME '09:30') AT TIME ZONE $5)
+       VALUES ($1, 'مريض اختبار معادلة 2560', $2, $3, 'done', ($4::date + TIME '09:30') AT TIME ZONE $5)
        RETURNING id`,
       [patient.id, doctor.id, invoice.id, FIXTURE_DAY, CLINIC_TIME_ZONE],
     );
     await getPool().query(
       `INSERT INTO lab_orders (patient_id, lab_name, work_type, due_date, visit_id, doctor_id, status, cost_minor, cost_currency)
-       VALUES ($1, 'مختبر اختبار 2400', 'تاج زيركون', $4::date, $2, $3, 'delivered', 2000, 'YER')`,
+       VALUES ($1, 'مختبر اختبار 2560', 'تاج زيركون', $4::date, $2, $3, 'delivered', 2000, 'YER')`,
       [patient.id, visit.id, doctor.id, FIXTURE_DAY],
     );
     const { rows: [shift] } = await getPool().query<{ id: number }>(
@@ -132,10 +138,10 @@ describe("Charter §17, §18 & §16: Commission Consumption Base Math, Per-Servi
     const row = rows.find((r) => r.doctorId === doctor.id && r.currency === "YER");
     expect(row).toBeDefined();
     expect(row!.labCostMinor).toBe(2_000);
-    expect(row!.materialRateCostMinor).toBe(2_000);
+    expect(row!.materialRateCostMinor).toBe(1_600);
     expect(row!.earnedMinor).toBe(3_200);
-    expect(row!.netEarnedMinor).toBe(2_400);
-    expect(row!.dueMinor).toBe(2_400);
+    expect(row!.netEarnedMinor).toBe(2_560);
+    expect(row!.dueMinor).toBe(2_560);
   });
 
   it("Charter §18 (proposal 0141): exempts consultation services marked material_consumption_exempt = TRUE", async () => {

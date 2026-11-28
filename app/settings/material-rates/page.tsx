@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/PageHeader";
 import { Icon } from "@/components/Icon";
+import { ServiceMaterialRates } from "@/components/settings/ServiceMaterialRates";
 
 /**
  * نسب إهلاك المواد لكل تخصص. (من مستودع الوكيل الآخر.)
@@ -209,6 +210,8 @@ export default function MaterialRatesPage() {
           {message}
         </p>
       ) : null}
+
+      <ServiceMaterialRates />
 
       <section className="mb-4 rounded-2xl border border-amber-300 bg-amber-50 p-4">
         <div className="flex items-start justify-between gap-3">

@@ -29,9 +29,13 @@ export function formatCanonicalPatientNumber(prefix: string, numericText: string
 
 export function parseNumberingRequest(rawPrefix: unknown, rawNext: unknown): NumberingRequest | null {
   if (typeof rawPrefix !== "string" || typeof rawNext !== "string") return null;
-  const prefix = rawPrefix.trim().toUpperCase();
-  const next = rawNext.trim();
-  // No scientific notation, signs, fractions, Unicode lookalikes or JS rounding.
+  const prefixText = rawPrefix.trim();
+  // Check before uppercasing; Unicode lookalikes such as ß must not expand to ASCII.
+  if (!/^[A-Za-z]{1,6}$/.test(prefixText)) return null;
+  const prefix = prefixText.toUpperCase();
+  const next = rawNext.trim().replace(/[٠-٩]/g, digit => String(digit.charCodeAt(0) - 0x660))
+    .replace(/[۰-۹]/g, digit => String(digit.charCodeAt(0) - 0x6f0));
+  // Only Arabic/Persian decimal digit input is normalized; no signs or JS rounding.
   if (!PATIENT_PREFIX_PATTERN.test(prefix) || !/^[1-9][0-9]*$/.test(next) || next.length > 18) return null;
   if (formatCanonicalPatientNumber(prefix, next).length > MAX_PATIENT_NUMBER_LENGTH) return null;
   if (BigInt(next) > PATIENT_NUMBER_MAX) return null;

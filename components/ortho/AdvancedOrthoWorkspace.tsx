@@ -94,6 +94,7 @@ export function AdvancedOrthoWorkspace({
   const [liveCases, setLiveCases] = useState<LiveOrthoCaseSummary[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<number | null>(null);
   const [loadingWorkspace, setLoadingWorkspace] = useState(true);
+  const [workspaceReadError, setWorkspaceReadError] = useState<string | null>(null);
   const [savingState, setSavingState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
@@ -108,14 +109,17 @@ export function AdvancedOrthoWorkspace({
 
   const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestRecordRef = useRef<OrthoWorkspaceRecord>(record);
+  const loadTicket = useRef(0);
+  const saveInFlight = useRef(false);
+  const [sendingWorkspace, setSendingWorkspace] = useState(false);
 
+  const requestedCaseId = selectedCaseId ?? context?.orthoCaseId ?? null;
   const liveCase: LiveOrthoCaseSummary | null = useMemo(() => {
-    if (selectedCaseId !== null) {
-      const found = liveCases.find((c) => c.id === selectedCaseId);
-      if (found) return found;
-    }
-    return liveCases.find((c) => c.status === "active") ?? liveCases[0] ?? null;
-  }, [liveCases, selectedCaseId]);
+    if (requestedCaseId === 0) return null;
+    if (requestedCaseId !== null) return liveCases.find(c => c.id === requestedCaseId) ?? null;
+    return liveCases.find(c => c.status === "active") ?? liveCases[0] ?? null;
+  }, [liveCases, requestedCaseId]);
+  const workspaceMatchesCase = record.patientId === patientId && record.orthoCaseId === (liveCase?.id ?? null);
 
   useEffect(() => {
     setActiveOrthoCorePatientId(patientId, liveCase?.id ?? null);
@@ -124,100 +128,91 @@ export function AdvancedOrthoWorkspace({
   const needsExtendedWorkspace = activeTab !== "sessions" || printState.open || aiDrawerOpen;
 
   const loadWorkspaceAndLiveContext = useCallback(async () => {
+    const ticket = ++loadTicket.current;
     if (!needsExtendedWorkspace || perms.loading) return;
     if (!perms.moduleVisible || !perms.can("records.read")) {
       setLoadingWorkspace(false);
       return;
     }
+    if (autosaveTimer.current || saveInFlight.current) return;
     setLoadingWorkspace(true);
+    setWorkspaceReadError(null);
     try {
-      const canSeePhotos =
-        session?.role !== "reception" &&
-        perms.can("photos.view") &&
-        perms.canField("previousPhotos");
-      const [wsRes, orthoRes, docsRes] = await Promise.all([
-        fetch(`/api/ortho/workspace/${patientId}`, { cache: "no-store" }),
+      const canSeePhotos = session?.role !== "reception" && perms.can("photos.view") && perms.canField("previousPhotos");
+      const [orthoRes, docsRes] = await Promise.all([
         fetch(`/api/ortho?patientId=${patientId}`, { cache: "no-store" }),
-        canSeePhotos
-          ? fetch(`/api/patients/${patientId}/documents`, { cache: "no-store" })
-          : Promise.resolve(null),
+        canSeePhotos ? fetch(`/api/patients/${patientId}/documents`, { cache: "no-store" }) : Promise.resolve(null),
       ]);
-
-      if (wsRes.ok) {
-        const wsData = (await wsRes.json()) as { workspace?: OrthoWorkspaceRecord };
-        if (wsData.workspace) {
-          setRecord(wsData.workspace);
-          latestRecordRef.current = wsData.workspace;
-        }
-      }
-
-      if (orthoRes.ok) {
-        const orthoData = (await orthoRes.json()) as { cases?: LiveOrthoCaseSummary[] };
-        const fetchedCases = Array.isArray(orthoData.cases) ? orthoData.cases : [];
-        setLiveCases(fetchedCases);
-        setSelectedCaseId((prev) => {
-          if (prev !== null && fetchedCases.some((c) => c.id === prev)) return prev;
-          const active = fetchedCases.find((c) => c.status === "active") ?? fetchedCases[0] ?? null;
-          return active?.id ?? null;
-        });
-      }
-
-      if (docsRes && docsRes.ok) {
-        const docsData = (await docsRes.json()) as { documents?: LivePatientDocument[] } | LivePatientDocument[];
-        const list = Array.isArray(docsData)
-          ? docsData
-          : Array.isArray(docsData?.documents)
-            ? docsData.documents
-            : [];
-        setLiveDocs(list);
-      } else {
-        setLiveDocs([]);
-      }
+      if (loadTicket.current !== ticket) return;
+      if (!orthoRes.ok) throw new Error("تعذّر تحميل حالات التقويم.");
+      const orthoData = await orthoRes.json() as { cases?: LiveOrthoCaseSummary[] };
+      const cases = Array.isArray(orthoData.cases) ? orthoData.cases : [];
+      const selected = requestedCaseId === null
+        ? cases.find(c => c.status === "active") ?? cases[0]
+        : cases.find(c => c.id === requestedCaseId);
+      if (requestedCaseId !== null && requestedCaseId !== 0 && !selected) throw new Error("حالة التقويم المطلوبة غير متاحة.");
+      const scopedCaseId = selected?.id ?? null;
+      const search = scopedCaseId === null ? "" : `?orthoCaseId=${scopedCaseId}`;
+      const wsRes = await fetch(`/api/ortho/workspace/${patientId}${search}`, { cache: "no-store" });
+      if (!wsRes.ok) throw new Error("تعذّر تحميل مساحة عمل هذه الحالة.");
+      const wsData = await wsRes.json() as { workspace?: OrthoWorkspaceRecord };
+      const ws = wsData.workspace;
+      if (!ws || ws.patientId !== patientId || ws.orthoCaseId !== scopedCaseId) throw new Error("بيانات مساحة العمل لا تطابق الحالة المختارة.");
+      const data = docsRes?.ok ? await docsRes.json() as { documents?: LivePatientDocument[] } | LivePatientDocument[] : [];
+      if (loadTicket.current !== ticket) return;
+      setLiveCases(cases);
+      setLiveDocs(Array.isArray(data) ? data : Array.isArray(data.documents) ? data.documents : []);
+      setRecord(ws);
+      latestRecordRef.current = ws;
+      setSavingState("idle");
+      setSaveError(null);
+    } catch (error) {
+      if (loadTicket.current === ticket) setWorkspaceReadError(error instanceof Error ? error.message : "تعذّر تحميل بيانات التقويم.");
     } finally {
-      setLoadingWorkspace(false);
+      if (loadTicket.current === ticket) setLoadingWorkspace(false);
     }
-  }, [needsExtendedWorkspace, patientId, perms, session?.role]);
+  }, [needsExtendedWorkspace, patientId, perms, requestedCaseId, session?.role]);
 
   useEffect(() => {
     void loadWorkspaceAndLiveContext();
+    return () => { loadTicket.current++; };
   }, [loadWorkspaceAndLiveContext]);
 
   const persistWorkspace = useCallback(async (next: OrthoWorkspaceRecord) => {
+    if (saveInFlight.current || next.patientId !== patientId) return;
+    if (autosaveTimer.current) { clearTimeout(autosaveTimer.current); autosaveTimer.current = null; }
+    saveInFlight.current = true;
+    setSendingWorkspace(true);
     setSavingState("saving");
     setSaveError(null);
+    const scope = next.orthoCaseId;
+    const search = scope === null ? "" : `?orthoCaseId=${scope}`;
     try {
-      const res = await fetch(`/api/ortho/workspace/${patientId}`, {
+      const res = await fetch(`/api/ortho/workspace/${patientId}${search}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          workspace: next,
-          expectedRevision: next.revision,
-        }),
+        body: JSON.stringify({ workspace: next, expectedRevision: next.revision }),
       });
-      const data = (await res.json().catch(() => null)) as {
-        workspace?: OrthoWorkspaceRecord;
-        message?: string;
-      } | null;
-      if (!res.ok) {
-        setSavingState("error");
-        setSaveError(data?.message ?? "تعذّر حفظ بيانات وحدة التقويم.");
-        return;
+      const data = await res.json().catch(() => null) as { workspace?: OrthoWorkspaceRecord; message?: string } | null;
+      if (!res.ok) throw new Error(data?.message ?? "تعذّر حفظ بيانات وحدة التقويم.");
+      if (!data?.workspace || data.workspace.patientId !== patientId || data.workspace.orthoCaseId !== scope) {
+        throw new Error("لا تتطابق نتيجة الحفظ مع الحالة المختارة.");
       }
-      if (data?.workspace) {
-        setRecord(data.workspace);
-        latestRecordRef.current = data.workspace;
-      }
+      if (latestRecordRef.current.patientId !== patientId || latestRecordRef.current.orthoCaseId !== scope) return;
+      setRecord(data.workspace);
+      latestRecordRef.current = data.workspace;
       setSavingState("saved");
-    } catch {
+    } catch (error) {
       setSavingState("error");
-      setSaveError("تعذّر الاتصال بالخادم لحفظ ملف التقويم.");
+      setSaveError(error instanceof Error ? error.message : "تعذّر الاتصال بالخادم لحفظ ملف التقويم.");
+    } finally {
+      saveInFlight.current = false;
+      setSendingWorkspace(false);
     }
   }, [patientId]);
 
   useEffect(() => {
-    return () => {
-      if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
-    };
+    return () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); };
   }, []);
 
   const canViewPhotos =
@@ -258,6 +253,7 @@ export function AdvancedOrthoWorkspace({
 
   const handleOrthoCoreUpdate = useCallback(
     (nextCase: PatientCase, timelineMsg?: { ar: string; en: string }) => {
+      if (loadingWorkspace || workspaceReadError || !workspaceMatchesCase || saveInFlight.current) return;
       if (!perms.can("records.edit") && !perms.can("records.create")) return;
 
       let syncedNext = nextCase;
@@ -317,10 +313,11 @@ export function AdvancedOrthoWorkspace({
       if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
       setSavingState("saving");
       autosaveTimer.current = setTimeout(() => {
-        void persistWorkspace(latestRecordRef.current);
+        autosaveTimer.current = null;
+        void persistWorkspace(updatedRecord);
       }, 750);
     },
-    [perms, lang, actorName, orthoRole, activeTab, persistWorkspace],
+    [perms, lang, actorName, orthoRole, activeTab, persistWorkspace, loadingWorkspace, workspaceReadError, workspaceMatchesCase],
   );
 
   const visibleTabs = useMemo(() => {
@@ -430,18 +427,24 @@ export function AdvancedOrthoWorkspace({
 
             {/* Exact OrthoCore Action Buttons */}
             <div className="flex flex-wrap items-center gap-2">
-              {!isBlindOnly && liveCases.length > 1 ? (
+              {!isBlindOnly && liveCases.length > 0 ? (
                 <label className="inline-flex items-center gap-1.5 text-xs text-navy-700">
                   <span className="font-semibold">{tr(lang, "الحالة:", "Case:")}</span>
                   <select
                     data-testid="ortho-case-switcher"
-                    value={liveCase?.id ?? ""}
+                    value={liveCase?.id ?? 0}
+                    disabled={loadingWorkspace || savingState === "saving" || savingState === "error"}
                     onChange={(e) => {
                       const v = Number(e.target.value);
-                      if (Number.isInteger(v) && v > 0) setSelectedCaseId(v);
+                      if (Number.isInteger(v) && v >= 0 && !autosaveTimer.current && !saveInFlight.current && savingState !== "error") {
+                        setLoadingWorkspace(true);
+                        setSelectedCaseId(v);
+
+                      }
                     }}
                     className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-navy-900"
                   >
+                    <option value={0}>{tr(lang, "ملف التقويم غير المرتبط بحالة", "Unassigned orthodontic intake")}</option>
                     {liveCases.map((c) => (
                       <option key={c.id} value={c.id}>
                         #{c.id} · {c.status === "active" ? tr(lang, "نشطة", "Active") : tr(lang, "سابقة", "Previous")}
@@ -498,6 +501,7 @@ export function AdvancedOrthoWorkspace({
               {!isBlindOnly && canEdit ? (
                 <button
                   type="button"
+                  disabled={loadingWorkspace || Boolean(workspaceReadError) || !workspaceMatchesCase}
                   onClick={() => void persistWorkspace(latestRecordRef.current)}
                   className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-brand-orange hover:bg-accent-600 text-white rounded-lg whitespace-nowrap shrink-0"
                 >
@@ -537,12 +541,17 @@ export function AdvancedOrthoWorkspace({
         </div>
 
         {/* Active Tab Content */}
-        {loadingWorkspace && activeTab !== "sessions" ? (
+        {workspaceReadError && activeTab !== "sessions" ? (
+          <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm">
+            {workspaceReadError}{" "}
+            <button type="button" className="underline" onClick={() => void loadWorkspaceAndLiveContext()}>إعادة المحاولة</button>
+          </div>
+        ) : (loadingWorkspace || !workspaceMatchesCase) && activeTab !== "sessions" ? (
           <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-500">
             جارٍ تحميل مساحة عمل التقويم…
           </div>
         ) : (
-          <div>
+          <fieldset disabled={sendingWorkspace && activeTab !== "sessions"} className="min-w-0">
             {activeTab === "overview" && perms.canSection("overview") && (
               <OverviewTab
                 patient={orthoCoreDraft}
@@ -619,7 +628,7 @@ export function AdvancedOrthoWorkspace({
             {activeTab === "sessions" && (perms.loading || perms.canSection("sessions") || perms.can("records.read") || isBlindOnly) && (
               <PatientOrtho
                 patientId={patientId}
-                context={context}
+                context={liveCase && requestedCaseId !== null ? { ...context, orthoCaseId: liveCase.id } : context}
                 onContextChange={onContextChange}
                 onClinicalChange={() => {
                   onClinicalChange?.();
@@ -641,6 +650,8 @@ export function AdvancedOrthoWorkspace({
 
             {activeTab === "reports" && perms.canSection("reports") && (
               <ReportsTab
+                key={liveCase?.id ?? "intake"}
+                orthoCaseId={liveCase?.id ?? null}
                 patient={orthoCoreDraft}
                 settings={clinicSettings}
                 lang={lang}
@@ -649,12 +660,12 @@ export function AdvancedOrthoWorkspace({
                 onOpenPrintView={(opts) => setPrintState({ open: true, ...opts })}
               />
             )}
-          </div>
+          </fieldset>
         )}
       </div>
 
       {/* Exact OrthoCore Print / PDF Summary View */}
-      {!isBlindOnly && perms.can("reports.print") && perms.canSection("reports") ? (
+      {!isBlindOnly && !loadingWorkspace && !workspaceReadError && workspaceMatchesCase && perms.can("reports.print") && perms.canSection("reports") ? (
         <PrintView
           open={printState.open}
           patient={orthoCoreDraft}

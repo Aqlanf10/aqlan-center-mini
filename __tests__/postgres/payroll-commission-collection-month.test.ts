@@ -2,6 +2,7 @@
  * payroll month of the collection, whatever the invoice's month; nothing is paid twice; an approved
  * run is never rewritten. Real PostgreSQL, synthetic data. Before the fix the payroll run read only
  * the period's own invoices, so an invoice of September collected in October entered no run. */
+import { readFileSync } from "node:fs";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { validatePostgresTestTarget } from "./_safe-target";
 import { assertRealPostgresUrl, dropPublicSchema, stubPostgresEnv } from "./_setup";
@@ -67,6 +68,40 @@ beforeEach(async () => {
 afterAll(async () => { await db.resetPoolForTesting(); });
 
 describe("payroll pays commission in the month of collection", () => {
+  it("uses distinct service rates in one invoice and keeps an approved payroll snapshot unchanged", async () => {
+    const d = await doctor(40), p = await patient();
+    await db.getPool().query(readFileSync(new URL(
+      "../../migrations/proposals/0143_service_material_rate_history.sql", import.meta.url), "utf8"));
+    const a = await id("INSERT INTO services(name,category,price_minor) VALUES('SYN material A','same',8000) RETURNING id");
+    const b = await id("INSERT INTO services(name,category,price_minor) VALUES('SYN material B','same',5000) RETURNING id");
+    await q(`INSERT INTO service_material_rate_history
+      (service_id,rate_bp,effective_from,recorded_by,change_reason)
+      VALUES ($1,2000,'2026-09-01T00:00:00Z','test','fixture A'),($2,1000,'2026-09-01T00:00:00Z','test','fixture B')`,[a,b]);
+    await q(`INSERT INTO material_rate_history(category,rate_bp,effective_from,recorded_by)
+      VALUES ('same',3000,'2026-09-01T00:00:00Z','test')`);
+    await q(`INSERT INTO settings(key,value) VALUES ('finance.commission_material_rate','on')
+      ON CONFLICT(key) DO UPDATE SET value='on'`);
+    const inv = await id(`INSERT INTO invoices
+      (invoice_number,patient_id,total_minor,discount_minor,base_currency,created_by,created_at)
+      VALUES('SYN-MATERIAL-MIX',$1,13000,0,'YER',$2,$3) RETURNING id`,[p,admin.username,SEP]);
+    await q(`INSERT INTO invoice_items(invoice_id,description,quantity,unit_price_minor,total_minor,doctor_id,service_id)
+      VALUES($1,'SYN A',1,8000,8000,$2,$3),($1,'SYN B',1,5000,5000,$2,$4)`,[inv,d.partyId,a,b]);
+    await receipt(p, inv, 13_000, OCT);
+    const result = (await db.commissionReport("2026-09-01","2026-10-31")).find(row => row.doctorId === d.partyId && row.currency === "YER");
+    expect(result).toMatchObject({ earnedMinor: 5_200, materialRateCostMinor: 2_100, netEarnedMinor: 4_360 });
+    const october = await run("2026-10");
+    expect(await itemOf(october.id,d.staffId)).toMatchObject({ commissionsMinor: 4_360 });
+    await payroll.approvePayrollRun(october.id, admin);
+    const approved = await itemOf(october.id,d.staffId);
+    await q(`INSERT INTO service_material_rate_history
+      (service_id,rate_bp,effective_from,recorded_by,change_reason)
+      VALUES ($1,0,'2026-11-01T00:00:00Z','test','new future exemption')`,[a]);
+    await expect(payroll.calculatePayrollRun(october.periodId,"YER",admin)).rejects.toThrow("معتمد");
+    expect(await itemOf(october.id,d.staffId)).toEqual(approved);
+    expect((await db.commissionReport("2026-09-01","2026-11-30")).find(row => row.doctorId === d.partyId && row.currency === "YER")?.netEarnedMinor).toBe(4_360);
+  });
+
+
   it("an invoice of September collected in October enters the October run, not September's, and is recorded as a later collection", async () => {
     const d = await doctor(), p = await patient();
     const inv = await invoice(p, d.partyId, SEP);

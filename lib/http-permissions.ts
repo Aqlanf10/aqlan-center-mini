@@ -305,6 +305,8 @@ export const HTTP_PERMISSIONS: Readonly<Record<string, Readonly<Partial<Record<H
   "/api/settings/display/announcements/reorder": { PATCH: ADMIN },
   "/api/settings/history": { GET: ADMIN },
   "/api/settings/material-rates": { GET: CLINIC, POST: ADMIN },
+  // Legacy admin gate; the handler independently checks the canonical finance grant.
+  "/api/settings/material-service-rates": { GET: ADMIN, POST: ADMIN },
   "/api/settings/messaging": { GET: ADMIN, PUT: ADMIN },
   "/api/settings/messaging/test": { POST: ADMIN },
   "/api/settings/ortho-privacy": { GET: ADMIN, PUT: ADMIN },

@@ -60,18 +60,12 @@ export function mergeOrthoWorkspaceRecord(
   const base = createDefaultOrthoWorkspace(patientId, orthoCaseId);
   if (!raw || typeof raw !== "object") return base;
   const obj = raw as Partial<OrthoWorkspaceRecord>;
-  const resolvedCaseId =
-    orthoCaseId !== null
-      ? orthoCaseId
-      : typeof obj.orthoCaseId === "number" && obj.orthoCaseId > 0
-        ? obj.orthoCaseId
-        : null;
   return {
     ...base,
     ...obj,
     schemaVersion: 1,
     patientId,
-    orthoCaseId: resolvedCaseId,
+    orthoCaseId,
     revision: typeof obj.revision === "number" && Number.isInteger(obj.revision) && obj.revision >= 0 ? obj.revision : 0,
     updatedAt: typeof obj.updatedAt === "string" ? obj.updatedAt : null,
     updatedBy: typeof obj.updatedBy === "string" ? obj.updatedBy : null,
@@ -357,11 +351,7 @@ async function readWorkspaceOnClient(
         record: rowToWorkspaceRecord(rows[0]),
       };
     }
-    return {
-      normalizedTable: true,
-      workspaceRowId: null,
-      record: createDefaultOrthoWorkspace(patientId, orthoCaseId),
-    };
+    // A newly installed normalized table can still have settings-era revisions.
   }
 
   const key = workspaceStorageKey(patientId, orthoCaseId);
@@ -373,20 +363,21 @@ async function readWorkspaceOnClient(
   if (rows[0]?.value) {
     try {
       return {
-        normalizedTable: false,
+        normalizedTable: normalized,
         workspaceRowId: null,
         record: mergeOrthoWorkspaceRecord(patientId, JSON.parse(rows[0].value), orthoCaseId),
       };
     } catch {
       return {
-        normalizedTable: false,
+        normalizedTable: normalized,
         workspaceRowId: null,
         record: createDefaultOrthoWorkspace(patientId, orthoCaseId),
       };
     }
   }
 
-  // Seamless one-way fallback read for legacy v1 intake record only when reading the first/intake case
+  // Only a legacy snapshot already explicitly bound to this case is eligible.
+  // Unassigned intake stays in intake rather than being copied into each case.
   if (orthoCaseId !== null) {
     const legacyKey = workspaceStorageKey(patientId, null);
     const legacy = await runner.query<{ value: string }>(
@@ -396,9 +387,9 @@ async function readWorkspaceOnClient(
     if (legacy.rows[0]?.value) {
       try {
         const parsed = JSON.parse(legacy.rows[0].value) as Partial<OrthoWorkspaceRecord>;
-        if (!parsed.orthoCaseId || parsed.orthoCaseId === orthoCaseId) {
+        if (parsed.orthoCaseId === orthoCaseId) {
           return {
-            normalizedTable: false,
+            normalizedTable: normalized,
             workspaceRowId: null,
             record: { ...mergeOrthoWorkspaceRecord(patientId, parsed, orthoCaseId), revision: 0 },
           };
@@ -410,10 +401,18 @@ async function readWorkspaceOnClient(
   }
 
   return {
-    normalizedTable: false,
+    normalizedTable: normalized,
     workspaceRowId: null,
     record: createDefaultOrthoWorkspace(patientId, orthoCaseId),
   };
+}
+
+export async function orthoWorkspaceCaseBelongsToPatient(patientId: number, orthoCaseId: number): Promise<boolean> {
+  await db.ensureSchema();
+  const { rows } = await db.getPool().query(
+    "SELECT 1 FROM ortho_cases WHERE id=$1 AND patient_id=$2", [orthoCaseId, patientId],
+  );
+  return rows.length === 1;
 }
 
 export async function loadOrthoWorkspaceRecord(
@@ -604,6 +603,12 @@ export async function saveOrthoWorkspaceRecord(
   const actorRole = options?.actorRole ?? "doctor";
 
   return withIsolation(pool, "READ COMMITTED", async (client) => {
+    if (orthoCaseId !== null) {
+      const { rows } = await client.query(
+        "SELECT 1 FROM ortho_cases WHERE id=$1 AND patient_id=$2 FOR KEY SHARE", [orthoCaseId, patientId],
+      );
+      if (rows.length !== 1) return { ok: false as const, status: 404, code: "CASE_NOT_FOUND", message: "حالة التقويم غير موجودة لهذا المريض." };
+    }
     // Serialize concurrent writes on this exact (patientId, orthoCaseId) workspace before reading current revision
     await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
       `ortho.workspace:${patientId}:${scope}`,

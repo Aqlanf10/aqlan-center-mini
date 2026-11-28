@@ -139,6 +139,19 @@ export async function POST(
     return NextResponse.json({ message: "بيانات الطلب غير صالحة." }, { status: 400, headers: NO_STORE_HEADERS });
   }
 
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ message: "بيانات الطلب غير صالحة." }, { status: 400, headers: NO_STORE_HEADERS });
+  }
+  const hasSelection = Object.prototype.hasOwnProperty.call(body, "selectedMediaIds");
+  if (hasSelection && (!Array.isArray(body.selectedMediaIds) || body.selectedMediaIds.length > 1000
+    || body.selectedMediaIds.some(id => typeof id !== "string" || !id.trim() || id.length > 200))) {
+    return NextResponse.json({ message: "اختيار الصور غير صالح." }, { status: 400, headers: NO_STORE_HEADERS });
+  }
+  if (body.orthoCaseId != null && (typeof body.orthoCaseId !== "number"
+    || !Number.isSafeInteger(body.orthoCaseId) || body.orthoCaseId <= 0)) {
+    return NextResponse.json({ message: "معرّف حالة التقويم غير صالح." }, { status: 400, headers: NO_STORE_HEADERS });
+  }
+  const selectedSet = hasSelection ? new Set(body.selectedMediaIds) : null;
   const format = body.format === "pdf" ? "pdf" : "pptx";
   const anonymize = body.anonymize === true;
   const lang = body.lang === "en" ? "en" : "ar";
@@ -175,11 +188,15 @@ export async function POST(
   const settings = await getSettingsSafe().catch(() => null);
   const clinicName = settings?.["clinic.name"]?.trim() || "مركز الدكتور عقلان";
   const today = clinicDateString(new Date(), CLINIC_TIME_ZONE);
-  const allCases = await listPatientOrthoCases(patientId, today).catch(() => []);
+  const explicitlyIntake = Object.prototype.hasOwnProperty.call(body, "orthoCaseId") && body.orthoCaseId === null;
+  const allCases = explicitlyIntake ? [] : await listPatientOrthoCases(patientId, today);
   const activeCase =
     (orthoCaseId
       ? allCases.find((c) => c.id === orthoCaseId)
       : allCases.find((c) => c.status === "active") ?? allCases[0]) ?? null;
+  if (orthoCaseId !== null && !activeCase) {
+    return NextResponse.json({ message: "حالة التقويم غير موجودة." }, { status: 404, headers: NO_STORE_HEADERS });
+  }
   const cases = activeCase ? [activeCase] : [];
   const effectiveCaseId = activeCase?.id ?? orthoCaseId;
   const rawRecord = await loadOrthoWorkspaceRecord(patientId, effectiveCaseId);
@@ -255,18 +272,9 @@ export async function POST(
     evalCreate.access.permissions["photos.view"] &&
     evalCreate.access.fields.previousPhotos;
 
-  if (canEmbedPhotos && format === "pptx" && activeCase) {
+  if (canEmbedPhotos && format === "pptx" && activeCase && selectedSet?.size !== 0) {
     const docs = await listPatientDocuments(patientId).catch(() => []);
-    const selectedSet =
-      Array.isArray(body.selectedMediaIds) && body.selectedMediaIds.length > 0
-        ? new Set(body.selectedMediaIds.map((x) => String(x)))
-        : null;
-
-    const adjustmentDocIds = new Set<number>();
-    for (const s of sessionSummaries) {
-      for (const did of s.photoDocIds ?? []) adjustmentDocIds.add(did);
-    }
-
+    const caseImageIds = new Set(docs.filter(d => d.isImage && !d.removedAt && d.orthoCaseId === activeCase.id).map(d => d.id));
     const imageDocs = docs
       .filter((d) => d.isImage && !d.removedAt && !derivedDocIdsToSkipStandalone.has(d.id))
       .filter((d) => d.orthoCaseId === activeCase.id)
@@ -276,8 +284,7 @@ export async function POST(
         return (
           selectedSet.has(String(d.id)) ||
           selectedSet.has(`doc-${d.id}`) ||
-          (meta ? selectedSet.has(meta.mediaId) : false) ||
-          adjustmentDocIds.has(d.id)
+          (meta ? selectedSet.has(meta.mediaId) : false)
         );
       })
       .slice(0, MAX_EMBEDDED_PHOTOS);
@@ -290,9 +297,11 @@ export async function POST(
       if (anonymize && isFacialView(viewType) && !allowFacialWhenAnon) {
         continue;
       }
-      const readDocId = meta?.effectiveDocId ?? doc.id;
+      const derivedId = meta?.effectiveDocId;
+      const readDocId = derivedId && caseImageIds.has(derivedId) ? derivedId : doc.id;
       const dl = await getDocumentForDownload(readDocId).catch(() => null);
-      if (!dl || dl.document.patientId !== patientId || !dl.storageKey) continue;
+      if (!dl || dl.document.patientId !== patientId || dl.document.orthoCaseId !== activeCase.id
+        || dl.document.removedAt || !dl.document.isImage || !dl.storageKey) continue;
       const buf = await readFileByKey(dl.storageKey).catch(() => null);
       if (!buf || buf.byteLength < 16 || buf.byteLength > MAX_PHOTO_BYTES) continue;
       const ext = detectPngOrJpeg(buf);
@@ -312,7 +321,9 @@ export async function POST(
   }
 
   const parsedOverlays: Partial<Record<PresentationOverlayKey, { bytes: Uint8Array; ext: "png" | "jpg" }>> = {};
-  if (canEmbedPhotos && format === "pptx" && body.tracedOverlays && typeof body.tracedOverlays === "object") {
+  // Explicit photo selection admits only server-verified case documents. The old
+  // unbound client overlays have no server-proven selected-document identity.
+  if (selectedSet === null && canEmbedPhotos && format === "pptx" && body.tracedOverlays && typeof body.tracedOverlays === "object") {
     for (const [k, v] of Object.entries(body.tracedOverlays)) {
       if (!ALLOWED_OVERLAY_KEYS.has(k as PresentationOverlayKey)) continue;
       if (anonymize && ["profile", "smile", "fifths", "thirds"].includes(k) && !filtered.questionnaire.consentForEducationDeidentified) {
