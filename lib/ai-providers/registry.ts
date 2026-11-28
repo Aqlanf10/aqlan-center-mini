@@ -482,12 +482,21 @@ export async function testAiProviderConnection(
   actorRole?: string | null,
   fetchImpl?: typeof fetch,
 ): Promise<AiTestOutcome> {
-  const provider = await getAiProvider(id);
-  if (!provider) {
+  // Read the transport and its precise save revision in one snapshot. Do not
+  // round PostgreSQL timestamps through Date or expose this revision in views.
+  const { rows } = await getPool().query<any>(
+    `SELECT *, updated_at::text AS saved_revision FROM ai_providers WHERE id = $1`,
+    [id],
+  );
+  if (rows.length === 0) {
     return { ok: false, message: "المزود غير موجود.", latencyMs: 0 };
   }
-
+  const provider = mapRowToConfig(rows[0]);
+  const savedRevision: unknown = rows[0].saved_revision;
   const usesUnsavedKey = Boolean(unsavedApiKey?.trim());
+  if (!usesUnsavedKey && (typeof savedRevision !== "string" || !savedRevision.trim())) {
+    return { ok: false, message: "تعذّر التحقق من إصدار إعدادات المزود؛ احفظ الإعدادات ثم أعد الاختبار.", latencyMs: 0 };
+  }
   const testConfig: AiProviderConfig = {
     ...provider,
     apiKeyEnc: usesUnsavedKey
@@ -513,11 +522,12 @@ export async function testAiProviderConnection(
          AND COALESCE(custom_headers::jsonb, '{}'::jsonb) = $11::jsonb
          AND COALESCE(timeout_ms, 30000) = $12
          AND COALESCE(max_tokens, 2048) = $13
-         AND COALESCE(temperature, 0.2) = $14`,
+         AND COALESCE(temperature, 0.2) = $14
+         AND updated_at::text = $15`,
       [outcome.ok, outcome.message, outcome.latencyMs, id, provider.apiKeyEnc,
         provider.protocolType, provider.baseUrl, provider.model, provider.apiEndpoint ?? null,
         provider.organizationId ?? null, JSON.stringify(provider.customHeaders ?? {}),
-        provider.timeoutMs, provider.maxTokens, provider.temperature],
+        provider.timeoutMs, provider.maxTokens, provider.temperature, savedRevision],
     );
     if (persisted.rowCount !== 1) {
       outcome = { ok: false, message: "تغيّرت إعدادات المزود أثناء الاختبار؛ أعد الاختبار بالإعدادات الحالية.", latencyMs: outcome.latencyMs };
