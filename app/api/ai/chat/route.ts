@@ -111,7 +111,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ message: "طلب غير صالح." }, { status: 400 });
   }
 
-  const source = (body ?? {}) as Record<string, unknown>;
+  // Match the confirmation endpoint: only a JSON object is a valid chat envelope.
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ message: "طلب غير صالح." }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
+  const source = body as Record<string, unknown>;
 
   // A supplied but malformed patient context must not become an unlinked cloud request.
   // Null/omitted is the explicit no-patient case; all other IDs must be safe positive integers.
