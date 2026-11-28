@@ -1005,12 +1005,18 @@ function PatientOrthoWorkspace({ patientId, context, onContextChange, onOpenTrea
                     <div className="space-y-4">
                       {/* معرض سجلات الحالة والأشعة المعياري الـ 12 كمنصة WebCeph */}
                       <section>
-                        <WebCephRecordsGrid
-                          patientId={patientId}
-                          orthoCaseId={row.id}
-                          currentPhase={row.phase}
-                          startDate={row.startDate}
-                        />
+                        {session?.role === "reception" ? (
+                          <p role="status" className="rounded-2xl border border-slate-200 bg-white p-3.5 text-xs text-slate-600">
+                            معرض سجلات الصور والأشعة محجوب لحساب الاستقبال.
+                          </p>
+                        ) : (
+                          <WebCephRecordsGrid
+                            patientId={patientId}
+                            orthoCaseId={row.id}
+                            currentPhase={row.phase}
+                            startDate={row.startDate}
+                          />
+                        )}
                       </section>
 
                       {/* السيفالومتري ومخطط ويب سيف (WebCeph Station) */}
@@ -1555,17 +1561,23 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
   } | null>(null);
   const [retryingPhotos, setRetryingPhotos] = useState(false);
 
-  const blindPhotoUpload = form.session?.role === "reception" || !caseRow.photosVisible;
+  const blindPhotoUpload = form.session?.role === "reception" || form.session?.role === "assistant";
 
   const addFiles = (files: FileList | null) => {
     if (!files || !form.editable() || !mayUpload(form.session)) return;
     const added: QueuedPhoto[] = [];
+    const baseSeq = Number(form.draft.values.get("blindSeq") ?? 0);
+    let nextSeq = baseSeq;
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
-      const preview = blindPhotoUpload ? "" : URL.createObjectURL(file);
-      if (preview) form.draft.urls.add(preview);
+      nextSeq += 1;
+      const preview = blindPhotoUpload
+        ? `blind-upload-${caseRow.id}-${nextSeq}`
+        : URL.createObjectURL(file);
+      if (!blindPhotoUpload) form.draft.urls.add(preview);
       added.push({ file, preview, view: "", timing: "during", note: "" });
     }
+    if (nextSeq !== baseSeq) form.draft.values.set("blindSeq", nextSeq);
     if (added.length > 0) setQueue((current) => [...current, ...added]);
   };
 
@@ -1836,10 +1848,12 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
-          <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) setLiveCameraOpen(true); }}
-            className="min-w-[10rem] flex-1 rounded-xl bg-brand-navy py-2.5 text-xs font-black text-white hover:opacity-95">
-            🎥 كاميرا حية (هاتف / كمبيوتر / USB)
-          </button>
+          {!blindPhotoUpload ? (
+            <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) setLiveCameraOpen(true); }}
+              className="min-w-[10rem] flex-1 rounded-xl bg-brand-navy py-2.5 text-xs font-black text-white hover:opacity-95">
+              🎥 كاميرا حية (هاتف / كمبيوتر / USB)
+            </button>
+          ) : null}
           <button type="button" disabled={saving || form.draft.uncertain || !mayUpload(form.session)} onClick={() => { if (form.editable() && mayUpload(form.session)) cameraInput.current?.click(); }}
             className="rounded-xl bg-navy-800 px-4 py-2.5 text-xs font-black text-white hover:bg-navy-900">
             📷 التقط بالكاميرا الآن
@@ -1866,28 +1880,26 @@ export function AdjustmentForm({ caseRow, today, patientId, onSaved, onError }: 
           </div>
         ) : null}
 
-        <TighteningCameraStudio
-          open={liveCameraOpen}
-          onClose={() => setLiveCameraOpen(false)}
-          onConfirm={(captured) => {
-            if (blindPhotoUpload) {
-              if (captured.previewUrl) URL.revokeObjectURL(captured.previewUrl);
-            } else {
+        {!blindPhotoUpload ? (
+          <TighteningCameraStudio
+            open={liveCameraOpen}
+            onClose={() => setLiveCameraOpen(false)}
+            onConfirm={(captured) => {
               form.draft.urls.add(captured.previewUrl);
-            }
-            setQueue((current) => [
-              ...current,
-              {
-                file: captured.originalFile,
-                derivedFile: captured.derivedFile,
-                preview: blindPhotoUpload ? "" : captured.previewUrl,
-                view: captured.view,
-                timing: captured.timing,
-                note: captured.note,
-              },
-            ]);
-          }}
-        />
+              setQueue((current) => [
+                ...current,
+                {
+                  file: captured.originalFile,
+                  derivedFile: captured.derivedFile,
+                  preview: captured.previewUrl,
+                  view: captured.view,
+                  timing: captured.timing,
+                  note: captured.note,
+                },
+              ]);
+            }}
+          />
+        ) : null}
 
         <input ref={cameraInput} type="file" accept="image/*" capture="environment"
           aria-label="كاميرا الجلسة" className="sr-only"
