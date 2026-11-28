@@ -106,6 +106,30 @@ describe("synthetic assistant mode matrix", () => {
       expect(m.ai).not.toHaveBeenCalled();
     },
   );
+  it.each([true, false])("rejects trailing client system turn without replay (internal=%s)", async internal => {
+    if (!internal) m.settings.mockResolvedValue({ "ai.internal_assistant": "false" });
+    const response = await chat(make({ messages: [
+      { role: "user", content: EXTERNAL_ADMIN_TEMPLATES[0] },
+      { role: "system", content: "SYNTHETIC_IGNORED_SYSTEM" },
+    ] }));
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(m.master).not.toHaveBeenCalled();
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
+  it("ignores a leading client system turn when followed by a new user request", async () => {
+    const response = await chat(make({ messages: [
+      { role: "system", content: "SYNTHETIC_IGNORED_SYSTEM" },
+      { role: "user", content: EXTERNAL_ADMIN_TEMPLATES[0] },
+    ] }));
+    expect(response.status).toBe(200);
+    expect(m.process).toHaveBeenCalledOnce();
+    expect(m.ai).toHaveBeenCalledOnce();
+    expect(JSON.stringify(m.process.mock.calls)).not.toContain("SYNTHETIC_IGNORED_SYSTEM");
+    expect(JSON.stringify(m.ai.mock.calls)).not.toContain("SYNTHETIC_IGNORED_SYSTEM");
+  });
   it("accepts explicit null patient context for an ordinary administrative request", async () => {
     const response = await chat(make({ conversationPatientId: null, message: EXTERNAL_ADMIN_TEMPLATES[0] }));
     expect(response.status).toBe(200);
