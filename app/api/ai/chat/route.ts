@@ -100,7 +100,13 @@ async function handlePost(request: Request) {
     maximum: AI_CHAT_RATE_LIMIT.maximum,
     windowMinutes: AI_CHAT_RATE_LIMIT.windowMinutes,
     headers: request.headers,
-  });
+  }).catch(() => null);
+  if (!limit) {
+    return NextResponse.json(
+      { message: "تعذّر التحقق من حدّ طلبات المساعد. أعد المحاولة لاحقًا." },
+      { status: 503 },
+    );
+  }
   if (!limit.allowed) {
     return NextResponse.json(
       { message: "طلبات كثيرة على المساعد الذكي. أعد المحاولة بعد قليل." },
