@@ -26,6 +26,13 @@ export const dynamic = "force-dynamic";
  * المعاملات — فما وافق عليه المستخدم في المعاينة هو ما يُنفَّذ حرفيًّا.
  */
 export async function POST(request: Request) {
+  const response = await handlePost(request);
+  // Denials and bounded-body errors must also be non-cacheable.
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
+async function handlePost(request: Request) {
   const session = await requireSession();
   if (!session) {
     return NextResponse.json({ message: "انتهت الجلسة. سجّل الدخول من جديد." }, { status: 401 });
