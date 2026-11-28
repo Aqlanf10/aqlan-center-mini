@@ -334,8 +334,9 @@ async function handlePost(request: Request) {
           : "الاستشارة السريرية النصية (دوائية/علاجية) متاحة للحسابات ذات الهوية السريرية — الرد أعلاه من المحرك المحلي ضمن صلاحياتك الإدارية.",
       ],
     };
-  } else if (!droppedPatientContext && (plan.kind === "clinical" ||
+  } else if (!droppedPatientContext && response.sourceType === "internal_engine" && !response.confirmation && (plan.kind === "clinical" ||
     (plan.kind === "administrative" && conversationPatientId === null))) {
+    // Never replace an authoritative database result or a pending signed action with cloud prose.
     // Never export a rejected/unverified patient context, or patient-linked administrative text.
     try {
       // Both cloud paths must mask registered names, including clinical history.
