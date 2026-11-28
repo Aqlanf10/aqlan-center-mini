@@ -73,6 +73,7 @@ export function AdvancedOrthoWorkspace({
   onOpenAccount,
 }: AdvancedOrthoWorkspaceProps) {
   const session = useSession();
+  const sessionRole = session?.role;
   const clinicName = useClinicName() || "مركز الدكتور عقلان";
   const actorName = session?.displayName || session?.username || "الطبيب";
   const orthoRole = mapRoleForOrthoCore(session?.role);
@@ -138,7 +139,7 @@ export function AdvancedOrthoWorkspace({
     setLoadingWorkspace(true);
     setWorkspaceReadError(null);
     try {
-      const canSeePhotos = session?.role !== "reception" && perms.can("photos.view") && perms.canField("previousPhotos");
+      const canSeePhotos = sessionRole !== "reception" && perms.can("photos.view") && perms.canField("previousPhotos");
       const [orthoRes, docsRes] = await Promise.all([
         fetch(`/api/ortho?patientId=${patientId}`, { cache: "no-store" }),
         canSeePhotos ? fetch(`/api/patients/${patientId}/documents`, { cache: "no-store" }) : Promise.resolve(null),
@@ -171,7 +172,7 @@ export function AdvancedOrthoWorkspace({
     } finally {
       if (loadTicket.current === ticket) setLoadingWorkspace(false);
     }
-  }, [needsExtendedWorkspace, patientId, perms, requestedCaseId, session?.role]);
+  }, [needsExtendedWorkspace, patientId, perms, requestedCaseId, sessionRole]);
 
   useEffect(() => {
     void loadWorkspaceAndLiveContext();
