@@ -130,6 +130,36 @@ describe("synthetic assistant mode matrix", () => {
     expect(JSON.stringify(m.process.mock.calls)).not.toContain("SYNTHETIC_IGNORED_SYSTEM");
     expect(JSON.stringify(m.ai.mock.calls)).not.toContain("SYNTHETIC_IGNORED_SYSTEM");
   });
+  it.each(["legacy", "history"] as const)("rejects an oversized current instruction instead of dropping its suffix (%s)", async shape => {
+    const instruction = "x".repeat(4000) + " cancel";
+    const body = shape === "legacy" ? { message: instruction } : { messages: [{ role: "user", content: instruction }] };
+    const response = await chat(make(body));
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(m.master).not.toHaveBeenCalled();
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
+  it("accepts a current instruction at the existing 4000-character boundary", async () => {
+    m.settings.mockResolvedValue({ "ai.external_assistant": "false" });
+    const instruction = "x".repeat(4000);
+    const response = await chat(make({ message: instruction }));
+    expect(response.status).toBe(200);
+    expect(m.process.mock.calls[0][0]).toBe(instruction);
+    expect(m.ai).not.toHaveBeenCalled();
+  });
+  it("retains compatibility with a long historical assistant reply and a fresh user turn", async () => {
+    m.settings.mockResolvedValue({ "ai.external_assistant": "false" });
+    const instruction = EXTERNAL_ADMIN_TEMPLATES[0];
+    const response = await chat(make({ messages: [
+      { role: "assistant", content: "x".repeat(4001) }, { role: "user", content: instruction },
+    ] }));
+    expect(response.status).toBe(200);
+    expect(m.process.mock.calls[0][0]).toBe(instruction);
+    expect(m.process.mock.calls[0][2][0].content).toHaveLength(4000);
+    expect(m.ai).not.toHaveBeenCalled();
+  });
   it("accepts explicit null patient context for an ordinary administrative request", async () => {
     const response = await chat(make({ conversationPatientId: null, message: EXTERNAL_ADMIN_TEMPLATES[0] }));
     expect(response.status).toBe(200);
