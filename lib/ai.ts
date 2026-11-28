@@ -448,10 +448,9 @@ export async function testAiConnection(
       `UPDATE ai_settings
        SET last_test_at = NOW(), last_test_ok = $1, last_test_message = $2
        WHERE id = 1 AND api_key_enc IS NOT DISTINCT FROM $3
-         AND enabled = $4 AND provider = $5 AND base_url = $6 AND model = $7
-         AND updated_at IS NOT DISTINCT FROM $8`,
+         AND enabled = $4 AND provider = $5 AND base_url = $6 AND model = $7`,
       [outcome.ok, outcome.message, settings.apiKeyEnc, settings.enabled,
-        settings.provider, settings.baseUrl, settings.model, settings.updatedAt],
+        settings.provider, settings.baseUrl, settings.model],
     );
     if (persisted.rowCount !== 1) {
       outcome = { ok: false, message: "تغيّرت إعدادات المزود أثناء الاختبار أو لم تُحفظ بعد؛ أعد الاختبار بالإعدادات الحالية.", latencyMs: outcome.latencyMs };
