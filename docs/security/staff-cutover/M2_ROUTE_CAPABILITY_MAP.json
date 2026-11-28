@@ -6181,6 +6181,34 @@
   "note": ""
  },
  {
+  "route": "/api/settings/material-service-rates",
+  "method": "GET",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.finance.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Dedicated finance Settings authority; the global staff cutover remains held."
+ },
+ {
+  "route": "/api/settings/material-service-rates",
+  "method": "POST",
+  "legacyRoles": [
+   "admin"
+  ],
+  "need": [
+   "settings.finance.edit"
+  ],
+  "anyOf": [],
+  "scope": null,
+  "status": "existing",
+  "note": "Dedicated finance Settings authority; the global staff cutover remains held."
+ },
+ {
   "route": "/api/settings/messaging",
   "method": "GET",
   "legacyRoles": [

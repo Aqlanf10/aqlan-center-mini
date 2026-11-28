@@ -3,7 +3,6 @@ import "server-only";
 import { NextResponse } from "next/server";
 import { ensureSchema, getPool, type DbClient } from "@/lib/db";
 import { isAdmin } from "@/lib/roles";
-import { requireSession } from "@/lib/session";
 import { staffAdmissionRefusal } from "@/lib/staff-capability-editor";
 import { selectRequestStaffEnvelope } from "@/lib/staff-session-admission";
 import { staffOperationCapabilities, staffOperationIdentity, withStaffOperation } from "@/lib/staff-operation-runtime";
@@ -15,7 +14,7 @@ const json = (body: unknown, status = 200) => NextResponse.json(body, { headers,
 type Actor = { username: string; role: string };
 type Result = { body: unknown; status?: number };
 
-export async function withMaterialRateSettingsAuthority(work: (db: DbClient, actor: Actor) => Promise<Result>) {
+export async function withMaterialRateSettingsAuthority(readLegacySession: () => Promise<Actor | null>, work: (db: DbClient, actor: Actor) => Promise<Result>) {
   const selected = await selectRequestStaffEnvelope();
   if (selected.kind === "denied") return json({ message: "سجّل الدخول من جديد." }, 401);
   try {
@@ -28,7 +27,7 @@ export async function withMaterialRateSettingsAuthority(work: (db: DbClient, act
       });
       return json(result.body, result.status);
     }
-    const session = await requireSession();
+    const session = await readLegacySession();
     if (!session) return json({ message: "سجّل الدخول من جديد." }, 401);
     if (!isAdmin(session.role)) return json({ message: "لا تملك صلاحية إعدادات المالية." }, 403);
     await ensureSchema();

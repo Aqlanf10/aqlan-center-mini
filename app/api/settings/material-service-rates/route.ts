@@ -3,11 +3,12 @@ import { SETTINGS_BODY_LIMIT_BYTES } from "@/lib/security-limits";
 import { parseServiceMaterialRateChange } from "@/lib/service-material-rates";
 import { insertAuditRow, serviceMaterialRateStorageAvailable } from "@/lib/db";
 import { withMaterialRateSettingsAuthority } from "@/lib/material-rate-settings-authority";
+import { requireSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return withMaterialRateSettingsAuthority(async db => {
+  return withMaterialRateSettingsAuthority(() => requireSession(), async db => {
     if (!await serviceMaterialRateStorageAvailable(db)) return { body: { enabled: false, rates: [] } };
     const { rows } = await db.query<{
       serviceId: number; name: string; category: string | null; rateBp: number | null; revision: string | null;
@@ -22,7 +23,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  return withMaterialRateSettingsAuthority(async (db, actor) => {
+  return withMaterialRateSettingsAuthority(() => requireSession(), async (db, actor) => {
     let body: unknown;
     try { body = await readJsonBody(request, SETTINGS_BODY_LIMIT_BYTES); }
     catch (error) {
