@@ -191,6 +191,16 @@ async function handlePost(request: Request) {
     return NextResponse.json({ message: "اكتب رسالتك أو استفسارك أولاً." }, { status: 400 });
   }
 
+  // Legacy message and nonempty history may coexist only when they identify
+  // the same current user instruction. Never silently prefer an older request
+  // over a different cancellation or correction in the other field.
+  if (Array.isArray(source.messages) && source.messages.length > 0 && source.message != null) {
+    const current = incomingMessages[incomingMessages.length - 1];
+    if (typeof source.message !== "string" || current.role !== "user" || source.message.trim() !== current.content) {
+      return NextResponse.json({ message: "تعارض نص الرسالة مع آخر طلب في سجل المحادثة. أعد الإرسال." }, { status: 400 });
+    }
+  }
+
   // التحقق من تفعيل خدمة الذكاء الاصطناعي
   const settings = await getAiSettings().catch(() => null);
   if (!settings) {
