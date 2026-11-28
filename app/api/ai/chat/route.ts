@@ -169,9 +169,18 @@ async function handlePost(request: Request) {
       if (typeof item.content !== "string" || !item.content.trim()) {
         return NextResponse.json({ message: "محتوى رسالة المحادثة غير صالح." }, { status: 400 });
       }
-      incomingMessages.push({ role: item.role, content: item.content.trim().slice(0, 4000) });
+      const content = item.content.trim();
+      // Never silently cut the current instruction: a suffix may change or cancel an action.
+      // Older history remains bounded for compatibility with long assistant replies.
+      if (index === source.messages.length - 1 && item.role === "user" && content.length > 4000) {
+        return NextResponse.json({ message: "الرسالة طويلة جدًا. اختصرها إلى 4000 حرف ثم أعد الإرسال." }, { status: 400 });
+      }
+      incomingMessages.push({ role: item.role, content: content.slice(0, 4000) });
     }
   } else if (typeof source.message === "string" && source.message.trim()) {
+    if (source.message.trim().length > 4000) {
+      return NextResponse.json({ message: "الرسالة طويلة جدًا. اختصرها إلى 4000 حرف ثم أعد الإرسال." }, { status: 400 });
+    }
     incomingMessages.push({
       role: "user",
       content: source.message.trim().slice(0, 4000),
