@@ -96,6 +96,7 @@ async function handlePost(request: Request) {
      بصمة HMAC للمستخدم على قاعدة البيانات (بين النسخ ومع إعادة التشغيل). */
   const limit = await consumeSecurityLimit({
     scope: "ai-chat",
+    failClosed: true,
     identifier: String(user.id),
     maximum: AI_CHAT_RATE_LIMIT.maximum,
     windowMinutes: AI_CHAT_RATE_LIMIT.windowMinutes,
