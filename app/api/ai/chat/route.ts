@@ -145,21 +145,24 @@ async function handlePost(request: Request) {
   // وحده)، وrole=assistant يُقبل كسياقٍ غير موثوق لا يُمنح أي امتياز.
   const incomingMessages: AiChatMessage[] = [];
 
+  if (source.messages != null && !Array.isArray(source.messages)) {
+    return NextResponse.json({ message: "سجل المحادثة غير صالح." }, { status: 400 });
+  }
   if (Array.isArray(source.messages) && source.messages.length > 0) {
     for (const m of source.messages) {
-      if (m && typeof m === "object") {
-        const item = m as Record<string, unknown>;
-        if (item.role === "system") continue; // برومبت نظام من العميل: مهمل
-        // Do not reinterpret unsupported client roles (tool, developer, missing, etc.) as user instructions.
-        if (item.role !== "user" && item.role !== "assistant") {
-          return NextResponse.json({ message: "دور رسالة المحادثة غير صالح." }, { status: 400 });
-        }
-        const role = item.role;
-        const content = typeof item.content === "string" ? item.content.trim() : "";
-        if (content) {
-          incomingMessages.push({ role, content: content.slice(0, 4000) });
-        }
+      // Never silently discard a malformed turn and replay an earlier user request.
+      if (!m || typeof m !== "object" || Array.isArray(m)) {
+        return NextResponse.json({ message: "رسالة المحادثة غير صالحة." }, { status: 400 });
       }
+      const item = m as Record<string, unknown>;
+      if (item.role === "system") continue; // برومبت نظام من العميل: مهمل
+      if (item.role !== "user" && item.role !== "assistant") {
+        return NextResponse.json({ message: "دور رسالة المحادثة غير صالح." }, { status: 400 });
+      }
+      if (typeof item.content !== "string" || !item.content.trim()) {
+        return NextResponse.json({ message: "محتوى رسالة المحادثة غير صالح." }, { status: 400 });
+      }
+      incomingMessages.push({ role: item.role, content: item.content.trim().slice(0, 4000) });
     }
   } else if (typeof source.message === "string" && source.message.trim()) {
     incomingMessages.push({
