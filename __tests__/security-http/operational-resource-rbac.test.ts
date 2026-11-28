@@ -219,7 +219,7 @@ describe("زيارات الطابور", () => {
 
     const response = await authedMutation(
       `/api/visits/${walkIn.id}`, h.sessions.doctorA, "PATCH",
-      JSON.stringify({ action: "seat", chair: 3 }),
+      JSON.stringify({ action: "seat", chair: 1 }),
     );
     expect([200, 409]).toContain(response.status);
   });

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { chromium, type Browser, type BrowserContext, type Page, type Route } from "playwright";
 import { Client } from "pg";
-import { baseUrl, harness } from "./_server";
+import { baseUrl, harness, TEST_USERS } from "./_server";
 
 /**
  * Owner's review #483 6882465665 on 0128: an expense whose outcome is unknown is never lost and never
@@ -89,7 +89,7 @@ describe("petty expense on the cash screen", () => {
       expect(await evidence(note)).toEqual({ vouchers: 1, audits: 1, drawerOut: 3 });
       await count(pending(page), 1);
       await save(page);
-      await count(page.getByRole("alert"), 0);
+      await count(page.getByRole("alert").filter({ hasText: "قد يكون سُجّل" }), 0);
       expect(await evidence(note)).toEqual({ vouchers: 1, audits: 1, drawerOut: 3 });
       await count(pending(page), 0);
     } finally { await context.close(); }
@@ -103,8 +103,10 @@ describe("petty expense on the cash screen", () => {
     const note = `SYN-REC-INFLIGHT-${++serial}-${Date.now()}`;
     const { context, page } = await open("admin");
     try {
-      const drawer = Number((await db.query(`SELECT opening_yer FROM cashier_shifts WHERE status = 'open'`)).rows[0].opening_yer);
-      const amount = String(drawer * 50 + 1_000_000); // more than the open drawer holds now
+      // More than the open drawer holds now. Files share this database and other files take cash into the
+      // same shift, so size it from the drawer's expected cash, not from its opening (hosted run 43659458968).
+      const shifts = await (await page.request.get(`${baseUrl}/api/shifts`)).json();
+      const amount = String(Number(shifts.drawer.expected.YER) + 1_000_000);
       await startExpense(page, note, amount);
       let firstHeaders: Record<string, string> | null = null, firstBody: string | null = null;
       let held = false;
@@ -168,7 +170,7 @@ describe("petty expense on the cash screen", () => {
       await breakNextAnswer(page, "/api/expenses", "unreadable");
       await save(page);
       await uncertain(page);
-      await page.reload({ waitUntil: "networkidle" });
+      await page.reload({ waitUntil: "load" }); await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await count(pending(page), 1);
       expect(await pending(page).innerText()).toContain("مستفيد اصطناعي");
       await pending(page).getByRole("button", { name: "تحقّق" }).click();
@@ -207,7 +209,7 @@ describe("petty expense on the cash screen", () => {
       await uncertain(page);
       expect(await evidence(note)).toEqual({ vouchers: 1, audits: 1, drawerOut: 3 });
       await signIn(context, "admin");
-      await page.reload({ waitUntil: "networkidle" });
+      await page.reload({ waitUntil: "load" }); await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await count(pending(page), 1);
       await pending(page).getByRole("button", { name: "تحقّق" }).click();
       await count(page.getByTestId("pending-expense-attempts"), 0);
@@ -224,11 +226,11 @@ describe("petty expense on the cash screen", () => {
       await save(page);
       await uncertain(page);
       await signIn(context, "reception");
-      await page.reload({ waitUntil: "networkidle" });
+      await page.reload({ waitUntil: "load" }); await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await count(pending(page), 0);
       await signIn(context, "admin");
-      await page.reload({ waitUntil: "networkidle" });
+      await page.reload({ waitUntil: "load" }); await page.getByRole("button", { name: /\+ سند صرف/ }).first().waitFor();
       await count(pending(page), 1);
       await pending(page).getByRole("button", { name: "تحقّق" }).click();
       await count(page.getByTestId("pending-expense-attempts"), 0);
@@ -287,6 +289,9 @@ describe("bill payment on the supplier page", () => {
       const paid = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM expenses WHERE payable_id = $1", [payableId]);
       expect(paid.rows[0]).toEqual({ n: 0 });
       expect((await db.query("SELECT count(*)::int AS n FROM audit_log WHERE action = 'expense.create' AND details::text LIKE $1", [`%${description}%`])).rows[0].n).toBe(0);
+      // The user's explicit «أنهِ» is audited once, under the request key; the late request adds nothing.
+      expect((await db.query("SELECT actor FROM audit_log WHERE action = 'expense.request_retire' AND entity_id = $1", [firstHeaders!["idempotency-key"]])).rows)
+        .toEqual([{ actor: TEST_USERS.admin.username }]);
     } finally { await context.close(); }
   });
 

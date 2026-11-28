@@ -17,9 +17,9 @@ type FixtureWindow = Window & {
 const localArabic: DeviceVoice = { lang: "ar-YE", localService: true, voiceURI: "synthetic-local-ar" };
 const remoteArabic: DeviceVoice = { lang: "ar-SA", localService: false, voiceURI: "synthetic-remote-ar" };
 const localEnglish: DeviceVoice = { lang: "en-US", localService: true, voiceURI: "synthetic-local-en" };
-const old = { at: "2026-01-01T09:00:00Z", chair: 1, name: "نداء تجريبي سابق", speechName: "السابق التجريبي" };
-const fresh = { at: "2026-01-01T09:01:00Z", chair: 2, name: "نداء تجريبي جديد", speechName: "الجديد التجريبي" };
-const next = { ...fresh, at: "2026-01-01T09:02:00Z", name: "نداء تجريبي لاحق", speechName: "اللاحق التجريبي" };
+const old = { at: "2026-01-01T09:00:00Z", chair: 1, name: "السابق التجريبي", speechName: "السابق" };
+const fresh = { at: "2026-01-01T09:01:00Z", chair: 2, name: "الجديد التجريبي", speechName: "الجديد" };
+const next = { ...fresh, at: "2026-01-01T09:02:00Z", name: "اللاحق التجريبي", speechName: "اللاحق" };
 const sound = "تشغيل صوت النداء";
 let browser: Browser;
 
@@ -120,11 +120,13 @@ async function withDisplay(
     await page.addInitScript(installSyntheticAudio, voices);
     await page.clock.install();
     let edition = 0;
-    const fixture = (call: Call | null, voice: boolean) => ({
-      now: "2026-01-01T09:10:00Z", called: call ? [call] : [], chairs: [], queue: [],
-      delayNotice: false, voice, announcements: [], welcomeText: `شاشة اختبار رقم ${++edition}`, tagline: "",
+    let clockMs = Date.parse("2026-01-01T09:00:30Z");
+    const fixture = (call: Call | null, voice: boolean, nowIso: string) => ({
+      now: nowIso, called: call ? [call] : [],
+      delayNotice: false, voice, speech: { voiceURI: "", rate: 0.9, pauseMs: 300 },
+      announcements: [], welcomeText: `شاشة اختبار رقم ${++edition}`, tagline: "",
     });
-    let feed = fixture(initialCall, true);
+    let feed = fixture(initialCall, true, new Date(clockMs).toISOString());
     await page.route(url => url.origin === baseUrl && url.pathname === "/api/display", route =>
       route.fulfill({ json: feed, headers: { "cache-control": "no-store" } }));
     const loaded = async () => {
@@ -135,7 +137,9 @@ async function withDisplay(
     expect(response?.status()).toBe(200);
     await loaded();
     await run(page, async (call, voice = true) => {
-      feed = fixture(call, voice);
+      const callMs = call?.at ? Date.parse(call.at) : 0;
+      clockMs = Math.max(clockMs + 1_000, callMs + 1_000);
+      feed = fixture(call, voice, new Date(clockMs).toISOString());
       await page.clock.fastForward(4_001);
       await loaded();
     });
@@ -146,7 +150,7 @@ async function withDisplay(
 
 it("alerts once on the first fresh call after an empty successful feed", async () => {
   await withDisplay(null, [remoteArabic, localEnglish, localArabic], async (page, publish) => {
-    await page.getByText("تابعوا الشاشة لمعرفة النداء القادم", { exact: true }).waitFor({ state: "visible" });
+    await page.getByText("يرجى انتظار النداء", { exact: true }).waitFor({ state: "visible" });
     for (const metric of ["في الانتظار", "متوسط الانتظار اليوم", "في العلاج الآن", "أُنجز اليوم", "جلسات تقويم اليوم"]) {
       expect(await page.getByText(metric, { exact: metric !== "جلسات تقويم اليوم" }).count()).toBe(0);
     }
@@ -157,7 +161,7 @@ it("alerts once on the first fresh call after an empty successful feed", async (
     // One actual chime comprises two oscillator starts.
     await expect.poll(() => counts(page)).toEqual([2, 1]);
     expect((await audio(page)).utterances).toEqual([{
-      text: `${fresh.speechName}، يرجى التوجه إلى غرفة العلاج رقم ${fresh.chair}`,
+      text: fresh.speechName,
       voiceURI: localArabic.voiceURI, lang: localArabic.lang,
     }]);
     await publish(fresh);

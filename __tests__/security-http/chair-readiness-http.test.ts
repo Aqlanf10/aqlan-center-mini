@@ -38,9 +38,9 @@ async function setGate(on: boolean) {
                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, [on ? "true" : "false"]);
 }
 
-let chairSeq = 20;
-/* قيمة «clinic.chairs» قبل الاختبار — تُعاد كما كانت في afterAll: أربعون كرسيًّا تُبقي
-   صفّ الانتظار عريضًا فيسقط اختبار عرض الهاتف الذي يليه في الجولة نفسها. */
+let chairSeq = 18;
+/* قيمة «clinic.chairs» قبل الاختبار — تُعاد كما كانت في afterAll: عشرون كرسيًّا الحدّ الأعلى المعتمد،
+   وتُعاد القيمة الأصلية حتى لا يتأثر اختبار عرض الهاتف الذي يليه في الجولة نفسها. */
 let originalChairs: string | null = null;
 
 beforeAll(async () => {
@@ -55,8 +55,9 @@ beforeAll(async () => {
   patientId = patient.id;
   const { rows: chairsRows } = await db.query<{ value: string }>(`SELECT value FROM settings WHERE key = 'clinic.chairs'`);
   originalChairs = chairsRows[0]?.value ?? null;
-  await db.query(`INSERT INTO settings (key, value) VALUES ('clinic.chairs', '40')
+  await db.query(`INSERT INTO settings (key, value) VALUES ('clinic.chairs', '20')
                   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`);
+  await db.query(`UPDATE visits SET status = 'done', chair = NULL WHERE chair IN (19, 20) AND status IN ('called', 'in_chair')`);
 }, 120_000);
 
 afterAll(async () => {
