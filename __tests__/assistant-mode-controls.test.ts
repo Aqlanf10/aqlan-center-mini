@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({
   session: vi.fn(), settings: vi.fn(), master: vi.fn(), user: vi.fn(), ai: vi.fn(), audit: vi.fn(),
-  names: vi.fn(), process: vi.fn(), verify: vi.fn(), execute: vi.fn(), search: vi.fn(), access: vi.fn(),
+  names: vi.fn(), process: vi.fn(), verify: vi.fn(), execute: vi.fn(), search: vi.fn(), access: vi.fn(), rateLimit: vi.fn(),
 }));
 vi.mock("@/lib/session", () => ({ requireSession: m.session }));
 vi.mock("@/lib/db", () => ({
@@ -10,7 +10,7 @@ vi.mock("@/lib/db", () => ({
   personNameTokens: m.names, searchPatients: m.search,
 }));
 vi.mock("@/lib/assistant-mode-settings", () => ({ readAssistantControlSettings: m.settings }));
-vi.mock("@/lib/security-rate-limit", () => ({ consumeSecurityLimit: async () => ({ allowed: true }) }));
+vi.mock("@/lib/security-rate-limit", () => ({ consumeSecurityLimit: m.rateLimit }));
 vi.mock("@/lib/ai", () => ({ getAiSettings: m.master, aiChat: m.ai }));
 vi.mock("@/lib/reports", () => ({ dbTodayISO: async () => "2026-11-27" }));
 vi.mock("@/lib/assistant-engine", () => ({ detectPromptInjection: () => false, processAssistantQuery: m.process }));
@@ -27,6 +27,7 @@ const make = (body: object) => new Request("http://localhost", { method: "POST",
 
 beforeEach(() => {
   vi.resetAllMocks();
+  m.rateLimit.mockResolvedValue({ allowed: true, retryAfterSeconds: 0 });
   m.session.mockResolvedValue({ userId: 22, username: "synthetic-admin", role: "admin" });
   m.user.mockResolvedValue({ id: 22, username: "synthetic-admin", role: "admin", isActive: true, permissions: { canUseAiChat: true } });
   m.settings.mockResolvedValue({});
@@ -267,6 +268,27 @@ describe("synthetic assistant mode matrix", () => {
     expect((await confirmation(make({ token: "synthetic-signed-preview" }))).status).toBe(503);
     expect(m.master).toHaveBeenCalledOnce();
     expect(m.execute).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
+  it("preserves Retry-After and no-store for denied chat requests", async () => {
+    m.rateLimit.mockResolvedValue({ allowed: false, retryAfterSeconds: 37 });
+    const response = await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("37");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(m.master).not.toHaveBeenCalled();
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+  });
+  it("rejects unexpected rate-limit errors without dispatch or sensitive error details", async () => {
+    m.rateLimit.mockRejectedValue(new Error("SYNTHETIC_PRIVATE_LIMIT_ERROR"));
+    const response = await chat(make({ message: EXTERNAL_ADMIN_TEMPLATES[0] }));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response.text()).not.toContain("SYNTHETIC_PRIVATE_LIMIT_ERROR");
+    expect(m.master).not.toHaveBeenCalled();
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
     expect(m.audit).not.toHaveBeenCalled();
   });
   it.each(["chat", "confirmation"] as const)("prevents storing unauthenticated %s responses", async route => {
