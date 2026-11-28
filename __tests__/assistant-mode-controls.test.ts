@@ -269,6 +269,33 @@ describe("synthetic assistant mode matrix", () => {
     expect(m.execute).not.toHaveBeenCalled();
     expect(m.audit).not.toHaveBeenCalled();
   });
+  it.each(["chat", "confirmation"] as const)("prevents storing unauthenticated %s responses", async route => {
+    m.session.mockResolvedValue(null);
+    const response = await (route === "chat" ? chat : confirmation)(make({}));
+    expect(response.status).toBe(401);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.execute).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+  });
+  it.each(["chat", "confirmation"] as const)("prevents storing malformed JSON %s responses", async route => {
+    const response = await (route === "chat" ? chat : confirmation)(new Request("http://localhost", { method: "POST", body: "{" }));
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.execute).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+  });
+  it.each(["chat", "confirmation"] as const)("preserves the body limit status and prohibits caching in %s", async route => {
+    const response = await (route === "chat" ? chat : confirmation)(new Request("http://localhost", {
+      method: "POST", headers: { "Content-Length": "999999999" }, body: "{}",
+    }));
+    expect(response.status).toBe(413);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.execute).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+  });
   it.each([null, [], "synthetic", 1, true].map(value => ({ value })))("rejects non-object chat body %j without dispatch", async ({ value }) => {
     const response = await chat(new Request("http://localhost", { method: "POST", body: JSON.stringify(value) }));
     expect(response.status).toBe(400);
