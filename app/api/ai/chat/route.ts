@@ -150,7 +150,11 @@ async function handlePost(request: Request) {
       if (m && typeof m === "object") {
         const item = m as Record<string, unknown>;
         if (item.role === "system") continue; // برومبت نظام من العميل: مهمل
-        const role = item.role === "assistant" ? "assistant" : "user";
+        // Do not reinterpret unsupported client roles (tool, developer, missing, etc.) as user instructions.
+        if (item.role !== "user" && item.role !== "assistant") {
+          return NextResponse.json({ message: "دور رسالة المحادثة غير صالح." }, { status: 400 });
+        }
+        const role = item.role;
         const content = typeof item.content === "string" ? item.content.trim() : "";
         if (content) {
           incomingMessages.push({ role, content: content.slice(0, 4000) });
