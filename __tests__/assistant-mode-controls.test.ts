@@ -269,6 +269,15 @@ describe("synthetic assistant mode matrix", () => {
     expect(m.execute).not.toHaveBeenCalled();
     expect(m.audit).not.toHaveBeenCalled();
   });
+  it.each([null, [], "synthetic", 1, true].map(value => ({ value })))("rejects non-object chat body %j without dispatch", async ({ value }) => {
+    const response = await chat(new Request("http://localhost", { method: "POST", body: JSON.stringify(value) }));
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(m.master).not.toHaveBeenCalled();
+    expect(m.process).not.toHaveBeenCalled();
+    expect(m.ai).not.toHaveBeenCalled();
+    expect(m.audit).not.toHaveBeenCalled();
+  });
   it.each([null, [], "synthetic", 1, true].map(value => ({ value })))("rejects non-object confirmation body %j without dispatch", async ({ value }) => {
     const response = await confirmation(new Request("http://localhost", { method: "POST", body: JSON.stringify(value) }));
     expect(response.status).toBe(400);
